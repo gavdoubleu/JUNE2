@@ -118,15 +118,20 @@ class ActivityManager {
   // Not re-entrant: hierarchical sampling uses thread_local scratch buffers
   // shared across calls on the same thread, so calls must be sequential per
   // thread (safe across threads, not safe recursively/interleaved).
+  // `previous_location`, if non-null, is the caller's not-yet-overwritten
+  // PersonLocation from the prior timestep; only consulted when activity_idx
+  // == remain_at_previous_venue_act_idx_ (falls back to residence if null or
+  // its venue_id is -1).
   std::pair<VenueId, SubsetIndex> selectVenue(
       const Person& person, int16_t activity_idx,
       const TimeSlot&
           slot,  // Used for specified_activity (to select specific venue index)
-      uint64_t time_key, int logical_day);
+      uint64_t time_key, int logical_day,
+      const PersonLocation* previous_location = nullptr);
   // Thin wrapper: forwards current_sim_day_ as logical_day.
   std::pair<VenueId, SubsetIndex> selectVenue(
       const Person& person, int16_t activity_idx, const TimeSlot& slot,
-      uint64_t time_key);
+      uint64_t time_key, const PersonLocation* previous_location = nullptr);
 
   PerformanceStats stats_;
 
@@ -135,6 +140,7 @@ class ActivityManager {
   int16_t residence_act_idx_ = -1;
   int16_t none_act_idx_ = -1;
   int16_t no_venue_act_idx_ = -1;
+  int16_t remain_at_previous_venue_act_idx_ = -1;
 
   void ensureIndicesCached();
 
@@ -228,8 +234,10 @@ class ActivityManager {
   // Pre-computes one (person, day-type, slot) entry. Picks the activity
   // via selectActivity against the per-slot precomp_key, classifies it
   // as deterministic / hybrid / fully-stochastic (honouring the
-  // per-schedule force_hybrid_mask and the linked-activities-mask
-  // re-roll override), picks the venue for the first two cases, and
+  // per-schedule force_hybrid_mask, the linked-activities-mask re-roll
+  // override, and forcing remain_at_previous_venue_act_idx_ to always be
+  // fully-stochastic since there is no "previous location" to bake in at
+  // world-build time), picks the venue for the first two cases, and
   // appends a ScheduleEntry to dt_schedules.
   void precomputeOneSlot(Person& person, const TimeSlot& slot, size_t slot_idx,
                          int dt_idx, const ScheduleType* schedule_type,
@@ -237,9 +245,10 @@ class ActivityManager {
                          std::vector<ScheduleEntry>& dt_schedules);
 
   // Fills `available` with the slot's allowed activity indices, restricted
-  // to those the person actually has venues for. no_venue_act_idx_ and
-  // property-dispatch activities are always retained (their venue check
-  // happens later). Output is cleared at the start.
+  // to those the person actually has venues for. no_venue_act_idx_,
+  // remain_at_previous_venue_act_idx_, and property-dispatch activities are
+  // always retained (their venue check happens later). Output is cleared at
+  // the start.
   void filterAvailableActivities(const Person& person, const TimeSlot& slot,
                                  std::vector<int16_t>& available) const;
 
@@ -264,6 +273,10 @@ class ActivityManager {
   // writes the final activity/venue/subset/encounter_type fields. Returns
   // early when a policy override fired (caller still writes
   // person_id / person_array_index in its tail).
+  // `locations[person_array_idx]` still holds the prior timestep's value at
+  // entry (nothing has written to it yet this step), so it doubles as the
+  // "previous location" read for remain_at_previous_venue_act_idx_ before
+  // being overwritten with this step's result at the end.
   void resolveAndWriteValidScheduleSlot(size_t person_array_idx, Person& person,
                                         const ScheduleEntry& entry,
                                         int time_slot_index, int day_type_idx,
@@ -290,7 +303,9 @@ class ActivityManager {
                                int day_type_idx, uint64_t time_key,
                                int16_t& scheduled_activity_index,
                                VenueId& scheduled_venue_id,
-                               SubsetIndex& scheduled_subset_idx);
+                               SubsetIndex& scheduled_subset_idx,
+                               const PersonLocation* previous_location =
+                                   nullptr);
 
   // Hybrid branch of resolveStochasticEntry: re-rolls participation via
   // selectActivity. If the runtime activity matches the precomputed
@@ -303,7 +318,8 @@ class ActivityManager {
                           const TimeSlot& current_slot,
                           int16_t& scheduled_activity_index,
                           VenueId& scheduled_venue_id,
-                          SubsetIndex& scheduled_subset_idx);
+                          SubsetIndex& scheduled_subset_idx,
+                          const PersonLocation* previous_location = nullptr);
 
   // Re-evaluates a non-deterministic precomputed schedule entry at runtime.
   // For hybrid entries, re-rolls participation and reuses the precomputed
@@ -315,7 +331,8 @@ class ActivityManager {
       Person& person, const ScheduleEntry& entry, int time_slot_index,
       int day_type_idx, uint64_t time_key, const ScheduleType*& sched_type,
       const TimeSlot*& current_slot, int16_t& scheduled_activity_index,
-      VenueId& scheduled_venue_id, SubsetIndex& scheduled_subset_idx);
+      VenueId& scheduled_venue_id, SubsetIndex& scheduled_subset_idx,
+      const PersonLocation* previous_location = nullptr);
 
   // Handles the non-hopped, non-dead branch of assignActivities (single
   // slot form): resolves the person's schedule type (lazily caching),
@@ -359,9 +376,14 @@ class ActivityManager {
   // the hop began; the slot's day type is derived from hop_start_day + k / n.
   // Shared by advanceHoppedSchedule (forward) and findLastNonNullVenueOnHop
   // (backward) so the two can never diverge.
+  // `previous_location`, if non-null, is passed through to selectVenue for
+  // remain_at_previous_venue_act_idx_ resolution. Null when scanning
+  // historical slots (findLastNonNullVenueOnHop) where no live "previous
+  // location" is available — remain_at_previous_venue falls back to
+  // residence in that case.
   std::tuple<int16_t, VenueId, SubsetIndex> resolveHopSlot(
       const Person& person, const ScheduleType& hopped, int16_t k,
-      int hop_start_day);
+      int hop_start_day, const PersonLocation* previous_location = nullptr);
 
   // Handles a person who is currently on a hopped (temporary) schedule.
   // Assigns from flat_slots[schedule_hop.temp_slot_progress] and advances it.

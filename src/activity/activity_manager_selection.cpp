@@ -77,6 +77,7 @@ void ActivityManager::filterAvailableActivities(
   VenueResolveContext ctx;
   for (int16_t act_idx : slot.allowed_activity_indices) {
     if (act_idx == no_venue_act_idx_ ||
+        act_idx == remain_at_previous_venue_act_idx_ ||
         slot.property_hop_dispatch_by_activity_idx.count(act_idx)) {
       available.push_back(act_idx);
       continue;
@@ -179,14 +180,31 @@ int16_t ActivityManager::pickActivityByRate(
 // interleaved on the same thread).
 std::pair<VenueId, SubsetIndex> ActivityManager::selectVenue(
     const Person& person, int16_t activity_idx, const TimeSlot& slot,
-    uint64_t time_key) {
-  return selectVenue(person, activity_idx, slot, time_key, current_sim_day_);
+    uint64_t time_key, const PersonLocation* previous_location) {
+  return selectVenue(person, activity_idx, slot, time_key, current_sim_day_,
+                     previous_location);
 }
 
 std::pair<VenueId, SubsetIndex> ActivityManager::selectVenue(
     const Person& person, int16_t activity_idx, const TimeSlot& slot,
-    uint64_t time_key, int logical_day) {
+    uint64_t time_key, int logical_day,
+    const PersonLocation* previous_location) {
   if (activity_idx == no_venue_act_idx_) {
+    return {-1, -1};
+  }
+  if (activity_idx == remain_at_previous_venue_act_idx_) {
+    if (previous_location && previous_location->venue_id != -1) {
+      return {previous_location->venue_id, previous_location->subset_index};
+    }
+    // No valid previous venue (first-ever resolution with no residence,
+    // previous activity was dead/none/no_venue, or called from a context
+    // with no previous_location, e.g. historical hop-slot rescans) — fall
+    // back to residence, matching the convention used elsewhere on
+    // resolution failure (setResidenceOrNoneLocation, findLastNonNullVenueOnHop).
+    auto residence = world_.getActivityVenues(person, residence_act_idx_);
+    if (!residence.empty()) {
+      return residence[0];
+    }
     return {-1, -1};
   }
   auto venues = world_.getActivityVenues(person, activity_idx);

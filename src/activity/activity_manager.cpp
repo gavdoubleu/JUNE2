@@ -137,6 +137,8 @@ void ActivityManager::ensureIndicesCached() {
     none_act_idx_ = static_cast<int16_t>(world_.getActivityIndex("none"));
     no_venue_act_idx_ =
         static_cast<int16_t>(world_.getActivityIndex("no_venue"));
+    remain_at_previous_venue_act_idx_ = static_cast<int16_t>(
+        world_.getActivityIndex("remain_at_previous_venue"));
   }
 }
 
@@ -163,7 +165,7 @@ void ActivityManager::initializeLocations(
 
 std::tuple<int16_t, VenueId, SubsetIndex> ActivityManager::resolveHopSlot(
     const Person& person, const ScheduleType& hopped, int16_t k,
-    int hop_start_day) {
+    int hop_start_day, const PersonLocation* previous_location) {
   const int16_t n = static_cast<int16_t>(hopped.flat_slots.size());
   const int16_t s = k % n;
   const TimeSlot& slot = hopped.flat_slots[s];
@@ -173,8 +175,8 @@ std::tuple<int16_t, VenueId, SubsetIndex> ActivityManager::resolveHopSlot(
       mix_seed(base_seed_, person.id, static_cast<uint64_t>(s));
   const int16_t act =
       selectActivity(person, slot, s, &hopped, day_type_idx, hop_key);
-  auto [v, sub] =
-      selectVenue(person, act, slot, hop_key, hop_start_day + k / n);
+  auto [v, sub] = selectVenue(person, act, slot, hop_key, hop_start_day + k / n,
+                              previous_location);
   return {act, v, sub};
 }
 
@@ -194,8 +196,12 @@ bool ActivityManager::advanceHoppedSchedule(Person& person, PersonLocation& loc,
   const int16_t n = static_cast<int16_t>(hopped.flat_slots.size());
   const int hop_start_day = ScheduleHop::hopStartDay(
       current_sim_day_, n, person.schedule_hop.temp_slot_progress);
-  auto [act, v, s] = resolveHopSlot(
-      person, hopped, person.schedule_hop.temp_slot_progress, hop_start_day);
+  // `loc` still holds the prior timestep's PersonLocation here (not yet
+  // overwritten below), so it is the correct "previous location" for
+  // remain_at_previous_venue_act_idx_ resolution.
+  auto [act, v, s] =
+      resolveHopSlot(person, hopped, person.schedule_hop.temp_slot_progress,
+                     hop_start_day, &loc);
   loc.venue_id = v;
   loc.subset_index = s;
   loc.activity_index = act;
@@ -258,9 +264,11 @@ void ActivityManager::assignSingleSlotForLivePerson(
   int16_t scheduled_activity_index =
       selectActivity(person, slot, -1, schedule_type, day_type_idx, time_key);
 
-  // Select specific venue for that activity
-  auto [venue_id, subset_idx] =
-      selectVenue(person, scheduled_activity_index, slot, time_key);
+  // Select specific venue for that activity. locations[i] still holds the
+  // prior timestep's value here, so it doubles as the "previous location"
+  // for remain_at_previous_venue_act_idx_ resolution.
+  auto [venue_id, subset_idx] = selectVenue(
+      person, scheduled_activity_index, slot, time_key, &locations[i]);
 
   // Update location
   locations[i].venue_id = venue_id;
@@ -415,18 +423,21 @@ void ActivityManager::resolveAndWriteValidScheduleSlot(
   SubsetIndex scheduled_subset_idx = entry.subset_index;
   int16_t scheduled_activity_index = entry.activity_index;
 
+  // locations[i] still holds the prior timestep's value here (not yet
+  // overwritten), so it doubles as the "previous location" for
+  // remain_at_previous_venue_act_idx_ resolution below.
   if (!entry.is_deterministic) {
     const ScheduleType* sched_type = schedule_type;
     resolveStochasticEntry(person, entry, time_slot_index, day_type_idx,
                            time_key, sched_type, current_slot,
                            scheduled_activity_index, scheduled_venue_id,
-                           scheduled_subset_idx);
+                           scheduled_subset_idx, &locations[i]);
   }
 
   // Check for schedule hop trigger
   maybeTriggerScheduleHop(person, current_slot, day_type_idx, time_key,
                           scheduled_activity_index, scheduled_venue_id,
-                          scheduled_subset_idx);
+                          scheduled_subset_idx, &locations[i]);
 
   // Check for policy overrides (symptom-based, lockdowns, etc.)
   if (applyPolicyOverride(locations[i], person, scheduled_activity_index,
@@ -446,7 +457,8 @@ void ActivityManager::resolveHybridEntry(
     Person& person, const ScheduleEntry& entry, int time_slot_index,
     int day_type_idx, uint64_t time_key, const ScheduleType* sched_type,
     const TimeSlot& current_slot, int16_t& scheduled_activity_index,
-    VenueId& scheduled_venue_id, SubsetIndex& scheduled_subset_idx) {
+    VenueId& scheduled_venue_id, SubsetIndex& scheduled_subset_idx,
+    const PersonLocation* previous_location) {
   // HYBRID: Re-evaluate participation, use precomputed venue if passed
   int16_t runtime_activity_idx =
       selectActivity(person, current_slot, time_slot_index, sched_type,
@@ -459,8 +471,9 @@ void ActivityManager::resolveHybridEntry(
     scheduled_activity_index = entry.activity_index;
   } else {
     // Failed participation or chose different activity
-    auto [venue_id, subset_idx] =
-        selectVenue(person, runtime_activity_idx, current_slot, time_key);
+    auto [venue_id, subset_idx] = selectVenue(
+        person, runtime_activity_idx, current_slot, time_key,
+        previous_location);
     scheduled_venue_id = venue_id;
     scheduled_subset_idx = subset_idx;
     scheduled_activity_index = runtime_activity_idx;
@@ -471,7 +484,8 @@ void ActivityManager::resolveStochasticEntry(
     Person& person, const ScheduleEntry& entry, int time_slot_index,
     int day_type_idx, uint64_t time_key, const ScheduleType*& sched_type,
     const TimeSlot*& current_slot, int16_t& scheduled_activity_index,
-    VenueId& scheduled_venue_id, SubsetIndex& scheduled_subset_idx) {
+    VenueId& scheduled_venue_id, SubsetIndex& scheduled_subset_idx,
+    const PersonLocation* previous_location) {
   // Check if this is a hybrid activity using bitmask (no string
   // comparison). Also honour the per-schedule force_hybrid_mask so the
   // cached venue is reused on participation pass.
@@ -494,14 +508,16 @@ void ActivityManager::resolveStochasticEntry(
   if (is_hybrid_entry) {
     resolveHybridEntry(person, entry, time_slot_index, day_type_idx, time_key,
                        sched_type, *current_slot, scheduled_activity_index,
-                       scheduled_venue_id, scheduled_subset_idx);
+                       scheduled_venue_id, scheduled_subset_idx,
+                       previous_location);
   } else {
     // FULLY STOCHASTIC: select both activity and venue at runtime
     int16_t runtime_activity_idx =
         selectActivity(person, *current_slot, time_slot_index, sched_type,
                        day_type_idx, time_key);
-    auto [venue_id, subset_idx] =
-        selectVenue(person, runtime_activity_idx, *current_slot, time_key);
+    auto [venue_id, subset_idx] = selectVenue(
+        person, runtime_activity_idx, *current_slot, time_key,
+        previous_location);
     scheduled_venue_id = venue_id;
     scheduled_subset_idx = subset_idx;
     scheduled_activity_index = runtime_activity_idx;
@@ -511,7 +527,8 @@ void ActivityManager::resolveStochasticEntry(
 void ActivityManager::maybeTriggerScheduleHop(
     Person& person, const TimeSlot* current_slot, int day_type_idx,
     uint64_t time_key, int16_t& scheduled_activity_index,
-    VenueId& scheduled_venue_id, SubsetIndex& scheduled_subset_idx) {
+    VenueId& scheduled_venue_id, SubsetIndex& scheduled_subset_idx,
+    const PersonLocation* previous_location) {
   int16_t hop_idx = -1;
   if (current_slot && scheduled_activity_index >= 0 &&
       scheduled_activity_index <
@@ -542,7 +559,8 @@ void ActivityManager::maybeTriggerScheduleHop(
     int16_t new_act =
         selectActivity(person, slot0, 0, &target, day_type_idx, hop_key);
 
-    auto [v, s] = selectVenue(person, new_act, slot0, hop_key);
+    auto [v, s] =
+        selectVenue(person, new_act, slot0, hop_key, previous_location);
     scheduled_activity_index = new_act;
     scheduled_venue_id = v;
     scheduled_subset_idx = s;
@@ -582,6 +600,15 @@ void ActivityManager::precomputeOneSlot(
           0) {
     is_det = false;
     is_hyb = true;
+  }
+  // remain_at_previous_venue has no "previous location" at world-build time
+  // (precompute runs once, before any simulation history exists), so baking
+  // in a venue here would be meaningless. Force fully-stochastic so it is
+  // always re-resolved at runtime via resolveStochasticEntry, regardless of
+  // config_.performance.deterministic_activities/hybrid_activities.
+  if (act_idx == remain_at_previous_venue_act_idx_) {
+    is_det = false;
+    is_hyb = false;
   }
 
   if (is_det) {
@@ -657,7 +684,8 @@ void ActivityManager::assignHoppedSingleSlot(
       // assignActivities is called with a single slot; use it directly
       int16_t act = selectActivity(person, slot, 0, &hopped_sched, day_type_idx,
                                    time_key_hop);
-      auto [v, s] = selectVenue(person, act, slot, time_key_hop);
+      auto [v, s] =
+          selectVenue(person, act, slot, time_key_hop, &locations[i]);
       locations[i].venue_id = v;
       locations[i].subset_index = s;
       locations[i].activity_index = act;
@@ -704,7 +732,8 @@ void ActivityManager::assignHoppedScheduleSlot(
         const TimeSlot& hop_slot = slots[time_slot_index];
         int16_t act = selectActivity(person, hop_slot, time_slot_index,
                                      &hopped_sched, day_type_idx, time_key);
-        auto [v, s] = selectVenue(person, act, hop_slot, time_key);
+        auto [v, s] =
+            selectVenue(person, act, hop_slot, time_key, &locations[i]);
         locations[i].venue_id = v;
         locations[i].subset_index = s;
         locations[i].activity_index = act;

@@ -231,6 +231,89 @@ TEST_CASE("ActivityManager - Precompute Schedules") {
   }
 }
 
+TEST_CASE("ActivityManager - remain_at_previous_venue") {
+  WorldState world = TestWorldFactory::createMinimalWorld(1, 3);
+  world.activity_names = {"residence", "remain_at_previous_venue", "none",
+                          "dead"};
+  world.venue_type_names = {"home", "pub"};
+  world.venues[0].type_id = 0;  // home
+  world.venues[1].type_id = 1;  // pub
+  world.venues[2].type_id = 1;  // pub (unused, keeps world non-trivial)
+  world.buildIndices();
+
+  // Person 0 has a residence (venue 0), no pre-baked venues for
+  // remain_at_previous_venue (it is never pre-baked, matching fair_*
+  // activities).
+  world.people[0].activity_meta_start =
+      static_cast<uint32_t>(world.activity_meta.size());
+  world.people[0].activity_meta_count = 1;
+  world.activity_meta.push_back(
+      {0, static_cast<uint32_t>(world.activity_venues.size()), 1});
+  world.activity_venues.push_back({0, 0});  // residence: venue 0, subset 0
+
+  Config config;
+  config.resolve(world);
+  ActivityManager manager(world, config);
+
+  TimeSlot rapv_slot;
+  rapv_slot.name = "rapv_slot";
+  rapv_slot.allowed_activities = {"remain_at_previous_venue"};
+
+  config.schedule.day_type_cycle = {"workday"};
+  config.schedule.day_type_names = {"workday"};
+  ScheduleType sched;
+  sched.name = "rapv_schedule";
+  sched.slots_by_day_type["workday"].push_back(rapv_slot);
+  config.schedule.schedule_types.push_back(sched);
+  config.schedule.default_schedule_type = "rapv_schedule";
+  config.resolve(world);
+  world.people[0].cached_schedule_type_ = &config.schedule.schedule_types[0];
+  // Use the resolved copy (allowed_activity_indices/mask are populated on the
+  // ScheduleType's own slot storage during resolve(), not on the local
+  // rapv_slot variable above).
+  const TimeSlot& resolved_slot =
+      config.schedule.schedule_types[0].slots_by_day_type["workday"][0];
+
+  SUBCASE("first-ever resolution stays at the initialised residence") {
+    std::vector<PersonLocation> locations;
+    manager.initializeLocations(locations);  // seeds venue 0 (residence)
+
+    manager.assignActivities(resolved_slot, 0, locations);
+
+    CHECK(locations[0].activity_index == 1);  // "remain_at_previous_venue"
+    CHECK(locations[0].venue_id == 0);
+    CHECK(locations[0].subset_index == 0);
+  }
+
+  SUBCASE("passthrough: carries forward an arbitrary previous venue") {
+    std::vector<PersonLocation> locations;
+    locations.resize(1);
+    locations[0].venue_id = 1;  // pub, not the residence
+    locations[0].subset_index = 4;
+    locations[0].person_id = 0;
+    locations[0].person_array_index = 0;
+
+    manager.assignActivities(resolved_slot, 0, locations);
+
+    CHECK(locations[0].venue_id == 1);
+    CHECK(locations[0].subset_index == 4);
+  }
+
+  SUBCASE("falls back to residence when the previous venue is invalid") {
+    std::vector<PersonLocation> locations;
+    locations.resize(1);
+    locations[0].venue_id = -1;  // e.g. previous slot was no_venue/dead/none
+    locations[0].subset_index = -1;
+    locations[0].person_id = 0;
+    locations[0].person_array_index = 0;
+
+    manager.assignActivities(resolved_slot, 0, locations);
+
+    CHECK(locations[0].venue_id == 0);  // residence
+    CHECK(locations[0].subset_index == 0);
+  }
+}
+
 TEST_CASE("ActivityManager - PolicyManager Override") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 2);
   world.activity_names = {"residence", "work", "none", "dead"};
