@@ -413,20 +413,17 @@ void CoordinatedEncounterManager::emitProposals(
 const CoordinatedEncounterDef*
 CoordinatedEncounterManager::findMatchingEncounterDef(
     const EncounterProposal& prop) const {
+  // Match by encounter_type_id (a unique, name-derived ID stamped on the
+  // proposal at emitProposals() time and carried over MPI), not by
+  // venue_type_id: multiple defs can legitimately share the same
+  // allowed_venues (e.g. social_contacts_local/_near/_med all allow
+  // household/guest_house), so a venue-mask scan can't disambiguate which
+  // def actually generated a given proposal — it would silently return
+  // whichever matching def happens to sort first by priority.
   for (const auto& enc_def : config_.coordinated_encounters.encounters) {
     if (!enc_def.enabled) continue;
-
-    if (enc_def.is_virtual) {
-      if (prop.venue_type_id == enc_def.cached_virtual_venue_type_id) {
-        return &enc_def;
-      }
-    } else {
-      // Use bitmask: check if bit at prop.venue_type_id is set in
-      // allowed_venue_mask
-      if (prop.venue_type_id < 32 &&
-          ((enc_def.allowed_venue_mask >> prop.venue_type_id) & 1)) {
-        return &enc_def;
-      }
+    if (prop.encounter_type_id == enc_def.cached_encounter_type_id) {
+      return &enc_def;
     }
   }
   return nullptr;
@@ -453,9 +450,14 @@ bool CoordinatedEncounterManager::isScheduleCompatible(
 
   // Use pre-cached masks (no string comparisons)
   // OR in coordinated_only_activity_mask so encounters can trigger on
-  // activities that are only available via coordinated encounters.
-  ActivityMask slot_mask = schedule_slots[slot].allowed_activity_mask |
-                           schedule_slots[slot].coordinated_only_activity_mask;
+  // activities that are only available via coordinated encounters, and
+  // coordinated_invitee_only_activity_mask so a slot can grant invitee
+  // eligibility without also granting host eligibility (checked separately
+  // in getValidSlotsForType, which does not OR this mask in).
+  ActivityMask slot_mask =
+      schedule_slots[slot].allowed_activity_mask |
+      schedule_slots[slot].coordinated_only_activity_mask |
+      schedule_slots[slot].coordinated_invitee_only_activity_mask;
   ActivityMask trigger_mask = def.trigger_mask;
   return (slot_mask & trigger_mask) != 0;
 }

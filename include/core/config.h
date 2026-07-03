@@ -109,7 +109,15 @@ struct TimeSlot {
   // Activities available ONLY through coordinated encounters, not regular
   // activity assignment. E.g., "sex" can only happen via the coordinated
   // encounter pipeline during this slot, never through normal scheduling.
+  // Grants both host and invitee eligibility.
   std::vector<std::string> coordinated_only_activities;
+
+  // Like coordinated_only_activities, but invitee-eligibility only: a
+  // person can accept an invitation here (and hop away to visit the host,
+  // if the def sets hop_schedule) but cannot themselves host/propose one
+  // (e.g. a standard_worker's workday: won't leave their post to initiate
+  // a trip, but an unplanned invitation can still pull them away).
+  std::vector<std::string> coordinated_invitee_only_activities;
 
   // Pre-resolved: bitmask of allowed activity indices (bit i =
   // activity_names[i] is allowed)
@@ -118,10 +126,14 @@ struct TimeSlot {
   std::vector<int16_t> allowed_activity_indices;
 
   // Pre-resolved: bitmask of coordinated-only activity indices.
-  // Encounter trigger checks use (allowed_activity_mask |
-  // coordinated_only_activity_mask). Regular ActivityManager uses only
-  // allowed_activity_mask.
+  // Host-eligibility checks use (allowed_activity_mask |
+  // coordinated_only_activity_mask). Invitee-eligibility checks additionally
+  // OR in coordinated_invitee_only_activity_mask. Regular ActivityManager
+  // uses only allowed_activity_mask.
   ActivityMask coordinated_only_activity_mask = 0;
+
+  // Pre-resolved: bitmask of invitee-only coordinated activity indices.
+  ActivityMask coordinated_invitee_only_activity_mask = 0;
 
   // Optional: Specifies which index from person's activity list to use for a
   // specific activity type This allows control over activity selection (e.g.,

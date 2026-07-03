@@ -286,6 +286,12 @@ schedule_types:
         end: "17:00"
         allowed_activities: ["lords_land_work", "primary_activity", "residence"]
 
+        # standard_worker can accept a day-trip invitation (and hop away to
+        # visit the host) mid-shift, but cannot themselves propose/host one
+        # — see coordinated_invitee_only_activities in docs/CONTEXT.md.
+        coordinated_only_activities: ["social_contacts_near"]
+        coordinated_invitee_only_activities: ["social_contacts_med"]
+
       - name: "evening"
         start: "17:00"
         end: "21:00"

@@ -56,6 +56,11 @@ std::vector<TimeSlot> parseSlotList(const YAML::Node& slot_list_node) {
       ts.coordinated_only_activities =
           slot["coordinated_only_activities"].as<std::vector<std::string>>();
 
+    if (slot["coordinated_invitee_only_activities"])
+      ts.coordinated_invitee_only_activities =
+          slot["coordinated_invitee_only_activities"]
+              .as<std::vector<std::string>>();
+
     if (slot["specified_activity"]) {
       SpecifiedActivity spec_act;
       spec_act.type = slot["specified_activity"]["type"].as<std::string>();

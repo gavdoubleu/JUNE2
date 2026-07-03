@@ -204,11 +204,15 @@ void registerSystemAndConfigActivities(WorldState& world,
         for (const auto& act : slot.allowed_activities) register_activity(act);
         for (const auto& act : slot.coordinated_only_activities)
           register_activity(act);
+        for (const auto& act : slot.coordinated_invitee_only_activities)
+          register_activity(act);
       }
     }
     for (const auto& slot : sched_type.flat_slots) {
       for (const auto& act : slot.allowed_activities) register_activity(act);
       for (const auto& act : slot.coordinated_only_activities)
+        register_activity(act);
+      for (const auto& act : slot.coordinated_invitee_only_activities)
         register_activity(act);
     }
   }

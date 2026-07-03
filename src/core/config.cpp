@@ -559,6 +559,8 @@ void ScheduleConfig::resolveSlots(const WorldState& world) {
           slot.allowed_activities, world.activity_names);
       slot.coordinated_only_activity_mask = computeActivityMaskFromNames(
           slot.coordinated_only_activities, world.activity_names);
+      slot.coordinated_invitee_only_activity_mask = computeActivityMaskFromNames(
+          slot.coordinated_invitee_only_activities, world.activity_names);
       slot.allowed_activity_indices.clear();
       for (const auto& act : slot.allowed_activities) {
         int idx = world.getActivityIndex(act);

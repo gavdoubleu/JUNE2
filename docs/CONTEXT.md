@@ -58,6 +58,12 @@ Optionally sets `hop_schedule`, which moves non-host participants onto a
 temporary Schedule Hop on acceptance (e.g. a multi-slot trip) — the host
 always stays at their own Venue. No `hop_schedule` means an in-place
 encounter: participants are assigned the Venue directly, without hopping.
+A slot's `coordinated_only_activities` grants both host and invitee
+eligibility; `coordinated_invitee_only_activities` grants invitee
+eligibility only — a person can accept an invitation (and, if `hop_schedule`
+is set, travel to visit the host) during that slot, but cannot themselves
+propose/host one (e.g. a standard_worker's workday: won't leave their post
+to initiate a trip, but an unplanned invitation can still pull them away).
 _Avoid_: "negotiated activity", "live encounter".
 
 **Schedule Hop**:
