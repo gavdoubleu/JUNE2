@@ -264,6 +264,9 @@ CoordinatedEncounterDef parseEncounter(
     enc_def.network_partner_filter =
         enc_node["network_partner_filter"].as<std::string>();
   }
+  if (enc_node["hop_schedule"]) {
+    enc_def.hop_schedule = enc_node["hop_schedule"].as<std::string>();
+  }
 
   parseEncounterRateSource(enc_node, enc_def, frequency_groups,
                            has_proposal_prob);

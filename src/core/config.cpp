@@ -729,6 +729,21 @@ void CoordinatedEncounterConfig::resolve(
     // Network resolution: looked up from the static network registry.
     enc.cached_network_idx = world.getNetworkTypeIndex(enc.network);
 
+    // Hop-schedule resolution: -1 (no hop) if hop_schedule is empty or
+    // names an unknown schedule type.
+    if (!enc.hop_schedule.empty()) {
+      enc.cached_hop_schedule_idx =
+          static_cast<int16_t>(world.getScheduleTypeIndex(enc.hop_schedule));
+    }
+
+    // Trigger-activity resolution: used to stamp activity_index on
+    // injection so it reflects the trigger activity even when that
+    // activity is coordinated_only (never chosen by ordinary resolution).
+    if (!enc.trigger_slots.empty()) {
+      enc.cached_trigger_activity_idx =
+          static_cast<int16_t>(world.getActivityIndex(enc.trigger_slots[0]));
+    }
+
     // Virtual venue type ID: use deterministic sorted registry
     if (enc.is_virtual && !enc.virtual_contact_matrix.empty()) {
       auto id_it =

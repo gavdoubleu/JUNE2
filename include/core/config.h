@@ -712,6 +712,12 @@ struct CoordinatedEncounterDef {
   std::vector<std::string> trigger_slots;   // e.g., ["leisure", "social"]
   std::vector<std::string> allowed_venues;  // e.g., ["pub", "restaurant"]
 
+  // Optional: schedule type non-host participants hop into on acceptance
+  // (e.g. "day_trip"). Empty = no hop (ordinary in-place encounter, the
+  // existing behaviour). Only the invitee(s) hop; selectVenue always
+  // resolves to the host's own venue, so the host never leaves home.
+  std::string hop_schedule = "";
+
   // General Settings
   bool enabled = true;
   int priority = 0;  // Lower = higher precedence (processed first)
@@ -749,6 +755,14 @@ struct CoordinatedEncounterDef {
   int cached_network_idx = -1;          // Resolved network type index
   uint8_t cached_encounter_type_id = 255;  // Resolved encounter type ID
   int cached_virtual_venue_type_id = 255;  // Resolved virtual venue type ID
+  // Resolved index into ScheduleConfig::schedule_types for hop_schedule;
+  // -1 = no hop (hop_schedule empty or unresolvable).
+  int16_t cached_hop_schedule_idx = -1;
+  // Resolved activity index of trigger_slots[0]; -1 = unresolved. Used to
+  // stamp PersonLocation::activity_index on injection so it reflects the
+  // trigger activity rather than whatever ordinary resolution rolled for
+  // this slot (relevant once the trigger activity is coordinated_only).
+  int16_t cached_trigger_activity_idx = -1;
 };
 
 // Raw row from a frequency-group CSV, resolved for fast per-person lookup.

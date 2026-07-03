@@ -10,6 +10,16 @@
 #   social_contacts_med  →  day_trip  (4 flat_slots: rest of today + morning home)
 #   social_contacts_far  →  long_trip (8 flat_slots: two nights away)
 #
+#   social_contacts_med/_far are NOT triggered via hop_on_activity below —
+#   they are coordinated_only_activities, resolved live through
+#   coordinated_encounters.yaml (rejects dead contacts; the ordinary
+#   pre-baked venue map has no liveness check). See that file's
+#   hop_schedule field for the day_trip/long_trip trigger, and
+#   applyEncounterInjection (simulator_encounters.cpp) for where the hop
+#   actually starts. day_trip/long_trip's own flat_slots use
+#   remain_at_previous_venue rather than social_contacts_med/_far — see
+#   comments on those schedule_types below.
+#
 # The trigger slot must be where the travel activity can actually be selected
 # (i.e. it must appear in allowed_activities and have non-zero participation).
 # On workdays, only merchants can trigger a day_trip; standard workers cannot.
@@ -33,12 +43,19 @@ schedule_csv: "configs/config_plague/schedules.csv"
 schedule_types:
 
   # --------------------------------------------------------------------------
-  # DAY TRIP  (triggered when social_contacts_med is selected in a normal slot)
+  # DAY TRIP  (triggered by an accepted social_contacts_med coordinated
+  # encounter — see coordinated_encounters.yaml's hop_schedule. Injection
+  # stamps this timeslot's venue directly and starts the hop already past
+  # slot 0, so flat_slots[0] is never evaluated on the forward pass; it is
+  # kept as remain_at_previous_venue (not social_contacts_med) so that if
+  # findLastNonNullVenueOnHop's backward scan ever reaches it, it carries
+  # the negotiated venue forward instead of re-deriving one via the
+  # ordinary pre-baked map (which has no liveness check).
   # 4 flat_slots.  Assuming triggered during rest_day "day" (12:00-18:00):
   #
   #  Slot  Day-type slot        Duration   Activity
-  #  [0]   rest_day  "day"      6 h        social_contacts_med  ← replaces trigger
-  #  [1]   rest_day  "evening"  3 h        social_contacts_med
+  #  [0]   rest_day  "day"      6 h        remain_at_previous_venue  ← unused fwd, injection covers this slot
+  #  [1]   rest_day  "evening"  3 h        remain_at_previous_venue
   #  [2]   rest_day  "night"   12 h        residence (sleeping away)
   #  [3]   workday   "morning"  1 h        residence (travelling home)
   #  ──────────────────────────────────────────────────────────────────────────
@@ -55,12 +72,12 @@ schedule_types:
       - name: "at_destination"
         start: "12:00"
         end: "18:00"
-        allowed_activities: ["social_contacts_med"]
+        allowed_activities: ["remain_at_previous_venue"]
 
       - name: "evening_at_destination"
         start: "18:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_med"]
+        allowed_activities: ["remain_at_previous_venue"]
 
       - name: "overnight_away"
         start: "21:00"
@@ -73,16 +90,20 @@ schedule_types:
         allowed_activities: ["residence"]
 
   # --------------------------------------------------------------------------
-  # LONG TRIP  (triggered when social_contacts_far is selected)
+  # LONG TRIP  (triggered by an accepted social_contacts_far coordinated
+  # encounter — see coordinated_encounters.yaml's hop_schedule. Same
+  # remain_at_previous_venue rationale as day_trip above: injection covers
+  # slot 0's venue directly, and every subsequent at-destination slot
+  # carries that venue forward rather than re-deriving one.)
   # 8 flat_slots.  Assuming triggered during rest_day "day" (12:00-18:00):
   #
   #  Slot  Day-type slot          Duration   Activity
-  #  [0]   rest_day   "day"       6 h        social_contacts_far ← replaces trigger
-  #  [1]   rest_day   "evening"   3 h        social_contacts_far
+  #  [0]   rest_day   "day"       6 h        remain_at_previous_venue ← unused fwd, injection covers this slot
+  #  [1]   rest_day   "evening"   3 h        remain_at_previous_venue
   #  [2]   rest_day   "night"    12 h        residence (night 1 away)
-  #  [3]   workday    "morning"   1 h        social_contacts_far (arrived, day 2)
-  #  [4]   workday    "primary"   8 h        social_contacts_far
-  #  [5]   workday    "evening"   4 h        social_contacts_far
+  #  [3]   workday    "morning"   1 h        remain_at_previous_venue (arrived, day 2)
+  #  [4]   workday    "primary"   8 h        remain_at_previous_venue
+  #  [5]   workday    "evening"   4 h        remain_at_previous_venue
   #  [6]   workday    "night"    11 h        residence (night 2 away)
   #  [7]   workday+1  "morning"   1 h        residence (travelling home)
   #  ──────────────────────────────────────────────────────────────────────────
@@ -95,12 +116,12 @@ schedule_types:
       - name: "travelling_to_destination"
         start: "12:00"
         end: "18:00"
-        allowed_activities: ["social_contacts_far"]
+        allowed_activities: ["remain_at_previous_venue"]
 
       - name: "evening_at_destination_d1"
         start: "18:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_far"]
+        allowed_activities: ["remain_at_previous_venue"]
 
       - name: "overnight_away_n1"
         start: "21:00"
@@ -110,17 +131,17 @@ schedule_types:
       - name: "morning_at_destination_d2"
         start: "09:00"
         end: "17:00"
-        allowed_activities: ["social_contacts_far"]
+        allowed_activities: ["remain_at_previous_venue"]
 
       - name: "afternoon_at_destination_d2"
         start: "17:00"
         end: "18:00"
-        allowed_activities: ["social_contacts_far"]
+        allowed_activities: ["remain_at_previous_venue"]
 
       - name: "evening_at_destination_d2"
         start: "18:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_far"]
+        allowed_activities: ["remain_at_previous_venue"]
 
       - name: "overnight_away_n2"
         start: "21:00"
@@ -284,25 +305,21 @@ schedule_types:
         start: "12:00"
         end: "18:00"
         allowed_activities: ["church", "primary_activity", "social_contacts_local",
-                             "social_contacts_near", "social_contacts_med",
-                             "social_contacts_far", "residence"]
-        # Hop triggers: if the stochastic draw lands on a travel activity,
-        # replace this slot with flat_slots[0] of the temporary schedule and
-        # progress through the remaining flat_slots on subsequent simulation slots.
-        hop_on_activity:
-          social_contacts_med: day_trip
-          social_contacts_far: long_trip
+                             "social_contacts_near", "residence"]
+        # social_contacts_med/_far are coordinated_only: negotiated live via
+        # coordinated_encounters.yaml (rejects dead contacts), which also
+        # triggers the day_trip/long_trip hop on acceptance for the
+        # travelling participant. See top-of-file comment.
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
 
       - name: "evening"
         start: "18:00"
         end: "21:00"
         allowed_activities: ["social_contacts_local", "social_contacts_near",
-                             "social_contacts_med", "residence"]
+                             "residence"]
         # Evening trigger: a traveller who sets out late still completes the trip;
         # the flat_slots sequence shifts accordingly (arriving after dark, etc.).
-        hop_on_activity:
-          social_contacts_med: day_trip
-          social_contacts_far: long_trip
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
 
       - name: "night"
         start: "21:00"
@@ -325,12 +342,6 @@ schedule_types:
       social_contacts_near:
         workday: 0.15
         rest_day: 0.20
-      social_contacts_med:
-        workday: 0.01       # ~1 % chance of standard workers travel on workdays
-        rest_day: 0.05     # ~5 % chance of a day trip on a rest day
-      social_contacts_far:
-        workday: 0.0
-        rest_day: 0.01     # ~1 % chance of a long trip on a rest day
       residence:
         workday: 1.0
         rest_day: 1.0
@@ -359,9 +370,10 @@ schedule_types:
         start: "09:00"
         end: "17:00"
         allowed_activities: ["primary_activity", "social_contacts_near",
-                             "social_contacts_med", "residence"]
-        hop_on_activity:
-          social_contacts_med: day_trip     # merchants travel on workdays too
+                             "residence"]
+        # merchants travel on workdays too — negotiated via
+        # coordinated_encounters.yaml (see schedules.yaml top-of-file note)
+        coordinated_only_activities: ["social_contacts_med"]
 
       - name: "evening"
         start: "17:00"
@@ -383,19 +395,15 @@ schedule_types:
         start: "12:00"
         end: "18:00"
         allowed_activities: ["church", "social_contacts_local", "social_contacts_near",
-                             "social_contacts_med", "residence"]
-        hop_on_activity:
-          social_contacts_med: day_trip
-          social_contacts_far: long_trip
+                             "residence"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
 
       - name: "evening"
         start: "18:00"
         end: "21:00"
         allowed_activities: ["social_contacts_local", "social_contacts_near",
-                             "social_contacts_med", "residence"]
-        hop_on_activity:
-          social_contacts_med: day_trip
-          social_contacts_far: long_trip
+                             "residence"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
 
       - name: "night"
         start: "21:00"
@@ -415,12 +423,6 @@ schedule_types:
       social_contacts_near:
         workday: 0.20       # regular trade with nearby settlements on workdays
         rest_day: 0.15
-      social_contacts_med:
-        workday: 0.10       # ~10 % chance of a day trip on a workday
-        rest_day: 0.15      # ~15 % chance on rest days
-      social_contacts_far:
-        workday: 0.0
-        rest_day: 0.05      # ~5 % chance of a two-day journey on a rest day
       residence:
         workday: 1.0
         rest_day: 1.0
@@ -486,8 +488,8 @@ schedule_types:
         start: "12:00"
         end: "18:00"
         allowed_activities: ["church", "primary_activity", "social_contacts_local",
-                             "social_contacts_near", "social_contacts_med",
-                             "social_contacts_far", "residence"]
+                             "social_contacts_near", "residence"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
 
       - name: "evening"
         start: "18:00"
@@ -515,12 +517,6 @@ schedule_types:
       social_contacts_near:
         workday: 0.10
         rest_day: 0.10
-      social_contacts_med:
-        workday: 0.0
-        rest_day: 0.03
-      social_contacts_far:
-        workday: 0.0
-        rest_day: 0.01
       residence:
         workday: 1.0
         rest_day: 1.0
@@ -2999,8 +2995,8 @@ schedule_types:
         start: "12:00"
         end: "18:00"
         allowed_activities: ["church", "primary_activity", "social_contacts_local",
-                             "social_contacts_near", "social_contacts_med",
-                             "social_contacts_far", "residence"]
+                             "social_contacts_near", "residence"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
 
       - name: "evening"
         start: "18:00"
@@ -3028,12 +3024,6 @@ schedule_types:
       social_contacts_near:
         workday: 0.10
         rest_day: 0.10
-      social_contacts_med:
-        workday: 0.0
-        rest_day: 0.03
-      social_contacts_far:
-        workday: 0.0
-        rest_day: 0.01
       residence:
         workday: 1.0
         rest_day: 1.0

@@ -14,12 +14,24 @@ namespace june {
 
 namespace {
 
+// Per-def hop-trigger info: schedule to hop non-host participants into on
+// injection, the schedule to return to afterwards, and the trigger
+// activity's own index (stamped onto activity_index so it doesn't go
+// stale once the trigger activity is coordinated_only). hop_schedule_idx
+// == -1 means this def has no hop (ordinary in-place encounter).
+struct EncounterHopInfo {
+  int16_t hop_schedule_idx = -1;
+  int16_t return_schedule_idx = -1;
+  int16_t trigger_activity_idx = -1;
+};
+
 // Per-slot lookup tables derived from the coordinated-encounters config:
 // encounter_type_id -> trigger activity indices, and
 // encounter_type_id -> min_attendees threshold.
 struct EncounterLookups {
   std::unordered_map<uint8_t, std::vector<int16_t>> trigger_activities;
   std::unordered_map<uint8_t, int> min_attendees;
+  std::unordered_map<uint8_t, EncounterHopInfo> hop_info;
 };
 
 // Pass-1 result for one daily_encounter: which local participants pass the
@@ -33,7 +45,7 @@ struct EncounterEligibility {
 };
 
 EncounterLookups buildEncounterLookups(
-    const WorldState& world,
+    const WorldState& world, const ScheduleConfig& schedule_config,
     const std::vector<CoordinatedEncounterDef>& encounters) {
   EncounterLookups out;
   for (const auto& def : encounters) {
@@ -46,6 +58,25 @@ EncounterLookups buildEncounterLookups(
     }
     out.trigger_activities[static_cast<uint8_t>(type_id)] = std::move(indices);
     out.min_attendees[static_cast<uint8_t>(type_id)] = def.min_attendees;
+
+    EncounterHopInfo hop_info;
+    hop_info.trigger_activity_idx = def.cached_trigger_activity_idx;
+    if (def.cached_hop_schedule_idx >= 0 &&
+        static_cast<size_t>(def.cached_hop_schedule_idx) <
+            schedule_config.schedule_types.size()) {
+      const ScheduleType& target =
+          schedule_config.schedule_types[def.cached_hop_schedule_idx];
+      // Only temporary schedules with flat_slots make sense as a hop
+      // target here (mirrors the guard in
+      // ActivityManager::maybeTriggerScheduleHop) — a permanent hop_schedule
+      // is not supported by the consumeSlot0()-based onset in
+      // applyEncounterInjection.
+      if (target.is_temporary && !target.flat_slots.empty()) {
+        hop_info.hop_schedule_idx = def.cached_hop_schedule_idx;
+        hop_info.return_schedule_idx = target.return_schedule_idx;
+      }
+    }
+    out.hop_info[static_cast<uint8_t>(type_id)] = hop_info;
   }
   return out;
 }
@@ -213,7 +244,9 @@ void applyEncounterInjection(
     const std::vector<EncounterEligibility>& slot_encounters,
     const std::vector<CoordinatedEncounter>& daily_encounters,
     const std::unordered_map<int, int>& global_eligible_map,
-    std::vector<PersonLocation>& locations, DomainManager* domain_mgr) {
+    const std::unordered_map<uint8_t, EncounterHopInfo>& hop_info,
+    std::vector<PersonLocation>& locations, WorldState& world,
+    DomainManager* domain_mgr) {
   for (size_t i = 0; i < slot_encounters.size(); ++i) {
     const auto& ee = slot_encounters[i];
     const auto& enc = daily_encounters[ee.encounter_idx];
@@ -230,9 +263,37 @@ void applyEncounterInjection(
 
     if (total_eligible < ee.min_required || ee.local_eligible <= 0) continue;
 
+    auto hop_it = hop_info.find(enc.encounter_type_id);
+    const EncounterHopInfo* hop =
+        (hop_it != hop_info.end()) ? &hop_it->second : nullptr;
+
     for (size_t array_idx : ee.eligible_indices) {
       locations[array_idx].venue_id = enc.venue_id;
       locations[array_idx].encounter_type_id = enc.encounter_type_id;
+      if (hop && hop->trigger_activity_idx >= 0) {
+        locations[array_idx].activity_index = hop->trigger_activity_idx;
+      }
+
+      // Non-host participants of a hop-bearing encounter trip into the
+      // configured schedule (e.g. day_trip/long_trip). selectVenue always
+      // resolves an encounter to the host's own venue, so the host never
+      // leaves home and is skipped here. The hop is started already
+      // "consumed" (consumeSlot0) because this slot's venue has already
+      // been stamped above, standing in for the hop target's flat_slots[0]
+      // — the next timeslot resolves flat_slots[1] onward normally via
+      // advanceHoppedSchedule.
+      if (hop && hop->hop_schedule_idx >= 0) {
+        Person& person = world.people[array_idx];
+        if (person.id != enc.host_id) {
+          int16_t effective_return =
+              (hop->return_schedule_idx != -1)
+                  ? hop->return_schedule_idx
+                  : static_cast<int16_t>(person.schedule_type_id);
+          person.schedule_hop =
+              ScheduleHop::begin(hop->hop_schedule_idx, effective_return);
+          person.schedule_hop.consumeSlot0();
+        }
+      }
     }
 
 #ifdef USE_MPI
@@ -350,8 +411,8 @@ void Simulator::injectCoordinatedEncountersIntoSlot(int time_slot_index) {
 
   // Per-slot lookup tables (trigger activities + min attendees) keyed by
   // encounter_type_id. Cheap to rebuild per slot.
-  EncounterLookups lookups =
-      buildEncounterLookups(world_, config_.coordinated_encounters.encounters);
+  EncounterLookups lookups = buildEncounterLookups(
+      world_, config_.schedule, config_.coordinated_encounters.encounters);
 
   auto daily_encounters = dedupAndSortDailyEncounters(
       coordinated_encounter_manager_->getDailyEncounters());
@@ -371,7 +432,8 @@ void Simulator::injectCoordinatedEncountersIntoSlot(int time_slot_index) {
   // Pass 2: stamp venue_id / encounter_type_id onto eligible participants
   // for encounters that meet their min_required threshold.
   applyEncounterInjection(slot_encounters, daily_encounters,
-                          global_eligible_map, locations_, domain_mgr_);
+                          global_eligible_map, lookups.hop_info, locations_,
+                          world_, domain_mgr_);
 }
 
 }  // namespace june

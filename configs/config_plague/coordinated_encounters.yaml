@@ -1,6 +1,19 @@
 coordinated_encounters:
   enabled: false
   log_commitments: false
+
+  # Per-occupation daily proposal rates for social_contacts_med/_far — see
+  # social_contacts_travel_rates.csv for the blended-rate derivation.
+  frequency_groups:
+    social_contacts_med_rate:
+      csv: "configs/config_plague/social_contacts_travel_rates.csv"
+      rate_column: "social_contacts_med_rate"
+      rate_unit: "per_day"
+    social_contacts_far_rate:
+      csv: "configs/config_plague/social_contacts_travel_rates.csv"
+      rate_column: "social_contacts_far_rate"
+      rate_unit: "per_day"
+
   encounters:
     - name: "social_encounters"
       priority: 10
@@ -15,5 +28,61 @@ coordinated_encounters:
       invite_distribution:
         type: binomial
         p: 0.3
+      acceptance_probability: 0.8
+      is_virtual: false
+
+    # Replaces the ordinary hop_on_activity-triggered day_trip: negotiated
+    # live so a dead contact's household stops attracting visits (see
+    # schedules.yaml's day_trip / travel-mechanic comment). Only the
+    # accepting invitee hops into day_trip — selectVenue resolves to the
+    # host's own venue, so the host stays home.
+    #
+    # network "social_contacts_med" is not a hand-authored network — it is
+    # a person property (a JSON PersonId-list string per person) in the
+    # world HDF5's /population/properties, auto-loaded as a network keyed
+    # by its own property name (src/loaders/domain_loader_internals.cpp).
+    # This is the same list previously consulted only implicitly; nothing
+    # new needs to be added to the world builder for this activity.
+    - name: "social_contacts_med"
+      priority: 20
+      enabled: true
+      network: "social_contacts_med"
+      trigger_slots: ["social_contacts_med"]
+      allowed_venues: ["household"]
+      hop_schedule: "day_trip"
+      daily_max_distribution:
+        type: fixed
+        count: 1
+      frequency_group: "social_contacts_med_rate"
+      invite_distribution:
+        type: fixed
+        count: 1
+      acceptance_probability: 0.8
+      is_virtual: false
+
+    # Replaces the ordinary hop_on_activity-triggered long_trip. Same
+    # host-stays/invitee-travels semantics as social_contacts_med above.
+    #
+    # NOTE: unlike social_contacts_med/_local/_near, the current world file
+    # (data/data_plague/world_state_medieval_with_fairs.h5) has NO
+    # "social_contacts_far" property in /population/properties — so this
+    # network will resolve to zero partners and this def will never
+    # generate a proposal until the MAY world-builder adds that property
+    # (same JSON PersonId-list-string shape as the other three). Config is
+    # wired correctly ahead of that data becoming available.
+    - name: "social_contacts_far"
+      priority: 21
+      enabled: true
+      network: "social_contacts_far"
+      trigger_slots: ["social_contacts_far"]
+      allowed_venues: ["household"]
+      hop_schedule: "long_trip"
+      daily_max_distribution:
+        type: fixed
+        count: 1
+      frequency_group: "social_contacts_far_rate"
+      invite_distribution:
+        type: fixed
+        count: 1
       acceptance_probability: 0.8
       is_virtual: false
