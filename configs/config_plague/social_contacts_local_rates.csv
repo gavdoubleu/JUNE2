@@ -1,0 +1,16 @@
+# Per-occupation daily proposal rates for the social_contacts_local/_near
+# coordinated encounters (see coordinated_encounters.yaml). First matching
+# row wins (frequency_group semantics), so rows are ordered by the same
+# priority as their originating schedule_type in schedules.yaml (sailor 7 >
+# traveller 6 > merchant 5 > standard_worker 0, catch-all).
+#
+# Values are single daily probabilities blended from the old per-day-type
+# (workday/rest_day) participation rates in schedules.yaml, weighted by
+# day_type_cycle (6 workdays : 1 rest_day per week) — frequency_group rows
+# have no day-type axis, only per-person static criteria. E.g. standard_worker
+# social_contacts_near: (6*0.15 + 1*0.20) / 7 = 0.157143.
+filter.num_sailing_days,filter.occupation,filter.num_travel_days,social_contacts_local_rate,social_contacts_near_rate
+>0,,,0.100000,0.100000
+,,>0,0.100000,0.100000
+,merchant,,0.192857,0.192857
+,,,0.200000,0.157143

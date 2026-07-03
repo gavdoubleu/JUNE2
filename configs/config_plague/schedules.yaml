@@ -10,15 +10,16 @@
 #   social_contacts_med  →  day_trip  (4 flat_slots: rest of today + morning home)
 #   social_contacts_far  →  long_trip (8 flat_slots: two nights away)
 #
-#   social_contacts_med/_far are NOT triggered via hop_on_activity below —
-#   they are coordinated_only_activities, resolved live through
-#   coordinated_encounters.yaml (rejects dead contacts; the ordinary
-#   pre-baked venue map has no liveness check). See that file's
-#   hop_schedule field for the day_trip/long_trip trigger, and
-#   applyEncounterInjection (simulator_encounters.cpp) for where the hop
-#   actually starts. day_trip/long_trip's own flat_slots use
-#   remain_at_previous_venue rather than social_contacts_med/_far — see
-#   comments on those schedule_types below.
+#   social_contacts_med/_far/_local/_near are NOT triggered via
+#   hop_on_activity below — they are coordinated_only_activities, resolved
+#   live through coordinated_encounters.yaml (rejects dead contacts; the
+#   ordinary pre-baked venue map has no liveness check). med/_far additionally
+#   set hop_schedule (day_trip/long_trip trigger) since they leave the day's
+#   schedule; local/_near have no hop_schedule — they resolve in place, same
+#   as the friendships/leisure def. See applyEncounterInjection
+#   (simulator_encounters.cpp) for where the hop actually starts. day_trip/
+#   long_trip's own flat_slots use remain_at_previous_venue rather than
+#   social_contacts_med/_far — see comments on those schedule_types below.
 #
 # The trigger slot must be where the travel activity can actually be selected
 # (i.e. it must appear in allowed_activities and have non-zero participation).
@@ -224,43 +225,43 @@ schedule_types:
       - name: "morning"
         start: "08:00"
         end: "09:00"
-        allowed_activities: ["residence"]
+        allowed_activities: ["remain_at_previous_venue"] #["residence"]
 
       - name: "primary_activity"
         start: "09:00"
         end: "17:00"
-        allowed_activities: ["residence"]
+        allowed_activities: ["remain_at_previous_venue"] #["residence"]
 
       - name: "evening"
         start: "17:00"
         end: "21:00"
-        allowed_activities: ["residence"]
+        allowed_activities: ["remain_at_previous_venue"] #["residence"]
 
       - name: "night"
         start: "21:00"
         end: "08:00"
-        allowed_activities: ["residence"]
+        allowed_activities: ["remain_at_previous_venue"] #["residence"]
 
     rest_day:
       - name: "morning"
         start: "09:00"
         end: "12:00"
-        allowed_activities: ["residence"]
+        allowed_activities: ["remain_at_previous_venue"] #["residence"]
 
       - name: "day"
         start: "12:00"
         end: "18:00"
-        allowed_activities: ["residence"]
+        allowed_activities: ["remain_at_previous_venue"] #["residence"]
 
       - name: "evening"
         start: "18:00"
         end: "21:00"
-        allowed_activities: ["residence"]
+        allowed_activities: ["remain_at_previous_venue"] #["residence"]
 
       - name: "night"
         start: "21:00"
         end: "09:00"
-        allowed_activities: ["residence"]
+        allowed_activities: ["remain_at_previous_venue"] #["residence"]
 
     participation:
       residence:
@@ -288,7 +289,10 @@ schedule_types:
       - name: "evening"
         start: "17:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        # social_contacts_local/_near are coordinated_only: see top-of-file
+        # comment.
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "night"
         start: "21:00"
@@ -299,27 +303,29 @@ schedule_types:
       - name: "morning"
         start: "09:00"
         end: "12:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "day"
         start: "12:00"
         end: "18:00"
-        allowed_activities: ["church", "primary_activity", "social_contacts_local",
-                             "social_contacts_near", "residence"]
-        # social_contacts_med/_far are coordinated_only: negotiated live via
-        # coordinated_encounters.yaml (rejects dead contacts), which also
-        # triggers the day_trip/long_trip hop on acceptance for the
-        # travelling participant. See top-of-file comment.
-        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
+        allowed_activities: ["church", "primary_activity", "residence"]
+        # social_contacts_med/_far/_local/_near are coordinated_only:
+        # negotiated live via coordinated_encounters.yaml (rejects dead
+        # contacts); med/_far additionally trigger the day_trip/long_trip hop
+        # on acceptance for the travelling participant. See top-of-file
+        # comment.
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far",
+                                       "social_contacts_local", "social_contacts_near"]
 
       - name: "evening"
         start: "18:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near",
-                             "residence"]
+        allowed_activities: ["residence"]
         # Evening trigger: a traveller who sets out late still completes the trip;
         # the flat_slots sequence shifts accordingly (arriving after dark, etc.).
-        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far",
+                                       "social_contacts_local", "social_contacts_near"]
 
       - name: "night"
         start: "21:00"
@@ -336,12 +342,6 @@ schedule_types:
       church:
         workday: 0.0
         rest_day: 0.8
-      social_contacts_local:
-        workday: 0.20
-        rest_day: 0.20
-      social_contacts_near:
-        workday: 0.15
-        rest_day: 0.20
       residence:
         workday: 1.0
         rest_day: 1.0
@@ -369,16 +369,16 @@ schedule_types:
       - name: "primary_activity"
         start: "09:00"
         end: "17:00"
-        allowed_activities: ["primary_activity", "social_contacts_near",
-                             "residence"]
+        allowed_activities: ["primary_activity", "residence"]
         # merchants travel on workdays too — negotiated via
         # coordinated_encounters.yaml (see schedules.yaml top-of-file note)
-        coordinated_only_activities: ["social_contacts_med"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_near"]
 
       - name: "evening"
         start: "17:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "night"
         start: "21:00"
@@ -389,21 +389,22 @@ schedule_types:
       - name: "morning"
         start: "09:00"
         end: "12:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "day"
         start: "12:00"
         end: "18:00"
-        allowed_activities: ["church", "social_contacts_local", "social_contacts_near",
-                             "residence"]
-        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
+        allowed_activities: ["church", "residence"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far",
+                                       "social_contacts_local", "social_contacts_near"]
 
       - name: "evening"
         start: "18:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near",
-                             "residence"]
-        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far",
+                                       "social_contacts_local", "social_contacts_near"]
 
       - name: "night"
         start: "21:00"
@@ -417,12 +418,6 @@ schedule_types:
       church:
         workday: 0.0
         rest_day: 0.5
-      social_contacts_local:
-        workday: 0.20
-        rest_day: 0.15
-      social_contacts_near:
-        workday: 0.20       # regular trade with nearby settlements on workdays
-        rest_day: 0.15
       residence:
         workday: 1.0
         rest_day: 1.0
@@ -471,7 +466,8 @@ schedule_types:
       - name: "evening"
         start: "17:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "night"
         start: "21:00"
@@ -482,19 +478,21 @@ schedule_types:
       - name: "morning"
         start: "09:00"
         end: "12:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "day"
         start: "12:00"
         end: "18:00"
-        allowed_activities: ["church", "primary_activity", "social_contacts_local",
-                             "social_contacts_near", "residence"]
-        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
+        allowed_activities: ["church", "primary_activity", "residence"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far",
+                                       "social_contacts_local", "social_contacts_near"]
 
       - name: "evening"
         start: "18:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "night"
         start: "21:00"
@@ -511,12 +509,6 @@ schedule_types:
       church:
         workday: 0.0
         rest_day: 0.8
-      social_contacts_local:
-        workday: 0.10
-        rest_day: 0.10
-      social_contacts_near:
-        workday: 0.10
-        rest_day: 0.10
       residence:
         workday: 1.0
         rest_day: 1.0
@@ -2978,7 +2970,8 @@ schedule_types:
       - name: "evening"
         start: "17:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "night"
         start: "21:00"
@@ -2989,19 +2982,21 @@ schedule_types:
       - name: "morning"
         start: "09:00"
         end: "12:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "day"
         start: "12:00"
         end: "18:00"
-        allowed_activities: ["church", "primary_activity", "social_contacts_local",
-                             "social_contacts_near", "residence"]
-        coordinated_only_activities: ["social_contacts_med", "social_contacts_far"]
+        allowed_activities: ["church", "primary_activity", "residence"]
+        coordinated_only_activities: ["social_contacts_med", "social_contacts_far",
+                                       "social_contacts_local", "social_contacts_near"]
 
       - name: "evening"
         start: "18:00"
         end: "21:00"
-        allowed_activities: ["social_contacts_local", "social_contacts_near", "residence"]
+        allowed_activities: ["residence"]
+        coordinated_only_activities: ["social_contacts_local", "social_contacts_near"]
 
       - name: "night"
         start: "21:00"
@@ -3018,12 +3013,6 @@ schedule_types:
       church:
         workday: 0.0
         rest_day: 0.8
-      social_contacts_local:
-        workday: 0.10
-        rest_day: 0.10
-      social_contacts_near:
-        workday: 0.10
-        rest_day: 0.10
       residence:
         workday: 1.0
         rest_day: 1.0

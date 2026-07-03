@@ -46,6 +46,20 @@ Subset: membership is never pre-baked; it is recomputed each time the
 Calendar Event fires.
 _Avoid_: Subset (pre-baked, world-build-time — the opposite of this).
 
+**Coordinated Encounter**:
+A live-negotiated Activity assignment (`CoordinatedEncounterDef`, defined in
+`coordinated_encounters.yaml`): a host proposes to network partners at a
+`trigger_slots` Activity, invitees are drawn from a named network and
+liveness-checked, and accepting participants are assigned a Venue from
+`allowed_venues`. Replaces the ordinary pre-baked-venue-map resolution for
+Activities marked `coordinated_only_activities` in `schedules.yaml` (that map
+has no liveness check, so it kept sending visitors to dead contacts).
+Optionally sets `hop_schedule`, which moves non-host participants onto a
+temporary Schedule Hop on acceptance (e.g. a multi-slot trip) — the host
+always stays at their own Venue. No `hop_schedule` means an in-place
+encounter: participants are assigned the Venue directly, without hopping.
+_Avoid_: "negotiated activity", "live encounter".
+
 **Schedule Hop**:
 A temporary or permanent departure from a Person's assigned schedule type,
 owned by the `ScheduleHop` struct on Person; active when

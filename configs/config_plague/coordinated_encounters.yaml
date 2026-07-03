@@ -1,5 +1,5 @@
 coordinated_encounters:
-  enabled: false
+  enabled: true
   log_commitments: false
 
   # Per-occupation daily proposal rates for social_contacts_med/_far — see
@@ -12,6 +12,16 @@ coordinated_encounters:
     social_contacts_far_rate:
       csv: "configs/config_plague/social_contacts_travel_rates.csv"
       rate_column: "social_contacts_far_rate"
+      rate_unit: "per_day"
+    # Per-occupation daily proposal rates for social_contacts_local/_near —
+    # see social_contacts_local_rates.csv for the blended-rate derivation.
+    social_contacts_local_rate:
+      csv: "configs/config_plague/social_contacts_local_rates.csv"
+      rate_column: "social_contacts_local_rate"
+      rate_unit: "per_day"
+    social_contacts_near_rate:
+      csv: "configs/config_plague/social_contacts_local_rates.csv"
+      rate_column: "social_contacts_near_rate"
       rate_unit: "per_day"
 
   encounters:
@@ -28,6 +38,44 @@ coordinated_encounters:
       invite_distribution:
         type: binomial
         p: 0.3
+      acceptance_probability: 0.8
+      is_virtual: false
+
+    # Replaces the ordinary allowed_activities-resolved social_contacts_local:
+    # negotiated live so a dead contact's household stops attracting visits
+    # (same liveness problem med/_far had — see below). No hop_schedule: this
+    # is an in-place visit, not a multi-slot trip, so the encounter resolves
+    # within the triggering slot exactly like social_encounters above.
+    - name: "social_contacts_local"
+      priority: 15
+      enabled: true
+      network: "social_contacts_local"
+      trigger_slots: ["social_contacts_local"]
+      allowed_venues: ["household"]
+      daily_max_distribution:
+        type: fixed
+        count: 1
+      frequency_group: "social_contacts_local_rate"
+      invite_distribution:
+        type: fixed
+        count: 1
+      acceptance_probability: 0.8
+      is_virtual: false
+
+    # Same rationale as social_contacts_local above.
+    - name: "social_contacts_near"
+      priority: 16
+      enabled: true
+      network: "social_contacts_near"
+      trigger_slots: ["social_contacts_near"]
+      allowed_venues: ["household"]
+      daily_max_distribution:
+        type: fixed
+        count: 1
+      frequency_group: "social_contacts_near_rate"
+      invite_distribution:
+        type: fixed
+        count: 1
       acceptance_probability: 0.8
       is_virtual: false
 
