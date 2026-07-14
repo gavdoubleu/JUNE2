@@ -2,6 +2,7 @@
 
 #include "parallel/domain_communicator.h"
 
+#include <cstddef>
 #include <cstring>
 #include <iostream>
 #include <vector>
@@ -33,6 +34,17 @@ constexpr auto kVisitorWire = makeWireRecord(
     &june::Domain::VisitorData::symptom_id,
     &june::Domain::VisitorData::time_in_stage);
 constexpr int VISITOR_WIRE_HEADER = kVisitorWire.size();
+// Tripwire: VisitorData's trailing integrated_infectiousness is a
+// std::vector<double> packed manually as a count-known-elsewhere tail (not
+// via WireRecord), and fields after it (newly_infected etc.) are pure
+// return data never on the wire, so sizeof(VisitorData) isn't a useful
+// proxy here. offsetof(integrated_infectiousness) instead marks where the
+// fixed header covered by kVisitorWire ends - it moves if a field is
+// added/removed/resized anywhere before the tail.
+static_assert(offsetof(june::Domain::VisitorData, integrated_infectiousness) ==
+                 40,
+             "VisitorData's fixed-header region changed - check kVisitorWire "
+             "covers every field, then update this literal");
 inline int visitorWireSize(int num_modes) {
   return VISITOR_WIRE_HEADER + num_modes * static_cast<int>(sizeof(double));
 }

@@ -1,6 +1,7 @@
 #ifdef USE_MPI
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -32,6 +33,14 @@ constexpr auto kProposalWire = makeWireRecord(
     &june::EncounterProposal::venue_type_id, &june::EncounterProposal::slot,
     &june::EncounterProposal::encounter_type_id);
 constexpr int PROPOSAL_WIRE_SIZE = kProposalWire.size();
+// Tripwire: EncounterProposal is all-scalar fields, all listed above, so its
+// sizeof is a proxy for "did a field get added/removed/resized". Not exact
+// (a same-or-smaller field could land in trailing padding unnoticed), but
+// catches the common case. If this fires, update kProposalWire and the
+// literal below together.
+static_assert(sizeof(june::EncounterProposal) == 36,
+             "EncounterProposal size changed - check kProposalWire covers "
+             "every field, then update this literal");
 
 char* packProposal(char* ptr, const june::EncounterProposal& p) {
   return kProposalWire.pack(ptr, p);
@@ -50,6 +59,12 @@ constexpr auto kReplyWire = makeWireRecord(
     &june::EncounterReply::venue_type_id, &june::EncounterReply::slot,
     &june::EncounterReply::encounter_type_id);
 constexpr int REPLY_WIRE_SIZE = kReplyWire.size() + sizeof(uint8_t);
+// Tripwire: EncounterReply is all-scalar (kReplyWire's fields plus the
+// status enum packed manually below), so sizeof is a proxy for drift. Same
+// caveat as PROPOSAL_WIRE_SIZE's tripwire above.
+static_assert(sizeof(june::EncounterReply) == 28,
+             "EncounterReply size changed - check kReplyWire (+ status_byte) "
+             "covers every field, then update this literal");
 
 // home_array_index is never on the wire (local-only; defaults to -1 and
 // stays there after unpack), so it's skipped in this field list.
@@ -61,6 +76,12 @@ constexpr auto kInfectionWire = makeWireRecord(
     &june::PendingInfection::venue_id,
     &june::PendingInfection::infector_symptom_id,
     &june::PendingInfection::transmission_mode_index);
+// Tripwire: PendingInfection is all-scalar (kInfectionWire's fields plus
+// the excluded local-only home_array_index), so sizeof is a proxy for
+// drift. Same caveat as PROPOSAL_WIRE_SIZE's tripwire above.
+static_assert(sizeof(june::PendingInfection) == 32,
+             "PendingInfection size changed - check kInfectionWire (+ "
+             "home_array_index) covers every field, then update this literal");
 
 // Fixed header of a finalized encounter; participant_count + the
 // variable-length participants tail are appended manually around this (see
@@ -73,6 +94,15 @@ constexpr auto kFinalizedWire = makeWireRecord(
     &june::CoordinatedEncounter::slot,
     &june::CoordinatedEncounter::encounter_type_id,
     &june::CoordinatedEncounter::host_subset_index);
+// Tripwire: unlike the scalar-only structs above, CoordinatedEncounter ends
+// in a std::set<PersonId> participants (packed manually as a count-prefixed
+// tail, not via WireRecord), so its sizeof is dominated by the set's own
+// object layout and says nothing about the header. offsetof(participants)
+// instead marks where the fixed header covered by kFinalizedWire ends -
+// it moves if a field is added/removed/resized anywhere before the tail.
+static_assert(offsetof(june::CoordinatedEncounter, participants) == 32,
+             "CoordinatedEncounter's fixed-header region changed - check "
+             "kFinalizedWire covers every field, then update this literal");
 
 char* packReply(char* ptr, const june::EncounterReply& r) {
   ptr = kReplyWire.pack(ptr, r);
