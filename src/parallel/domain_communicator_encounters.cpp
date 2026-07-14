@@ -51,8 +51,8 @@ constexpr auto kReplyWire = makeWireRecord(
     &june::EncounterReply::encounter_type_id);
 constexpr int REPLY_WIRE_SIZE = kReplyWire.size() + sizeof(uint8_t);
 
-// home_array_index is never on the wire (local-only, set post-unpack via
-// lookup in applyOnePendingInfection), so it's skipped in this field list.
+// home_array_index is never on the wire (local-only; defaults to -1 and
+// stays there after unpack), so it's skipped in this field list.
 constexpr auto kInfectionWire = makeWireRecord(
     &june::PendingInfection::person_id, &june::PendingInfection::infector_id,
     &june::PendingInfection::infection_time,
@@ -536,9 +536,7 @@ std::optional<PendingInfection> DomainCommunicator::applyOnePendingInfection(
       pending.venue_id, severity_factor, pending.infector_symptom_id, "", "",
       pending.transmission_mode_index);
 
-  PendingInfection applied = pending;
-  applied.home_array_index = -1;
-  return applied;
+  return pending;
 }
 
 // =============================================================================
