@@ -290,6 +290,7 @@ if(BUILD_TESTING)
     endif()
   endmacro()
 
+  add_june_test(test_domain_communicator_detail "tests/test_domain_communicator_detail.cpp")
   add_june_test(test_run_dir "tests/test_run_dir.cpp")
   add_june_test(test_world_state "tests/test_world_state.cpp")
   add_june_test(test_infection "tests/test_infection.cpp;src/loaders/disease_loader.cpp")
