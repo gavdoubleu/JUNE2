@@ -97,12 +97,14 @@ constexpr auto kFinalizedWire = makeWireRecord(
 // Tripwire: unlike the scalar-only structs above, CoordinatedEncounter ends
 // in a std::set<PersonId> participants (packed manually as a count-prefixed
 // tail, not via WireRecord), so its sizeof is dominated by the set's own
-// object layout and says nothing about the header. offsetof(participants)
-// instead marks where the fixed header covered by kFinalizedWire ends -
-// it moves if a field is added/removed/resized anywhere before the tail.
-static_assert(offsetof(june::CoordinatedEncounter, participants) == 32,
-             "CoordinatedEncounter's fixed-header region changed - check "
-             "kFinalizedWire covers every field, then update this literal");
+// object layout and says nothing about the header. The header/tail boundary
+// is instead checked in tests/test_domain_communicator_detail.cpp - not here
+// as a static_assert(offsetof(...)), because a std::set member makes
+// CoordinatedEncounter non-standard-layout, and offsetof on a
+// non-standard-layout type is only conditionally-supported (GCC/Clang accept
+// it with a -Winvalid-offsetof warning, but the computed value isn't a
+// portable guarantee across standard libraries). The test uses well-defined
+// pointer subtraction on a real object instead.
 
 char* packReply(char* ptr, const june::EncounterReply& r) {
   ptr = kReplyWire.pack(ptr, r);

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <vector>
 
+#include "activity/coordinated_encounter_types.h"
 #include "parallel/domain_communicator_detail.h"
 
 using june::domain_comm_detail::makeWireRecord;
@@ -105,6 +106,28 @@ TEST_CASE(
   CHECK(restored.id == original.id);
   CHECK(restored.value == doctest::Approx(original.value));
   CHECK(restored_status == status);
+}
+
+TEST_CASE(
+    "CoordinatedEncounter: participants offset matches kFinalizedWire's "
+    "header (regression tripwire)") {
+  // CoordinatedEncounter (include/activity/coordinated_encounter_types.h)
+  // packs a fixed header via WireRecord (kFinalizedWire in
+  // domain_communicator_encounters.cpp) then appends its std::set<PersonId>
+  // participants manually as a count-prefixed tail. That std::set member
+  // makes CoordinatedEncounter non-standard-layout, so offsetof(...) on it
+  // is only conditionally-supported (compiler/stdlib-dependent) rather than
+  // a portable guarantee - not safe to use in a static_assert. This test
+  // computes the same offset via well-defined pointer subtraction on a real
+  // object instead, so it still catches a field added/removed/resized in
+  // the header without kFinalizedWire being updated to match.
+  june::CoordinatedEncounter encounter{};
+  const auto* base = reinterpret_cast<const char*>(&encounter);
+  const auto* participants_field =
+      reinterpret_cast<const char*>(&encounter.participants);
+  const auto header_size = participants_field - base;
+
+  CHECK(header_size == 32);
 }
 
 #else

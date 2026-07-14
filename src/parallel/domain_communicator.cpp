@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstring>
 #include <iostream>
+#include <type_traits>
 #include <vector>
 
 #include "parallel/domain_communicator_detail.h"
@@ -41,6 +42,12 @@ constexpr int VISITOR_WIRE_HEADER = kVisitorWire.size();
 // proxy here. offsetof(integrated_infectiousness) instead marks where the
 // fixed header covered by kVisitorWire ends - it moves if a field is
 // added/removed/resized anywhere before the tail.
+// offsetof is only standard-guaranteed for standard-layout types; guard that
+// assumption explicitly so a future member (e.g. a std::set) that breaks it
+// fails loudly here rather than degrading to a silent -Winvalid-offsetof.
+static_assert(std::is_standard_layout_v<june::Domain::VisitorData>,
+             "VisitorData must stay standard-layout for the offsetof check "
+             "below to be well-defined");
 static_assert(offsetof(june::Domain::VisitorData, integrated_infectiousness) ==
                  40,
              "VisitorData's fixed-header region changed - check kVisitorWire "
