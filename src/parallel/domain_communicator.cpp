@@ -2,8 +2,10 @@
 
 #include "parallel/domain_communicator.h"
 
+#include <cstddef>
 #include <cstring>
 #include <iostream>
+#include <type_traits>
 #include <vector>
 
 #include "parallel/domain_communicator_detail.h"
@@ -13,29 +15,49 @@
 
 namespace {
 
+using june::domain_comm_detail::makeWireRecord;
 using june::domain_comm_detail::packField;
 using june::domain_comm_detail::unpackField;
 
-// Fixed-size header of the visitor wire format (everything before the
-// integrated_infectiousness payload): 4+4+4+4+1+1+4+1+2+8 = 33 bytes.
+// Fixed header of the visitor wire format (everything before the
+// integrated_infectiousness payload); the variable-length per-mode payload
+// is appended manually after this, outside WireRecord.
 // Total wire size = VISITOR_WIRE_HEADER + num_modes * sizeof(double).
-constexpr int VISITOR_WIRE_HEADER = 33;
+constexpr auto kVisitorWire = makeWireRecord(
+    &june::Domain::VisitorData::person_id,
+    &june::Domain::VisitorData::home_rank, &june::Domain::VisitorData::venue_id,
+    &june::Domain::VisitorData::subset_idx,
+    &june::Domain::VisitorData::is_infected,
+    &june::Domain::VisitorData::is_infectious,
+    &june::Domain::VisitorData::immunity_level,
+    &june::Domain::VisitorData::encounter_type_id,
+    &june::Domain::VisitorData::symptom_id,
+    &june::Domain::VisitorData::time_in_stage);
+constexpr int VISITOR_WIRE_HEADER = kVisitorWire.size();
+// Tripwire: VisitorData's trailing integrated_infectiousness is a
+// std::vector<double> packed manually as a count-known-elsewhere tail (not
+// via WireRecord), and fields after it (newly_infected etc.) are pure
+// return data never on the wire, so sizeof(VisitorData) isn't a useful
+// proxy here. offsetof(integrated_infectiousness) instead marks where the
+// fixed header covered by kVisitorWire ends - it moves if a field is
+// added/removed/resized anywhere before the tail.
+// offsetof is only standard-guaranteed for standard-layout types; guard that
+// assumption explicitly so a future member (e.g. a std::set) that breaks it
+// fails loudly here rather than degrading to a silent -Winvalid-offsetof.
+static_assert(std::is_standard_layout_v<june::Domain::VisitorData>,
+              "VisitorData must stay standard-layout for the offsetof check "
+              "below to be well-defined");
+static_assert(offsetof(june::Domain::VisitorData, integrated_infectiousness) ==
+                  40,
+              "VisitorData's fixed-header region changed - check kVisitorWire "
+              "covers every field, then update this literal");
 inline int visitorWireSize(int num_modes) {
   return VISITOR_WIRE_HEADER + num_modes * static_cast<int>(sizeof(double));
 }
 
 char* packVisitor(char* ptr, const june::Domain::VisitorData& v,
                   int num_modes) {
-  ptr = packField(ptr, v.person_id);
-  ptr = packField(ptr, v.home_rank);
-  ptr = packField(ptr, v.venue_id);
-  ptr = packField(ptr, v.subset_idx);
-  ptr = packField(ptr, v.is_infected);
-  ptr = packField(ptr, v.is_infectious);
-  ptr = packField(ptr, v.immunity_level);
-  ptr = packField(ptr, v.encounter_type_id);
-  ptr = packField(ptr, v.symptom_id);
-  ptr = packField(ptr, v.time_in_stage);
+  ptr = kVisitorWire.pack(ptr, v);
   // Variable-length per-mode payload. The vector must be exactly num_modes
   // long; sender and receiver agree on this from disease->numModes(), which
   // is loaded identically on every rank. Mismatches indicate a config bug
@@ -56,16 +78,7 @@ char* packVisitor(char* ptr, const june::Domain::VisitorData& v,
 
 const char* unpackVisitor(const char* ptr, june::Domain::VisitorData& v,
                           int num_modes) {
-  ptr = unpackField(ptr, v.person_id);
-  ptr = unpackField(ptr, v.home_rank);
-  ptr = unpackField(ptr, v.venue_id);
-  ptr = unpackField(ptr, v.subset_idx);
-  ptr = unpackField(ptr, v.is_infected);
-  ptr = unpackField(ptr, v.is_infectious);
-  ptr = unpackField(ptr, v.immunity_level);
-  ptr = unpackField(ptr, v.encounter_type_id);
-  ptr = unpackField(ptr, v.symptom_id);
-  ptr = unpackField(ptr, v.time_in_stage);
+  ptr = kVisitorWire.unpack(ptr, v);
   v.integrated_infectiousness.assign(num_modes, 0.0);
   if (num_modes > 0) {
     std::memcpy(v.integrated_infectiousness.data(), ptr,
