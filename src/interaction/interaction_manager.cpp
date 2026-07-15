@@ -377,7 +377,8 @@ void InteractionManager::filterAndSortActiveLocations(
     if (runtime_bin_allocator_ &&
         runtime_bin_allocator_->isPartialPresenceVenue(loc.venue_id))
       continue;
-    if (loc.venue_id != -1 || loc.encounter_type_id != kDefaultEncounterTypeId) {
+    if (loc.venue_id != -1 ||
+        loc.encounter_type_id != kDefaultEncounterTypeId) {
       active_locations_buffer_.push_back(loc);
     }
   }

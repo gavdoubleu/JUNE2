@@ -503,11 +503,10 @@ int InteractionManager::resolvePartialPresenceInfections(
         "", c.transmission_mode_index);
 
     if (event_logger_ != nullptr)
-      event_logger_->logInfection(c.person_id, c.infector_id, c.venue_id,
-                                  current_time, kDefaultEncounterTypeId,
-                                  c.infector_symptom_id,
-                                  c.transmission_mode_index,
-                                  InfectionSource::Person);
+      event_logger_->logInfection(
+          c.person_id, c.infector_id, c.venue_id, current_time,
+          kDefaultEncounterTypeId, c.infector_symptom_id,
+          c.transmission_mode_index, InfectionSource::Person);
     if (active_infections != nullptr) active_infections->insert(c.person_id);
     applied++;
   }

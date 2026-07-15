@@ -41,9 +41,10 @@ std::vector<june::detail::PersonRecord> buildPersonRecords(
     june::detail::PersonRecord record;
     record.person_id = person.id;
     record.age = person.age;
-    std::string sex_str = (person.sex == june::Sex::MALE)     ? "male"
-                          : (person.sex == june::Sex::FEMALE) ? "female"
-                                                              : june::kCouldNotResolve;
+    std::string sex_str = (person.sex == june::Sex::MALE) ? "male"
+                          : (person.sex == june::Sex::FEMALE)
+                              ? "female"
+                              : june::kCouldNotResolve;
     strncpy(record.sex, sex_str.c_str(), 15);
     record.sex[15] = '\0';
     record.geo_unit_id = person.geo_unit_id;

@@ -39,8 +39,8 @@ constexpr int PROPOSAL_WIRE_SIZE = kProposalWire.size();
 // catches the common case. If this fires, update kProposalWire and the
 // literal below together.
 static_assert(sizeof(june::EncounterProposal) == 36,
-             "EncounterProposal size changed - check kProposalWire covers "
-             "every field, then update this literal");
+              "EncounterProposal size changed - check kProposalWire covers "
+              "every field, then update this literal");
 
 char* packProposal(char* ptr, const june::EncounterProposal& p) {
   return kProposalWire.pack(ptr, p);
@@ -63,8 +63,8 @@ constexpr int REPLY_WIRE_SIZE = kReplyWire.size() + sizeof(uint8_t);
 // status enum packed manually below), so sizeof is a proxy for drift. Same
 // caveat as PROPOSAL_WIRE_SIZE's tripwire above.
 static_assert(sizeof(june::EncounterReply) == 28,
-             "EncounterReply size changed - check kReplyWire (+ status_byte) "
-             "covers every field, then update this literal");
+              "EncounterReply size changed - check kReplyWire (+ status_byte) "
+              "covers every field, then update this literal");
 
 // home_array_index is never on the wire (local-only; defaults to -1 and
 // stays there after unpack), so it's skipped in this field list.
@@ -80,16 +80,15 @@ constexpr auto kInfectionWire = makeWireRecord(
 // the excluded local-only home_array_index), so sizeof is a proxy for
 // drift. Same caveat as PROPOSAL_WIRE_SIZE's tripwire above.
 static_assert(sizeof(june::PendingInfection) == 32,
-             "PendingInfection size changed - check kInfectionWire (+ "
-             "home_array_index) covers every field, then update this literal");
+              "PendingInfection size changed - check kInfectionWire (+ "
+              "home_array_index) covers every field, then update this literal");
 
 // Fixed header of a finalized encounter; participant_count + the
 // variable-length participants tail are appended manually around this (see
 // packFinalizedLocal / unpackFinalizedFromRank).
 constexpr auto kFinalizedWire = makeWireRecord(
     &june::CoordinatedEncounter::encounter_id,
-    &june::CoordinatedEncounter::host_id,
-    &june::CoordinatedEncounter::venue_id,
+    &june::CoordinatedEncounter::host_id, &june::CoordinatedEncounter::venue_id,
     &june::CoordinatedEncounter::venue_type_id,
     &june::CoordinatedEncounter::slot,
     &june::CoordinatedEncounter::encounter_type_id,
@@ -440,7 +439,7 @@ std::vector<char> packFinalizedLocal(
   for (const auto& enc : local_finalized) {
     int participant_count = static_cast<int>(enc.participants.size());
     size_t entry_size = kFinalizedWire.size() + sizeof(int) +
-                         participant_count * sizeof(june::PersonId);
+                        participant_count * sizeof(june::PersonId);
     size_t offset = local_buf.size();
     local_buf.resize(offset + entry_size);
     char* ptr = local_buf.data() + offset;
@@ -560,8 +559,7 @@ std::optional<PendingInfection> DomainCommunicator::applyOnePendingInfection(
   }
   uint64_t infection_seed =
       mix_seed(config_.simulation.random_seed, pending.person_id,
-               static_cast<uint64_t>(pending.infection_time * 1000),
-               venue_key);
+               static_cast<uint64_t>(pending.infection_time * 1000), venue_key);
   person->infection = std::make_unique<Infection>(
       disease_, pending.infection_time, person,
       static_cast<unsigned int>(infection_seed), &world_, venue_type_name,

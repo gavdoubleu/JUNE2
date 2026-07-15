@@ -25,8 +25,7 @@ using june::domain_comm_detail::unpackField;
 // Total wire size = VISITOR_WIRE_HEADER + num_modes * sizeof(double).
 constexpr auto kVisitorWire = makeWireRecord(
     &june::Domain::VisitorData::person_id,
-    &june::Domain::VisitorData::home_rank,
-    &june::Domain::VisitorData::venue_id,
+    &june::Domain::VisitorData::home_rank, &june::Domain::VisitorData::venue_id,
     &june::Domain::VisitorData::subset_idx,
     &june::Domain::VisitorData::is_infected,
     &june::Domain::VisitorData::is_infectious,
@@ -46,12 +45,12 @@ constexpr int VISITOR_WIRE_HEADER = kVisitorWire.size();
 // assumption explicitly so a future member (e.g. a std::set) that breaks it
 // fails loudly here rather than degrading to a silent -Winvalid-offsetof.
 static_assert(std::is_standard_layout_v<june::Domain::VisitorData>,
-             "VisitorData must stay standard-layout for the offsetof check "
-             "below to be well-defined");
+              "VisitorData must stay standard-layout for the offsetof check "
+              "below to be well-defined");
 static_assert(offsetof(june::Domain::VisitorData, integrated_infectiousness) ==
-                 40,
-             "VisitorData's fixed-header region changed - check kVisitorWire "
-             "covers every field, then update this literal");
+                  40,
+              "VisitorData's fixed-header region changed - check kVisitorWire "
+              "covers every field, then update this literal");
 inline int visitorWireSize(int num_modes) {
   return VISITOR_WIRE_HEADER + num_modes * static_cast<int>(sizeof(double));
 }
