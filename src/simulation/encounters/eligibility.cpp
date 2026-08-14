@@ -52,7 +52,7 @@ std::vector<EncounterEligibility> computeLocalEligibility(
         for (int16_t trigger_act_idx : trig_it->second) {
           auto override = policy_manager->getOverride(
               const_cast<Person&>(world.people[array_idx]), trigger_act_idx,
-              locations[array_idx].venue_id, locations[array_idx].subset_index,
+              enc.venue_id, locations[array_idx].subset_index,
               current_simulation_time, time_slot_index);
           if (override.has_value()) {
             policy_blocked = true;

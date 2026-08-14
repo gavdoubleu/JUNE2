@@ -1549,6 +1549,37 @@ static void addLockdownPolicy(
 }
 
 /**
+ * Helper: Creates a TemporalPolicy overriding named activities to "residence",
+ * optionally restricted to a set of venue types (the Phase 1 restrict-to gate).
+ * Pass an empty venue_types for the activity-only behaviour that predates the
+ * gate. Resolving needs a Disease, so one is created and returned to the
+ * caller to keep alive.
+ */
+static std::unique_ptr<Disease> addVenueGatedPolicy(
+    PolicyManager& pm, WorldState& world,
+    const std::vector<std::string>& activities,
+    const std::vector<std::string>& venue_types, double start_time,
+    double end_time) {
+  TemporalPolicy tp;
+  tp.name = "close_pubs";
+  tp.start_time = start_time;
+  tp.end_time = end_time;
+
+  tp.action.override_activities.insert(activities.begin(), activities.end());
+  tp.action.override_venue_types.insert(venue_types.begin(),
+                                        venue_types.end());
+  tp.action.replacement_activity = "residence";
+  tp.action.replacement_activity_index =
+      static_cast<int16_t>(world.getActivityIndex("residence"));
+  tp.action.compliance_rate = 1.0;
+
+  pm.addTemporalPolicy(tp);
+  auto disease = createMinimalDisease({"healthy"});
+  pm.resolveAll(*disease);
+  return disease;
+}
+
+/**
  * Helper: Sets up initial locations with everyone at residence.
  */
 static std::vector<PersonLocation> initLocations(WorldState& world) {
@@ -2008,6 +2039,127 @@ TEST_CASE(
 
   REQUIRE(replies.size() == 1);
   CHECK(replies[0].status == ReplyStatus::REJECTED_NO_MATCHING_DEF);
+}
+
+// =============================================================================
+// SECTION 7g-7i: Venue-gated policies
+//
+// The gate must be asked about the venue the encounter would put the person
+// in, not the venue they are currently scheduled to. Everyone starts at home
+// (initLocations), so a gate read off locations[] never sees the pub.
+// =============================================================================
+
+TEST_CASE("7g. Venue gate — encounter at a gated pub is cancelled") {
+  /**
+   * SCENARIO:
+   *   close_pubs overrides "leisure" at venue type "pub" only.
+   *   The encounter is at pub venue 100; both participants are currently at
+   *   home. The gate must see "pub" and block both, cancelling the encounter.
+   *
+   * REGRESSION: reading locations[].venue_id here yields "home", the gate
+   * does not match, and injection puts both back in the closed pub.
+   */
+  auto tw = buildEncounterWorld(
+      2, 1, "pub", "friendships", "pub_meetups", false, "", {"leisure"},
+      InviteDistribution{DistributionType::FIXED, 1.0, 0.5, 1}, 1.0, 1.0);
+
+  PolicyManager pm(tw.world);
+  auto disease = addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0,
+                                     10.0);
+
+  tw.world.people[0].applicable_temporal_policy_mask = 1;
+  tw.world.people[1].applicable_temporal_policy_mask = 1;
+
+  CoordinatedEncounter enc;
+  enc.encounter_id = 700;
+  enc.host_id = 0;
+  enc.venue_id = 100;  // the pub
+  enc.venue_type_id = 2;
+  enc.slot = 0;
+  enc.encounter_type_id = 0;
+  enc.participants = {0, 1};
+
+  auto locations = initLocations(tw.world);
+  auto injected = simulateEncounterInjection({enc}, 0, locations, tw.world,
+                                             tw.config, &pm, 5.0);
+
+  CHECK(injected.empty());
+  CHECK(locations[0].venue_id == 0);
+  CHECK(locations[1].venue_id == 0);
+  CHECK(locations[0].encounter_type_id == 255);
+  CHECK(locations[1].encounter_type_id == 255);
+}
+
+TEST_CASE("7h. Venue gate — same policy, encounter at an ungated venue fires") {
+  /**
+   * SCENARIO:
+   *   Identical to 7g except the encounter is hosted at a home venue. "home"
+   *   is not in the gate's mask, so the override does not apply and the
+   *   encounter proceeds. This is the allowed_venues modelling lever: the
+   *   same gathering written as ["household"] survives close_pubs.
+   */
+  auto tw = buildEncounterWorld(
+      2, 1, "pub", "friendships", "pub_meetups", false, "", {"leisure"},
+      InviteDistribution{DistributionType::FIXED, 1.0, 0.5, 1}, 1.0, 1.0);
+
+  PolicyManager pm(tw.world);
+  auto disease = addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0,
+                                     10.0);
+
+  tw.world.people[0].applicable_temporal_policy_mask = 1;
+  tw.world.people[1].applicable_temporal_policy_mask = 1;
+
+  CoordinatedEncounter enc;
+  enc.encounter_id = 701;
+  enc.host_id = 0;
+  enc.venue_id = 0;  // host's home, venue type "home"
+  enc.venue_type_id = 0;
+  enc.slot = 0;
+  enc.encounter_type_id = 0;
+  enc.participants = {0, 1};
+
+  auto locations = initLocations(tw.world);
+  auto injected = simulateEncounterInjection({enc}, 0, locations, tw.world,
+                                             tw.config, &pm, 5.0);
+
+  CHECK(injected.count(0) == 1);
+  CHECK(injected.count(1) == 1);
+  CHECK(locations[0].encounter_type_id == 0);
+  CHECK(locations[1].encounter_type_id == 0);
+}
+
+TEST_CASE("7i. Venue gate — activity-only policy blocks as it always has") {
+  /**
+   * SCENARIO:
+   *   Same encounter as 7h (ungated home venue), but the policy carries no
+   *   venue types at all. It must still block on the activity alone,
+   *   unchanged by the venue the gate now reads.
+   */
+  auto tw = buildEncounterWorld(
+      2, 1, "pub", "friendships", "pub_meetups", false, "", {"leisure"},
+      InviteDistribution{DistributionType::FIXED, 1.0, 0.5, 1}, 1.0, 1.0);
+
+  PolicyManager pm(tw.world);
+  auto disease =
+      addVenueGatedPolicy(pm, tw.world, {"leisure"}, {}, 0.0, 10.0);
+
+  tw.world.people[0].applicable_temporal_policy_mask = 1;
+  tw.world.people[1].applicable_temporal_policy_mask = 1;
+
+  CoordinatedEncounter enc;
+  enc.encounter_id = 702;
+  enc.host_id = 0;
+  enc.venue_id = 0;
+  enc.venue_type_id = 0;
+  enc.slot = 0;
+  enc.encounter_type_id = 0;
+  enc.participants = {0, 1};
+
+  auto locations = initLocations(tw.world);
+  auto injected = simulateEncounterInjection({enc}, 0, locations, tw.world,
+                                             tw.config, &pm, 5.0);
+
+  CHECK(injected.empty());
 }
 
 // =============================================================================
