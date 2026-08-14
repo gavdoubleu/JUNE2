@@ -362,6 +362,18 @@ bool mirrorSuppressed(const FollowConfig& fc, int16_t host_activity,
   return false;
 }
 
+bool policySuppressesMirror(PolicyManager* policy_manager, Person& follower,
+                            const PersonLocation& follower_location,
+                            VenueId host_venue, double current_time,
+                            int time_slot_index) {
+  if (!policy_manager) return false;
+  return policy_manager
+      ->getOverride(follower, follower_location.activity_index, host_venue,
+                    follower_location.subset_index, current_time,
+                    time_slot_index)
+      .has_value();
+}
+
 // The host's candidate pool: co-members of its venue of the configured type, or
 // its partners in the configured network. Both return global PersonIds; callers
 // enrol only those local to this rank (remote network partners are routed
@@ -844,13 +856,15 @@ void Simulator::processFollowRule(
                                         host_venue_type, floc.activity_index))
       continue;
     // The follower's own policy wins. If a policy would move them (sick and
-    // sent home, say), leave them where the policy put them.
-    if (policy_manager_ &&
-        policy_manager_
-            ->getOverride(world_.people[fi->second], floc.activity_index,
-                          floc.venue_id, floc.subset_index,
-                          current_simulation_time_, time_slot_index)
-            .has_value())
+    // sent home, say), leave them where the policy put them. The question is
+    // asked about the host's venue, since that is where the mirror is about to
+    // put them; a venue-gated policy asked about their own venue would miss.
+    // Only the named leg is gated — a partial-presence host's other legs are
+    // handled by the venue exceptions below.
+    if (follow_detail::policySuppressesMirror(
+            policy_manager_.get(), world_.people[fi->second], floc,
+            hl->second.venue,
+            current_simulation_time_, time_slot_index))
       continue;
 
     // Travelling with the host means riding the host's whole journey, not the

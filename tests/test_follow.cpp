@@ -498,3 +498,141 @@ TEST_CASE("the three exceptions are ORed") {
   CHECK(follow_detail::mirrorSuppressed(fc, 2, 3, 1) == true);   // own activity
   CHECK(follow_detail::mirrorSuppressed(fc, 2, 3, 4) == false);  // none fire
 }
+
+// ===========================================================================
+// Policy against the mirror
+// ===========================================================================
+//
+// The mirror moves the follower to the host's venue, so the policy question is
+// about that venue, not the one the follower is scheduled to. A venue-gated
+// policy (close_pubs: leisure at pub) asked about the follower's own grocery
+// would wave them through, straight into the closed pub.
+
+namespace {
+
+constexpr int16_t kResidenceActivity = 0;
+constexpr int16_t kLeisureActivity = 1;
+
+constexpr VenueId kHomeVenue = 0;
+constexpr VenueId kPubVenue = 1;
+constexpr VenueId kGroceryVenue = 2;
+
+// One person: residence at home, leisure reachable at the grocery. Venue types
+// household=0, pub=1, grocery=2, so a gate naming "pub" bites on kPubVenue
+// alone.
+WorldState buildGateWorld() {
+  WorldState world;
+  world.venue_type_names = {"household", "pub", "grocery"};
+  world.activity_names = {"residence", "leisure"};
+  world.geo_level_names = {"city"};
+  world.person_property_names = {"age"};
+  GeographicalUnit gu;
+  gu.id = 0;
+  gu.name = "g";
+  gu.level_id = 0;
+  gu.parent_id = -1;
+  world.geo_units.push_back(gu);
+
+  for (int i = 0; i < 3; ++i) {
+    Venue v;
+    v.id = i;
+    v.type_id = static_cast<uint8_t>(i);
+    v.geo_unit_id = 0;
+    v.parent_id = -1;
+    v.is_residence = (i == kHomeVenue);
+    world.venues.push_back(v);
+  }
+
+  Person& follower = world.people.emplace_back();
+  follower.id = 0;
+  follower.age = 30.f;
+  follower.geo_unit_id = 0;
+  follower.activity_meta_start = 0;
+  follower.activity_meta_count = 2;
+  for (VenueId venue : {kHomeVenue, kGroceryVenue}) {
+    Person::ActivityMeta meta;
+    meta.activity_index =
+        (venue == kHomeVenue) ? kResidenceActivity : kLeisureActivity;
+    meta.venue_start = static_cast<uint32_t>(world.activity_venues.size());
+    meta.venue_count = 1;
+    world.activity_venues.push_back({venue, /*subset=*/0});
+    world.activity_meta.push_back(meta);
+  }
+  // Normally set by precomputePolicyApplicability.
+  follower.applicable_temporal_policy_mask = 1;
+
+  world.buildIndices();
+  return world;
+}
+
+// A policy sending the named activities home, gated to the named venue types
+// (empty = ungated, the activity-only behaviour that predates the gate).
+void addClosurePolicy(PolicyManager& policy_manager, WorldState& world,
+                      const std::vector<std::string>& activities,
+                      const std::vector<std::string>& venue_types) {
+  TemporalPolicy policy;
+  policy.name = "close_pubs";
+  policy.start_time = 0.0;
+  policy.end_time = 10.0;
+  policy.action.override_activities.insert(activities.begin(),
+                                           activities.end());
+  policy.action.override_venue_types.insert(venue_types.begin(),
+                                            venue_types.end());
+  policy.action.replacement_activity = "residence";
+  policy.action.compliance_rate = 1.0;
+  policy.resolve(world);
+  policy_manager.addTemporalPolicy(policy);
+}
+
+// The follower out at the grocery for leisure — the location the mirror is
+// about to overwrite.
+PersonLocation groceryLeisure() {
+  PersonLocation location;
+  location.person_id = 0;
+  location.venue_id = kGroceryVenue;
+  location.subset_index = 0;
+  location.activity_index = kLeisureActivity;
+  return location;
+}
+
+}  // namespace
+
+TEST_CASE("a venue-gated policy on the host's venue stops the mirror") {
+  WorldState world = buildGateWorld();
+  PolicyManager policy_manager(world);
+  addClosurePolicy(policy_manager, world, {"leisure"}, {"pub"});
+  PersonLocation location = groceryLeisure();
+
+  // REGRESSION: asked about the follower's own grocery the gate does not
+  // match, and the follower is mirrored into the closed pub.
+  CHECK(follow_detail::policySuppressesMirror(&policy_manager, world.people[0],
+                                              location, kPubVenue, 5.0,
+                                              0) == true);
+
+  // Same policy, host somewhere the gate does not name: the mirror stands.
+  CHECK(follow_detail::policySuppressesMirror(&policy_manager, world.people[0],
+                                              location, kGroceryVenue, 5.0,
+                                              0) == false);
+}
+
+TEST_CASE("an activity-only policy stops the mirror wherever the host is") {
+  WorldState world = buildGateWorld();
+  PolicyManager policy_manager(world);
+  addClosurePolicy(policy_manager, world, {"leisure"}, {});
+  PersonLocation location = groceryLeisure();
+
+  CHECK(follow_detail::policySuppressesMirror(&policy_manager, world.people[0],
+                                              location, kPubVenue, 5.0,
+                                              0) == true);
+  CHECK(follow_detail::policySuppressesMirror(&policy_manager, world.people[0],
+                                              location, kGroceryVenue, 5.0,
+                                              0) == true);
+}
+
+TEST_CASE("with no policy manager the mirror always stands") {
+  WorldState world = buildGateWorld();
+  PersonLocation location = groceryLeisure();
+  CHECK(follow_detail::policySuppressesMirror(nullptr, world.people[0],
+                                              location, kPubVenue, 5.0,
+                                              0) == false);
+}

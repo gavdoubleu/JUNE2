@@ -9,6 +9,7 @@
 #include "core/config.h"
 #include "core/types.h"
 #include "core/world_state.h"
+#include "epidemiology/policy.h"
 
 // Internal helpers of the follow subsystem, exposed here only so the follow
 // unit tests can drive the binding logic directly on a synthetic world. The
@@ -50,6 +51,17 @@ void rebuildCriteriaBindings(
 // for an activity the person does not have this slot.
 bool mirrorSuppressed(const FollowConfig& fc, int16_t host_activity,
                       uint8_t host_venue_type, int16_t follower_activity);
+
+// Does the follower's own policy outrank the mirror? The venue put to the
+// policy is the host's — the venue the mirror is about to move the follower
+// to — not the follower's own scheduled one, so a venue-gated policy sees
+// where the follower would end up. The activity and subset stay the
+// follower's, since the mirror leaves those alone. True means a policy fires
+// and the follower stays where the policy put them.
+bool policySuppressesMirror(PolicyManager* policy_manager, Person& follower,
+                            const PersonLocation& follower_location,
+                            VenueId host_venue, double current_time,
+                            int time_slot_index);
 
 // Stochastic enrolment: each host rolls once and gathers followers from its
 // pool. Returns {hosts that gained followers, total local followers enrolled}.
