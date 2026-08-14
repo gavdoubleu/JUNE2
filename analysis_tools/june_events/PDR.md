@@ -90,8 +90,10 @@ def load_venues_lookup(path: str) -> Optional[pd.DataFrame]
 
 `decode/sentinels.py`
 ```python
-SEED_VENUE_ID = -999          # INFECTION_SEED_VENUE_ID in the engine
-UNSET_REGISTRY_INDEX = 255    # unset uint8 registry index
+SEED_VENUE_ID = -999              # INFECTION_SEED_VENUE_ID in the engine
+NO_INFECTOR_ID = -1               # kInvalidPersonId, as used for infector_id
+DEFAULT_ENCOUNTER_TYPE_ID = 255   # kDefaultEncounterTypeId (encounter_type_id)
+NO_SYMPTOM_ID = 255               # kNoSymptomId (infector_symptom_id)
 ```
 
 `decode/registries.py`
@@ -101,7 +103,7 @@ def decode_registry_column(
     df: pd.DataFrame,
     id_column: str,
     registry: list[str],
-    unset_value: int = UNSET_REGISTRY_INDEX,
+    unset_value: int | None = None,
     unset_label: str = "unknown",
     no_match_label: str = "not_recorded",
 ) -> pd.Series
@@ -217,13 +219,17 @@ def load_enriched_events(
 - Root-level HDF5 attrs are empty on every file inspected — there is no
   schema-version marker in the file itself. `inspect_file()` is the only way
   to discover what a given file actually contains.
-- Sentinels confirmed against `include/core/types.h`: `INFECTION_SEED_VENUE_ID
-  = -999` (int32 `venue_id`), `255` (uint8 registry-index unset, e.g.
-  `encounter_type_id`). `symptom_id`/`infector_symptom_id` (`uint16`) default
-  to `0` — a real registry index (`symptoms[0]`), not a sentinel — so
-  `decode_registry_column` is never called with an unset value on those
-  columns; `UNSET_REGISTRY_INDEX` only applies to uint8 registry indices like
-  `encounter_type_id`.
+- Sentinels confirmed against `include/core/types.h` /
+  `include/utils/event_logging/event_types.h` (as of the "Consistent
+  sentinels" rollout, #16): `INFECTION_SEED_VENUE_ID = -999` (int32
+  `venue_id`); `255` (uint8 registry-index unset) covers two distinct engine
+  constants — `kDefaultEncounterTypeId` (`encounter_type_id`) and
+  `kNoSymptomId` (`infector_symptom_id`, narrowed uint16_t -> uint8_t in the
+  same rollout, written directly by the engine for seed/fomite/compartmental
+  infections that have no infector to read a symptom from).
+  `old_symptom_id`/`new_symptom_id` are always a real logged transition, no
+  sentinel, so `decode_registry_column` is never called with an unset value
+  on those two columns.
 - `chunk_threshold_bytes = 500_000_000` / `chunk_rows = 5_000_000` confirmed as
   final defaults (Phase 2) — kept as a safety net per ADR-0004 even though no
   in-scope table on any inspected run reaches the threshold.

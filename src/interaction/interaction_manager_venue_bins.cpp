@@ -22,7 +22,7 @@ void InteractionManager::clearUsedBins(int num_modes) {
 
 std::vector<double> InteractionManager::binMembersAndPrepareBuffers(
     const std::vector<InteractionMember>& members, Venue* venue,
-    const ContactMatrix* matrix, int num_bins_needed, int num_modes,
+    const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
     int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
     const std::vector<int>& n_sub_per_mode, double current_time,
     double delta_hours, uint8_t encounter_type_id,
@@ -30,7 +30,7 @@ std::vector<double> InteractionManager::binMembersAndPrepareBuffers(
     const std::unordered_map<PersonId, VisitorInfo>* visitor_data) {
   // Pass 1: bin each member by contact-matrix row.
   for (const auto& member : members) {
-    binOneMember(member, venue, matrix, num_bins_needed, num_modes,
+    binOneMember(member, venue, bin_structure, num_bins_needed, num_modes,
                  num_fomite_modes, fomite_modes, n_sub_per_mode, current_time,
                  delta_hours, encounter_type_id, venue_type, venue_type_id,
                  visitor_data);
@@ -83,8 +83,7 @@ InteractionManager::getParentAggregateForVenue(
   auto pit = parent_aggregates_.find(venue->parent_id);
   if (pit == parent_aggregates_.end()) return {nullptr, nullptr};
   const ContactMatrix* parent_flat_matrix =
-      contact_matrices_.getMatrix(pit->second.parent_venue_type_id);
-  if (!parent_flat_matrix) return {nullptr, nullptr};
+      &contact_matrices_.getBinStructure(pit->second.parent_venue_type_id);
   // V1 supports single-bin parent matrices only. The currently shipped
   // YAML (school/company/university) all use `bins: [all]`. A multi-
   // bin parent matrix would require per-susceptible parent_bin lookup
@@ -240,12 +239,12 @@ void InteractionManager::binMemberClassification(
 
 int InteractionManager::resolveMemberBinIndex(
     const InteractionMember& member, const Person* person, Venue* venue,
-    const ContactMatrix* matrix, int num_bins_needed, uint8_t encounter_type_id,
-    [[maybe_unused]] const std::string& venue_type,
+    const ContactMatrix& bin_structure, int num_bins_needed,
+    uint8_t encounter_type_id, [[maybe_unused]] const std::string& venue_type,
     [[maybe_unused]] uint8_t venue_type_id) {
-  if (matrix) stats_.bin_lookups++;
+  stats_.bin_lookups++;
   int bin_index = computeBinIndexForMatrix(person, venue, member.subset_index,
-                                           matrix, num_bins_needed);
+                                           &bin_structure, num_bins_needed);
   if (bin_index >= 0 && bin_index < num_bins_needed) return bin_index;
 
 #ifdef DEBUG_TRANSMISSION
@@ -271,9 +270,9 @@ int InteractionManager::resolveMemberBinIndex(
 }
 
 void InteractionManager::binOneMember(
-    const InteractionMember& member, Venue* venue, const ContactMatrix* matrix,
-    int num_bins_needed, int num_modes, int num_fomite_modes,
-    const std::vector<FomiteModeRef>& fomite_modes,
+    const InteractionMember& member, Venue* venue,
+    const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
+    int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
     const std::vector<int>& n_sub_per_mode, double current_time,
     double delta_hours, uint8_t encounter_type_id,
     const std::string& venue_type, uint8_t venue_type_id,
@@ -287,9 +286,9 @@ void InteractionManager::binOneMember(
     person = world_.getPerson(pid);
   }
 
-  int bin_index =
-      resolveMemberBinIndex(member, person, venue, matrix, num_bins_needed,
-                            encounter_type_id, venue_type, venue_type_id);
+  int bin_index = resolveMemberBinIndex(member, person, venue, bin_structure,
+                                        num_bins_needed, encounter_type_id,
+                                        venue_type, venue_type_id);
 
   // Track which bins are used (for selective clearing next call)
   if (bins_buffer_[bin_index].total_size == 0) {
@@ -468,14 +467,14 @@ void InteractionManager::resolveVenueTypeAndMatrix(
     } else {
       venue_type_out = world_.encounter_type_names[encounter_type_id];
     }
-    matrix_out = contact_matrices_.getVirtualMatrix(encounter_type_id);
+    matrix_out = &contact_matrices_.getVirtualBinStructure(encounter_type_id);
   } else if (venue) {
     venue_type_id_out = venue->type_id;
     if (venue_type_id_out < world_.venue_type_names.size()) {
       venue_type_out = world_.venue_type_names[venue_type_id_out];
     }
     stats_.matrix_lookups++;
-    matrix_out = contact_matrices_.getMatrix(venue_type_id_out);
+    matrix_out = &contact_matrices_.getBinStructure(venue_type_id_out);
   }
 }
 

@@ -219,7 +219,7 @@ Two modes are supported, chosen by the top-level `mode:` key:
 
 Within each mode you list `modes:` (the **transmission modes** —
 `respiratory`, `physical_contact`, `fomite`, etc.). Each gets its own
-`susceptibility_multiplier`. **The per-mode `beta` is not here** — it's
+`mode_transmissibility_multiplier`. **The per-mode `beta` is not here** — it's
 in `contact_matrices.yaml`, per venue.
 
 ### 4.5 Immunity
@@ -272,7 +272,7 @@ Each venue declares one block per transmission mode:
 
 The simulator multiplies these: `effective[i][j] = beta * contacts[i][j]`.
 
-> **Don't double-count.** The `mode_susceptibility_multiplier` in
+> **Don't double-count.** The `mode_transmissibility_multiplier` in
 > `disease.yaml` is folded into per-venue `beta` here. Leave it at 1.0
 > in `disease.yaml` unless you know what you're doing.
 

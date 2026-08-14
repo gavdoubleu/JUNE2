@@ -1,0 +1,6 @@
+contact_matrices:
+  household:
+    beta: 3.0
+    contacts:
+      - [2.5]
+    bins: ["residents"]

@@ -1,10 +1,8 @@
 import logging
 
-import pandas as pd
-
 from .decode import (
-    NO_INFECTOR_ID,
-    UNSET_REGISTRY_INDEX,
+    DEFAULT_ENCOUNTER_TYPE_ID,
+    NO_SYMPTOM_ID,
     decode_registry_column,
     load_registry,
 )
@@ -20,40 +18,31 @@ DEFAULT_REGISTRY_COLUMNS = {
     "new_symptom_id": "symptoms",
 }
 
-# Only encounter_type_id has a real engine-side sentinel (uint8_t default 255,
-# event_logger.h). The symptom_id columns default to 0 ("recovered") — a real
-# registry entry, not a sentinel — so they get no entry here; decode_registry_column
-# then treats every index as ordinary registry data.
+# encounter_type_id and infector_symptom_id each have a real engine-side
+# sentinel (uint8_t 255, event_types.h/types.h — kDefaultEncounterTypeId,
+# kNoSymptomId), written directly by the engine (no NaN-masking needed on
+# this side). old_symptom_id/new_symptom_id are always a real transition, no
+# sentinel, so they get no entry here — decode_registry_column then treats
+# every index as ordinary registry data.
 REGISTRY_SENTINELS = {
-    "encounter_type_id": UNSET_REGISTRY_INDEX,
+    "encounter_type_id": DEFAULT_ENCOUNTER_TYPE_ID,
+    "infector_symptom_id": NO_SYMPTOM_ID,
 }
 
-# encounter_type_id's UNSET_REGISTRY_INDEX sentinel means "ordinary venue-level
-# force of infection", not a missing value — decode_registry_column's generic
-# "unknown" would understate the majority case.
+# Each sentinel means something more specific than decode_registry_column's
+# generic "unknown": encounter_type_id's is the majority "ordinary venue-level
+# force of infection" case, not a missing value; infector_symptom_id's is "no
+# infector to read a symptom from" (seed/fomite/compartmental infections).
 UNSET_LABEL_OVERRIDES = {
     "encounter_type_id": "regular_non_coordinated_encounter",
+    "infector_symptom_id": "no_infector",
 }
-
-NO_INFECTOR_LABEL = "no_infector"
 
 
 def _decoded_column_name(id_column: str) -> str:
     if id_column.endswith("_id"):
         return id_column[: -len("_id")]
     return id_column
-
-
-def _mask_infector_symptom_for_no_infector(events):
-    # infector_symptom_id defaults to 0 ("recovered") whenever infector_id is
-    # -1 (seed/fomite/compartmental infections) — the engine has no infector
-    # to read a symptom from. Mask those rows before registry decode so they
-    # don't come back as a fabricated "recovered" infector.
-    if "infector_id" not in events.columns or "infector_symptom_id" not in events.columns:
-        return events
-    events = events.copy()
-    events.loc[events["infector_id"] == NO_INFECTOR_ID, "infector_symptom_id"] = pd.NA
-    return events
 
 
 def load_enriched_events(
@@ -72,8 +61,6 @@ def load_enriched_events(
 
     if registry_columns is None:
         registry_columns = DEFAULT_REGISTRY_COLUMNS
-
-    events = _mask_infector_symptom_for_no_infector(events)
 
     loaded_registries = {}
     for id_column, registry_name in registry_columns.items():
@@ -95,8 +82,6 @@ def load_enriched_events(
             decode_kwargs["unset_value"] = REGISTRY_SENTINELS[id_column]
         if id_column in UNSET_LABEL_OVERRIDES:
             decode_kwargs["unset_label"] = UNSET_LABEL_OVERRIDES[id_column]
-        if id_column == "infector_symptom_id":
-            decode_kwargs["no_match_label"] = NO_INFECTOR_LABEL
         events[_decoded_column_name(id_column)] = decode_registry_column(
             events, id_column, registry, **decode_kwargs
         )

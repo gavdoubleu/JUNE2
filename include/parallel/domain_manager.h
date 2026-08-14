@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "activity/runtime_bin_allocator.h"
+#include "activity/runtime_group_allocator.h"
 #include "core/config.h"
 #include "core/world_state.h"
 #include "domain.h"
@@ -49,7 +49,7 @@ class DomainManager {
   // Delegated exchanges
   void exchangeVisitors(const std::vector<PersonLocation>& locations,
                         double current_time, double delta_hours = 0.0,
-                        const RuntimeBinAllocator* alloc = nullptr);
+                        const RuntimeGroupAllocator* alloc = nullptr);
   std::unordered_set<PersonId> getVisitorIds() const;
   std::vector<PendingInfection> receivePendingInfections(
       const std::vector<PendingInfection>& pending_infections);

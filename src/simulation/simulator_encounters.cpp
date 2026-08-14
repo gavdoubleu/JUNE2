@@ -769,9 +769,10 @@ void Simulator::injectFollowsIntoSlot(int time_slot_index) {
   }
 
   // Followers bound for a line take over their host's rider entries, so they
-  // board the same carriages at the same time. Done once for all rules, since
-  // it costs one exchange between ranks.
-  if (runtime_bin_allocator_) runtime_bin_allocator_->attachFollowers(cotravel);
+  // board the same runtime groups at the same time. Done once for all rules,
+  // since it costs one exchange between ranks.
+  if (runtime_group_allocator_)
+    runtime_group_allocator_->attachFollowers(cotravel);
 }
 
 void Simulator::processFollowRule(
@@ -951,15 +952,15 @@ void Simulator::processFollowRule(
     // if any leg of it is a venue type this rule excepts, the follower stays on
     // its own schedule, because a child cannot be dropped at a bus stop and
     // rejoin two legs later.
-    if (runtime_bin_allocator_ &&
-        runtime_bin_allocator_->isPartialPresenceVenue(hl->second.venue)) {
-      const auto& legs = runtime_bin_allocator_->legsOf(host);
+    if (runtime_group_allocator_ &&
+        runtime_group_allocator_->isPartialPresenceVenue(hl->second.venue)) {
+      const auto& legs = runtime_group_allocator_->legsOf(host);
       bool excepted = false;
       for (VenueId leg : legs) {
         // The host's line may belong to another rank, whose venue types this
         // rank does not hold, so take the type the rider broadcast carried.
         if (follow_detail::venueExcepted(
-                fc, runtime_bin_allocator_->venueTypeOf(leg))) {
+                fc, runtime_group_allocator_->venueTypeOf(leg))) {
           excepted = true;
           break;
         }

@@ -339,169 +339,317 @@ void SimulationConfig::resolve(const WorldState& world) {
   }
 }
 
-void ContactMatrixConfig::resolve(const WorldState& world) {
-  const auto& venue_names = world.venue_type_names;
-  betas_by_id.assign(venue_names.size(), default_beta);
-  matrices_by_id.assign(venue_names.size(), nullptr);
+namespace {
 
+// Fills in male_bin/female_bin/bin_by_subset_type/age_to_bin for one matrix
+// against a resolved WorldState. Called (via resolve_matrix_bins, which
+// adds per-call dedup) from ContactMatrixConfig::resolve(), and directly
+// from ContactMatrixConfig::finalizeDefaultModeMatrices() so both paths keep
+// matrices reachable only via the default fallback correctly bin-resolved.
+void resolveContactMatrixBins(ContactMatrix& matrix, const WorldState& world) {
+  std::fill(std::begin(matrix.age_to_bin), std::end(matrix.age_to_bin), -1);
+  matrix.has_age_bins = false;
+  for (size_t b = 0; b < matrix.bins.size(); ++b) {
+    const std::string& bin_name = matrix.bins[b];
+    int min_age = -1, max_age = -1;
+    if (!bin_name.empty()) {
+      if (bin_name.back() == '+') {
+        try {
+          min_age = std::stoi(bin_name.substr(0, bin_name.size() - 1));
+          max_age = 99;
+        } catch (...) {
+        }
+      } else {
+        size_t sep_pos = bin_name.find_first_of("-,");
+        if (sep_pos != std::string::npos) {
+          try {
+            size_t start_pos = (bin_name[0] == '[') ? 1 : 0;
+            min_age =
+                std::stoi(bin_name.substr(start_pos, sep_pos - start_pos));
+            size_t end_pos = bin_name.find(']', sep_pos + 1);
+            if (end_pos == std::string::npos) end_pos = bin_name.size();
+            max_age =
+                std::stoi(bin_name.substr(sep_pos + 1, end_pos - sep_pos - 1));
+          } catch (...) {
+            min_age = -1;
+            max_age = -1;
+          }
+        }
+      }
+    }
+    if (min_age >= 0 && max_age >= min_age) {
+      matrix.has_age_bins = true;
+      for (int a = std::max(0, min_age); a <= std::min(99, max_age); ++a) {
+        if (matrix.age_to_bin[a] < 0) {
+          matrix.age_to_bin[a] = static_cast<int>(b);
+        }
+      }
+    }
+  }
+  matrix.male_bin = matrix.findBinIndex("male");
+  matrix.female_bin = matrix.findBinIndex("female");
+  matrix.bin_by_subset_type.assign(world.subset_type_names.size(), -1);
+  for (size_t st = 0; st < world.subset_type_names.size(); ++st) {
+    matrix.bin_by_subset_type[st] =
+        matrix.findBinIndex(world.subset_type_names[st]);
+  }
+}
+
+}  // namespace
+
+void ContactMatrixConfig::resolve(const WorldState& world) {
+  betas_by_id.assign(world.venue_type_names.size(), default_beta);
   for (const auto& [name, beta] : betas) {
     int idx = world.getVenueTypeIndex(name);
-    if (idx >= 0 && idx < (int)betas_by_id.size()) {
-      betas_by_id[idx] = beta;
-    }
+    if (idx >= 0 && idx < (int)betas_by_id.size()) betas_by_id[idx] = beta;
   }
 
-  // Helper lambda to resolve age_to_bin for a ContactMatrix
-  auto resolveAgeToBin = [](ContactMatrix& matrix) {
-    std::fill(std::begin(matrix.age_to_bin), std::end(matrix.age_to_bin), -1);
-    matrix.has_age_bins = false;
-    for (size_t b = 0; b < matrix.bins.size(); ++b) {
-      const std::string& bin_name = matrix.bins[b];
-      int min_age = -1, max_age = -1;
-      if (!bin_name.empty()) {
-        if (bin_name.back() == '+') {
-          try {
-            min_age = std::stoi(bin_name.substr(0, bin_name.size() - 1));
-            max_age = 99;
-          } catch (...) {
-          }
-        } else {
-          size_t sep_pos = bin_name.find_first_of("-,");
-          if (sep_pos != std::string::npos) {
-            try {
-              size_t start_pos = (bin_name[0] == '[') ? 1 : 0;
-              min_age =
-                  std::stoi(bin_name.substr(start_pos, sep_pos - start_pos));
-              size_t end_pos = bin_name.find(']', sep_pos + 1);
-              if (end_pos == std::string::npos) end_pos = bin_name.size();
-              max_age = std::stoi(
-                  bin_name.substr(sep_pos + 1, end_pos - sep_pos - 1));
-            } catch (...) {
-              min_age = -1;
-              max_age = -1;
-            }
-          }
-        }
-      }
-      if (min_age >= 0 && max_age >= min_age) {
-        matrix.has_age_bins = true;
-        for (int a = std::max(0, min_age); a <= std::min(99, max_age); ++a) {
-          if (matrix.age_to_bin[a] < 0) {
-            matrix.age_to_bin[a] = static_cast<int>(b);
-          }
-        }
-      }
-    }
-  };
-
-  for (auto& [name, matrix] : matrices) {
-    int idx = world.getVenueTypeIndex(name);
-    if (idx >= 0 && idx < (int)matrices_by_id.size()) {
-      matrices_by_id[idx] = &matrix;
-    }
-
-    // Pre-resolve bin lookups for this matrix
-    matrix.male_bin = matrix.findBinIndex("male");
-    matrix.female_bin = matrix.findBinIndex("female");
-
-    // Pre-resolve subset_type -> bin mapping
-    matrix.bin_by_subset_type.assign(world.subset_type_names.size(), -1);
-    for (size_t st = 0; st < world.subset_type_names.size(); ++st) {
-      matrix.bin_by_subset_type[st] =
-          matrix.findBinIndex(world.subset_type_names[st]);
-    }
-
-    // Pre-resolve age -> bin index lookup table
-    resolveAgeToBin(matrix);
-  }
-
-  // Populate mode_matrices_by_id for per-mode contact matrix lookups.
-  // mode_matrices[venue_type][mode_name] → ContactMatrix
-  if (!mode_matrices.empty() && !mode_names.empty()) {
-    int n_modes = static_cast<int>(mode_names.size());
-    mode_matrices_by_id.assign(
-        venue_names.size(),
-        std::vector<const ContactMatrix*>(n_modes, nullptr));
-
-    for (auto& [venue_name, mode_map] : mode_matrices) {
-      int venue_idx = world.getVenueTypeIndex(venue_name);
-      if (venue_idx < 0 || venue_idx >= (int)venue_names.size()) continue;
-
-      for (int m = 0; m < n_modes; ++m) {
-        auto it = mode_map.find(mode_names[m]);
-        if (it != mode_map.end()) {
-          mode_matrices_by_id[venue_idx][m] = &it->second;
-          // Pre-resolve bin lookups for mode matrices too
-          auto& cm = it->second;
-          cm.male_bin = cm.findBinIndex("male");
-          cm.female_bin = cm.findBinIndex("female");
-          cm.bin_by_subset_type.assign(world.subset_type_names.size(), -1);
-          for (size_t st = 0; st < world.subset_type_names.size(); ++st) {
-            cm.bin_by_subset_type[st] =
-                cm.findBinIndex(world.subset_type_names[st]);
-          }
-          resolveAgeToBin(cm);
-        }
-      }
-    }
-  }
-
-  // Populate encounter-id-indexed virtual-encounter matrix arrays.
-  // Virtual encounter matrices (e.g. "group_sex", "romantic_encounter")
-  // are stored under string keys in `matrices` / `mode_matrices` but don't
-  // correspond to any venue type, so they never reach `matrices_by_id` /
-  // `mode_matrices_by_id` above. Build a parallel integer-indexed lookup
-  // keyed by encounter_type_id so the transmission hot path in
-  // InteractionManager::processVenueTransmissions stays branch-and-index
-  // without string work. Uses `virtual_matrix_names`, which was built by
-  // CoordinatedEncounterConfig::resolve from each is_virtual encounter's
-  // virtual_contact_matrix field.
-  const size_t n_enc_types = world.encounter_type_names.size();
-  virtual_matrices_by_encounter_id.assign(n_enc_types, nullptr);
-  const int n_modes_virtual = static_cast<int>(mode_names.size());
-  if (n_modes_virtual > 0) {
-    virtual_mode_matrices_by_encounter_id.assign(
-        n_enc_types,
-        std::vector<const ContactMatrix*>(n_modes_virtual, nullptr));
-  } else {
-    virtual_mode_matrices_by_encounter_id.clear();
-  }
-
-  // Track which matrices we've already bin-resolved so we don't redo the
-  // work when several virtual encounter types alias onto the same matrix
-  // (e.g. ooe_encounter, romantic_encounters, cohabiting_encounters all
-  // point at "romantic_encounter").
+  // Resolve every matrix's bin fields against this world, whatever it is
+  // keyed under. finalizeResolvedMatrices picks matrices out of these same
+  // containers by name, so covering the containers covers everything that
+  // can end up in the resolved table -- venue types, virtual encounters and
+  // the defaults alike.
+  //
+  // Several keys often alias one matrix (ooe_encounter, romantic_encounters
+  // and cohabiting_encounters all point at "romantic_encounter"), so track
+  // what has been done rather than resolving the same matrix repeatedly.
   std::unordered_set<const ContactMatrix*> bin_resolved;
-
   auto resolve_matrix_bins = [&](ContactMatrix& cm) {
     if (!bin_resolved.insert(&cm).second) return;
-    cm.male_bin = cm.findBinIndex("male");
-    cm.female_bin = cm.findBinIndex("female");
-    cm.bin_by_subset_type.assign(world.subset_type_names.size(), -1);
-    for (size_t st = 0; st < world.subset_type_names.size(); ++st) {
-      cm.bin_by_subset_type[st] = cm.findBinIndex(world.subset_type_names[st]);
-    }
-    resolveAgeToBin(cm);
+    resolveContactMatrixBins(cm, world);
   };
 
-  for (const auto& [eid, matrix_name] : virtual_matrix_names) {
-    if (static_cast<size_t>(eid) >= n_enc_types) continue;
+  for (auto& [name, matrix] : matrices) resolve_matrix_bins(matrix);
+  for (auto& [venue_name, mode_map] : mode_matrices) {
+    for (auto& [mode_name, matrix] : mode_map) resolve_matrix_bins(matrix);
+  }
+  if (default_matrix.has_value()) resolve_matrix_bins(default_matrix.value());
+  if (default_mode_matrices.has_value()) {
+    for (auto& [mode_name, matrix] : *default_mode_matrices) {
+      resolve_matrix_bins(matrix);
+    }
+  }
+}
 
-    auto flat_it = matrices.find(matrix_name);
-    if (flat_it != matrices.end()) {
-      virtual_matrices_by_encounter_id[eid] = &flat_it->second;
-      resolve_matrix_bins(flat_it->second);
+void ContactMatrixConfig::finalizeDefaultModeMatrices(
+    const WorldState& world,
+    const std::vector<std::string>& disease_mode_names) {
+  default_mode_matrices_by_id.assign(disease_mode_names.size(), nullptr);
+
+  std::vector<std::string> missing_modes;
+  for (size_t m = 0; m < disease_mode_names.size(); ++m) {
+    const std::string& mode_name = disease_mode_names[m];
+    if (default_mode_matrices.has_value()) {
+      auto it = default_mode_matrices->find(mode_name);
+      if (it != default_mode_matrices->end()) {
+        default_mode_matrices_by_id[m] = &it->second;
+        resolveContactMatrixBins(it->second, world);
+        continue;
+      }
+    }
+    if (!default_matrix.has_value()) {
+      missing_modes.push_back(mode_name);
+    }
+  }
+
+  if (!missing_modes.empty()) {
+    std::string missing_list;
+    for (size_t i = 0; i < missing_modes.size(); ++i) {
+      if (i) missing_list += ", ";
+      missing_list += missing_modes[i];
+    }
+    throw std::runtime_error(
+        "default_contacts_matrix has no entry for disease mode(s): " +
+        missing_list + " (and no flat default_matrix to fall back on).");
+  }
+}
+
+void ContactMatrixConfig::throwUnresolved(const char* what, int id,
+                                          int mode_index) const {
+  std::string msg = "contact matrix lookup for " + std::string(what) + " " +
+                    std::to_string(id);
+  if (mode_index >= 0) msg += ", mode index " + std::to_string(mode_index);
+  msg +=
+      " has no resolved entry. Every id a world registry produces is resolved "
+      "at load, so this id did not come from one.";
+  throw std::runtime_error(msg);
+}
+
+namespace {
+
+// A pair that had to borrow the scenario default, for the load-time report.
+struct BorrowedDefault {
+  std::string type_name;
+  std::string mode_name;
+};
+
+std::string joinBorrowed(const std::vector<BorrowedDefault>& borrowed) {
+  std::string out;
+  for (const auto& b : borrowed) {
+    out += "\n  - " + b.type_name + " / " + b.mode_name;
+  }
+  return out;
+}
+
+}  // namespace
+
+void ContactMatrixConfig::finalizeResolvedMatrices(
+    const WorldState& world,
+    const std::vector<std::string>& disease_mode_names) {
+  // A disease that declares no modes still transmits through one unnamed
+  // channel, and the FOI loop still asks for mode 0, so resolve a single
+  // nameless mode for it rather than leaving an empty table behind.
+  const int n_modes = std::max<int>(1, disease_mode_names.size());
+  auto mode_name_at = [&](int m) -> std::string {
+    return m < (int)disease_mode_names.size() ? disease_mode_names[m]
+                                              : std::string();
+  };
+  const size_t n_venue_types = world.venue_type_names.size();
+  const size_t n_enc_types = world.encounter_type_names.size();
+
+  resolved_by_id.assign(n_venue_types,
+                        std::vector<const ContactMatrix*>(n_modes, nullptr));
+  resolved_virtual_by_id.assign(
+      n_enc_types, std::vector<const ContactMatrix*>(n_modes, nullptr));
+  bin_structure_by_id.assign(n_venue_types, nullptr);
+  virtual_bin_structure_by_id.assign(n_enc_types, nullptr);
+
+  std::vector<BorrowedDefault> borrowed;
+
+  // Picks the matrix for one (type, mode), preferring what the scenario said
+  // about this type and falling back to the scenario default only as a last
+  // resort, recording it when it does so.
+  auto resolveOne = [&](const std::string& type_name, int mode_index,
+                        bool is_virtual) -> const ContactMatrix* {
+    const std::string mode_name = mode_name_at(mode_index);
+
+    auto mode_it = mode_matrices.find(type_name);
+    if (mode_it != mode_matrices.end()) {
+      auto it = mode_it->second.find(mode_name);
+      if (it != mode_it->second.end()) return &it->second;
     }
 
-    if (n_modes_virtual <= 0) continue;
-    auto mode_it = mode_matrices.find(matrix_name);
-    if (mode_it == mode_matrices.end()) continue;
-    auto& per_mode = mode_it->second;
-    for (int m = 0; m < n_modes_virtual; ++m) {
-      auto it = per_mode.find(mode_names[m]);
-      if (it == per_mode.end()) continue;
-      virtual_mode_matrices_by_encounter_id[eid][m] = &it->second;
-      resolve_matrix_bins(it->second);
+    auto flat_it = matrices.find(type_name);
+    if (flat_it != matrices.end()) return &flat_it->second;
+
+    borrowed.push_back(
+        {type_name + (is_virtual ? " (encounter type)" : ""), mode_name});
+
+    if (mode_index < (int)default_mode_matrices_by_id.size() &&
+        default_mode_matrices_by_id[mode_index] != nullptr) {
+      return default_mode_matrices_by_id[mode_index];
+    }
+    return default_matrix.has_value() ? &default_matrix.value() : nullptr;
+  };
+
+  // A type's bins say who its occupants are, so they cannot legitimately
+  // change with the transmission route. Disagreement means one of the mode
+  // blocks was edited without the others, which would otherwise surface as
+  // people being scored against the wrong stratum.
+  auto checkBinsAgree = [&](const std::string& type_name,
+                            const std::vector<const ContactMatrix*>& per_mode) {
+    const ContactMatrix* first = nullptr;
+    int first_mode = -1;
+    for (int m = 0; m < n_modes; ++m) {
+      if (per_mode[m] == nullptr) continue;
+      if (!first) {
+        first = per_mode[m];
+        first_mode = m;
+        continue;
+      }
+      if (per_mode[m]->bins != first->bins) {
+        throw std::runtime_error(
+            "contact matrices for '" + type_name +
+            "' disagree about bins between mode '" + mode_name_at(first_mode) +
+            "' and mode '" + mode_name_at(m) +
+            "'. Bins describe who is present, so every mode of a type must "
+            "declare the same ones.");
+      }
+    }
+    return first;
+  };
+
+  std::vector<std::string> unresolved;
+
+  for (size_t v = 0; v < n_venue_types; ++v) {
+    const std::string& name = world.venue_type_names[v];
+    for (int m = 0; m < n_modes; ++m) {
+      resolved_by_id[v][m] = resolveOne(name, m, /*is_virtual=*/false);
+      if (!resolved_by_id[v][m]) unresolved.push_back(name);
+    }
+    bin_structure_by_id[v] = checkBinsAgree(name, resolved_by_id[v]);
+  }
+
+  // Only encounter types held at a virtual venue. One held at a physical
+  // venue mixes under that venue's matrix, so it needs none of its own and
+  // demanding one would refuse a perfectly well-formed scenario. Sorted, so
+  // the pairs reported below come out in the same order on every rank.
+  std::vector<uint8_t> virtual_ids = virtual_encounter_type_ids;
+  std::sort(virtual_ids.begin(), virtual_ids.end());
+  virtual_ids.erase(std::unique(virtual_ids.begin(), virtual_ids.end()),
+                    virtual_ids.end());
+
+  for (uint8_t eid : virtual_ids) {
+    if (static_cast<size_t>(eid) >= n_enc_types) continue;
+    auto name_it = virtual_matrix_names.find(eid);
+    const std::string& matrix_name = name_it != virtual_matrix_names.end()
+                                         ? name_it->second
+                                         : world.encounter_type_names[eid];
+    for (int m = 0; m < n_modes; ++m) {
+      resolved_virtual_by_id[eid][m] =
+          resolveOne(matrix_name, m, /*is_virtual=*/true);
+      if (!resolved_virtual_by_id[eid][m]) unresolved.push_back(matrix_name);
+    }
+    virtual_bin_structure_by_id[eid] =
+        checkBinsAgree(matrix_name, resolved_virtual_by_id[eid]);
+  }
+
+  if (!unresolved.empty()) {
+    throw std::runtime_error(
+        "no contact matrix could be resolved for '" + unresolved.front() +
+        "', and there is no default_contacts_matrix to fall back on.");
+  }
+
+  if (!borrowed.empty() && !allow_default_matrix) {
+    throw std::runtime_error(
+        "these (type, mode) pairs have no contact matrix of their own and "
+        "would silently use default_contacts_matrix:" +
+        joinBorrowed(borrowed) +
+        "\nDeclare a matrix for each, or set 'allow_default_matrix: true' in "
+        "the contact matrices file to accept the default for them.");
+  }
+  if (!borrowed.empty()) {
+    std::cerr << "[contact matrices] using default_contacts_matrix for "
+              << borrowed.size()
+              << " (type, mode) pair(s):" << joinBorrowed(borrowed)
+              << std::endl;
+  }
+
+  resolved_finalized_ = true;
+}
+
+void ContactMatrixConfig::finalizeDiseaseModeAlignment(
+    const std::vector<std::string>& disease_mode_names) {
+  std::unordered_set<std::string> seen_disease_mode_names;
+  for (const auto& name : disease_mode_names) {
+    if (!seen_disease_mode_names.insert(name).second) {
+      throw std::runtime_error(
+          "disease transmission_params.modes has duplicate mode name '" + name +
+          "'; contact-matrix alignment requires unique mode names.");
+    }
+  }
+
+  // A mode this config declares that no disease mode claims is dead weight in
+  // the scenario: nothing will ever look it up. Worth saying so, since it is
+  // usually a rename that only landed on one side.
+  for (size_t m = 0; m < mode_names.size(); ++m) {
+    const bool claimed =
+        std::find(disease_mode_names.begin(), disease_mode_names.end(),
+                  mode_names[m]) != disease_mode_names.end();
+    if (!claimed) {
+      std::cerr << "Warning: contact_matrices.yaml mode '" << mode_names[m]
+                << "' does not match any disease transmission mode; ignoring."
+                << std::endl;
     }
   }
 }
@@ -816,12 +964,21 @@ void CoordinatedEncounterConfig::resolve(
       world.encounter_type_names.push_back(enc.name);
     }
 
-    // Build encounter_type_id -> virtual_contact_matrix name mapping
-    if (enc.is_virtual && !enc.virtual_contact_matrix.empty()) {
+    // Build encounter_type_id -> virtual_contact_matrix name mapping, and
+    // record which encounter types are virtual at all. The second list
+    // deliberately includes virtual encounters that named no matrix: those
+    // are the ones whose matrix is missing or misspelt, and load-time
+    // resolution reports them rather than letting them quietly pick up the
+    // scenario default.
+    if (enc.is_virtual) {
       int type_id = world.getEncounterTypeIndex(enc.name);
       if (type_id >= 0) {
-        contact_matrices.virtual_matrix_names[static_cast<uint8_t>(type_id)] =
-            enc.virtual_contact_matrix;
+        if (!enc.virtual_contact_matrix.empty()) {
+          contact_matrices.virtual_matrix_names[static_cast<uint8_t>(type_id)] =
+              enc.virtual_contact_matrix;
+        }
+        contact_matrices.virtual_encounter_type_ids.push_back(
+            static_cast<uint8_t>(type_id));
       }
     }
 

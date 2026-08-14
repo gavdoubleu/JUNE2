@@ -21,7 +21,7 @@ human_to_compartmental_model_input:
 default_human_to_compartmental_model_input: 0.005
 
 # Per-venue-type FOI scaling: raw plugin output (infectious flea density per node) is
-# multiplied by this scale before applying susceptibility_multiplier.
+# multiplied by this scale before applying mode_transmissibility_multiplier.
 # bins follow the same definition as ContactMatrices and Fomite infections,
 # as defined in the contact matrices .yaml file; currently bin_idx=0 (one value per venue).
 # Calibrate all values against mortality data after initial runs.

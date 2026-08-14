@@ -1,6 +1,7 @@
 #ifdef USE_MPI
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <iomanip>
 #include <iostream>
@@ -17,83 +18,102 @@
 
 namespace {
 
+using june::domain_comm_detail::makeWireRecord;
 using june::domain_comm_detail::packField;
 using june::domain_comm_detail::unpackField;
 
-// Derived from the packed fields' own types (not a hand-maintained literal)
-// so a struct field-type change changes this constant automatically instead
-// of silently desyncing pack/unpack.
-constexpr int PROPOSAL_WIRE_SIZE =
-    sizeof(decltype(june::EncounterProposal::encounter_id)) +
-    sizeof(decltype(june::EncounterProposal::host_id)) +
-    sizeof(decltype(june::EncounterProposal::host_rank)) +
-    sizeof(decltype(june::EncounterProposal::invitee_id)) +
-    sizeof(decltype(june::EncounterProposal::venue_id)) +
-    sizeof(decltype(june::EncounterProposal::venue_owner_rank)) +
-    sizeof(decltype(june::EncounterProposal::venue_type_id)) +
-    sizeof(decltype(june::EncounterProposal::slot)) +
-    sizeof(decltype(june::EncounterProposal::encounter_type_id));
+// Single field list per record type; wire size, pack, and unpack are all
+// derived from it (see WireRecord in domain_communicator_detail.h) instead
+// of being hand-listed separately in each of those three places.
+constexpr auto kProposalWire = makeWireRecord(
+    &june::EncounterProposal::encounter_id, &june::EncounterProposal::host_id,
+    &june::EncounterProposal::host_rank, &june::EncounterProposal::invitee_id,
+    &june::EncounterProposal::venue_id,
+    &june::EncounterProposal::venue_owner_rank,
+    &june::EncounterProposal::venue_type_id, &june::EncounterProposal::slot,
+    &june::EncounterProposal::encounter_type_id);
+constexpr int PROPOSAL_WIRE_SIZE = kProposalWire.size();
+// Tripwire: EncounterProposal is all-scalar fields, all listed above, so its
+// sizeof is a proxy for "did a field get added/removed/resized". Not exact
+// (a same-or-smaller field could land in trailing padding unnoticed), but
+// catches the common case. If this fires, update kProposalWire and the
+// literal below together.
+static_assert(sizeof(june::EncounterProposal) == 36,
+              "EncounterProposal size changed - check kProposalWire covers "
+              "every field, then update this literal");
 
 char* packProposal(char* ptr, const june::EncounterProposal& p) {
-  ptr = packField(ptr, p.encounter_id);
-  ptr = packField(ptr, p.host_id);
-  ptr = packField(ptr, p.host_rank);
-  ptr = packField(ptr, p.invitee_id);
-  ptr = packField(ptr, p.venue_id);
-  ptr = packField(ptr, p.venue_owner_rank);
-  ptr = packField(ptr, p.venue_type_id);
-  ptr = packField(ptr, p.slot);
-  ptr = packField(ptr, p.encounter_type_id);
-  return ptr;
+  return kProposalWire.pack(ptr, p);
 }
 
 const char* unpackProposal(const char* ptr, june::EncounterProposal& p) {
-  ptr = unpackField(ptr, p.encounter_id);
-  ptr = unpackField(ptr, p.host_id);
-  ptr = unpackField(ptr, p.host_rank);
-  ptr = unpackField(ptr, p.invitee_id);
-  ptr = unpackField(ptr, p.venue_id);
-  ptr = unpackField(ptr, p.venue_owner_rank);
-  ptr = unpackField(ptr, p.venue_type_id);
-  ptr = unpackField(ptr, p.slot);
-  ptr = unpackField(ptr, p.encounter_type_id);
-  return ptr;
+  return kProposalWire.unpack(ptr, p);
 }
 
-// Derived from the packed fields' own types, plus the manual status_byte
-// transcode below (ReplyStatus is an enum, not memcpy-safe on its own, so it
-// is deliberately narrowed to a fixed uint8_t rather than decltype'd).
-constexpr int REPLY_WIRE_SIZE =
-    sizeof(decltype(june::EncounterReply::encounter_id)) +
-    sizeof(decltype(june::EncounterReply::host_id)) +
-    sizeof(decltype(june::EncounterReply::invitee_id)) +
-    sizeof(decltype(june::EncounterReply::venue_id)) +
-    sizeof(decltype(june::EncounterReply::venue_type_id)) +
-    sizeof(decltype(june::EncounterReply::slot)) +
-    sizeof(decltype(june::EncounterReply::encounter_type_id)) +
-    sizeof(uint8_t);  // status_byte
+// kReplyWire covers the plain fields only; status is a ReplyStatus enum,
+// deliberately narrowed to a fixed uint8_t rather than memcpy'd directly, so
+// it stays outside WireRecord and is transcoded manually below.
+constexpr auto kReplyWire = makeWireRecord(
+    &june::EncounterReply::encounter_id, &june::EncounterReply::host_id,
+    &june::EncounterReply::invitee_id, &june::EncounterReply::venue_id,
+    &june::EncounterReply::venue_type_id, &june::EncounterReply::slot,
+    &june::EncounterReply::encounter_type_id);
+constexpr int REPLY_WIRE_SIZE = kReplyWire.size() + sizeof(uint8_t);
+// Tripwire: EncounterReply is all-scalar (kReplyWire's fields plus the
+// status enum packed manually below), so sizeof is a proxy for drift. Same
+// caveat as PROPOSAL_WIRE_SIZE's tripwire above.
+static_assert(sizeof(june::EncounterReply) == 28,
+              "EncounterReply size changed - check kReplyWire (+ status_byte) "
+              "covers every field, then update this literal");
+
+// home_array_index is never on the wire (local-only; defaults to -1 and
+// stays there after unpack), so it's skipped in this field list.
+constexpr auto kInfectionWire = makeWireRecord(
+    &june::PendingInfection::person_id, &june::PendingInfection::infector_id,
+    &june::PendingInfection::infection_time,
+    &june::PendingInfection::venue_type_id,
+    &june::PendingInfection::encounter_type_id,
+    &june::PendingInfection::venue_id,
+    &june::PendingInfection::infector_symptom_id,
+    &june::PendingInfection::transmission_mode_index);
+// Tripwire: PendingInfection is all-scalar (kInfectionWire's fields plus
+// the excluded local-only home_array_index), so sizeof is a proxy for
+// drift. Same caveat as PROPOSAL_WIRE_SIZE's tripwire above.
+static_assert(sizeof(june::PendingInfection) == 32,
+              "PendingInfection size changed - check kInfectionWire (+ "
+              "home_array_index) covers every field, then update this literal");
+
+// Fixed header of a finalized encounter; participant_count + the
+// variable-length participants tail are appended manually around this (see
+// packFinalizedLocal / unpackFinalizedFromRank).
+constexpr auto kFinalizedWire = makeWireRecord(
+    &june::CoordinatedEncounter::encounter_id,
+    &june::CoordinatedEncounter::host_id, &june::CoordinatedEncounter::venue_id,
+    &june::CoordinatedEncounter::venue_type_id,
+    &june::CoordinatedEncounter::slot,
+    &june::CoordinatedEncounter::encounter_type_id,
+    &june::CoordinatedEncounter::host_subset_index);
+// Tripwire: unlike the scalar-only structs above, CoordinatedEncounter ends
+// in a std::set<PersonId> participants (packed manually as a count-prefixed
+// tail, not via WireRecord), so its sizeof is dominated by the set's own
+// object layout and says nothing about the header. The header/tail boundary
+// is instead checked in tests/test_domain_communicator_detail.cpp - not here
+// as a static_assert(offsetof(...)), because a std::set member makes
+// CoordinatedEncounter non-standard-layout, and offsetof on a
+// non-standard-layout type is only conditionally-supported (GCC/Clang accept
+// it with a -Winvalid-offsetof warning, but the computed value isn't a
+// portable guarantee across standard libraries). The test uses well-defined
+// pointer subtraction on a real object instead.
 
 char* packReply(char* ptr, const june::EncounterReply& r) {
-  ptr = packField(ptr, r.encounter_id);
-  ptr = packField(ptr, r.host_id);
-  ptr = packField(ptr, r.invitee_id);
-  ptr = packField(ptr, r.venue_id);
-  ptr = packField(ptr, r.venue_type_id);
-  ptr = packField(ptr, r.slot);
-  ptr = packField(ptr, r.encounter_type_id);
+  ptr = kReplyWire.pack(ptr, r);
   uint8_t status_byte = static_cast<uint8_t>(r.status);
   ptr = packField(ptr, status_byte);
   return ptr;
 }
 
 const char* unpackReply(const char* ptr, june::EncounterReply& r) {
-  ptr = unpackField(ptr, r.encounter_id);
-  ptr = unpackField(ptr, r.host_id);
-  ptr = unpackField(ptr, r.invitee_id);
-  ptr = unpackField(ptr, r.venue_id);
-  ptr = unpackField(ptr, r.venue_type_id);
-  ptr = unpackField(ptr, r.slot);
-  ptr = unpackField(ptr, r.encounter_type_id);
+  ptr = kReplyWire.unpack(ptr, r);
   uint8_t status_byte;
   ptr = unpackField(ptr, status_byte);
   r.status = static_cast<june::ReplyStatus>(status_byte);
@@ -391,13 +411,7 @@ void unpackFinalizedFromRank(
     std::vector<june::CoordinatedEncounter>& finalized_for_this_rank) {
   while (ptr < end) {
     june::CoordinatedEncounter enc;
-    ptr = unpackField(ptr, enc.encounter_id);
-    ptr = unpackField(ptr, enc.host_id);
-    ptr = unpackField(ptr, enc.venue_id);
-    ptr = unpackField(ptr, enc.venue_type_id);
-    ptr = unpackField(ptr, enc.slot);
-    ptr = unpackField(ptr, enc.encounter_type_id);
-    ptr = unpackField(ptr, enc.host_subset_index);
+    ptr = kFinalizedWire.unpack(ptr, enc);
     int participant_count;
     ptr = unpackField(ptr, participant_count);
     bool has_local = false;
@@ -414,29 +428,23 @@ void unpackFinalizedFromRank(
 }
 
 // Serializes one rank's finalized encounters into the variable-length
-// Allgatherv send buffer. Layout per encounter: 25-byte header
-// (encounter_id, host_id, venue_id, venue_type_id, slot, encounter_type_id,
-// host_subset_index) + participant_count (4 bytes) + participant_count *
-// PersonId (4 bytes each). All sizes are computed up-front per record so
-// the buffer is resized once per record (no slot left to grow on
-// participant_count drift).
+// Allgatherv send buffer. Layout per encounter: kFinalizedWire's fixed
+// header + participant_count (4 bytes) + participant_count * PersonId
+// (4 bytes each). All sizes are computed up-front per record so the buffer
+// is resized once per record (no slot left to grow on participant_count
+// drift).
 std::vector<char> packFinalizedLocal(
     const std::vector<june::CoordinatedEncounter>& local_finalized) {
   std::vector<char> local_buf;
   for (const auto& enc : local_finalized) {
     int participant_count = static_cast<int>(enc.participants.size());
-    size_t entry_size = 29 + participant_count * 4;
+    size_t entry_size = kFinalizedWire.size() + sizeof(int) +
+                        participant_count * sizeof(june::PersonId);
     size_t offset = local_buf.size();
     local_buf.resize(offset + entry_size);
     char* ptr = local_buf.data() + offset;
 
-    ptr = packField(ptr, enc.encounter_id);
-    ptr = packField(ptr, enc.host_id);
-    ptr = packField(ptr, enc.venue_id);
-    ptr = packField(ptr, enc.venue_type_id);
-    ptr = packField(ptr, enc.slot);
-    ptr = packField(ptr, enc.encounter_type_id);
-    ptr = packField(ptr, enc.host_subset_index);
+    ptr = kFinalizedWire.pack(ptr, enc);
     ptr = packField(ptr, participant_count);
     for (june::PersonId pid : enc.participants) {
       ptr = packField(ptr, pid);
@@ -459,18 +467,7 @@ std::vector<PendingInfection> DomainCommunicator::receivePendingInfections(
   MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT,
                MPI_COMM_WORLD);
 
-  // Derived from the packed fields' own types (not a hand-maintained
-  // literal) so a struct field-type change changes this constant
-  // automatically instead of silently desyncing pack/unpack.
-  const int INFECTION_SIZE =
-      sizeof(decltype(PendingInfection::person_id)) +
-      sizeof(decltype(PendingInfection::infector_id)) +
-      sizeof(decltype(PendingInfection::infection_time)) +
-      sizeof(decltype(PendingInfection::venue_type_id)) +
-      sizeof(decltype(PendingInfection::encounter_type_id)) +
-      sizeof(decltype(PendingInfection::venue_id)) +
-      sizeof(decltype(PendingInfection::infector_symptom_id)) +
-      sizeof(decltype(PendingInfection::transmission_mode_index));
+  const int INFECTION_SIZE = kInfectionWire.size();
   std::vector<int> sd, rd;
   int stotal, rtotal;
   mpi_utils::computeByteDisplacements(send_counts, INFECTION_SIZE, sd, stotal);
@@ -482,14 +479,7 @@ std::vector<PendingInfection> DomainCommunicator::receivePendingInfections(
   for (int r = 0; r < num_ranks_; ++r) {
     char* ptr = sbuf.data() + sd[r];
     for (const auto& u : updates[r]) {
-      ptr = packField(ptr, u.person_id);
-      ptr = packField(ptr, u.infector_id);
-      ptr = packField(ptr, u.infection_time);
-      ptr = packField(ptr, u.venue_type_id);
-      ptr = packField(ptr, u.encounter_type_id);
-      ptr = packField(ptr, u.venue_id);
-      ptr = packField(ptr, u.infector_symptom_id);
-      ptr = packField(ptr, u.transmission_mode_index);
+      ptr = kInfectionWire.pack(ptr, u);
     }
   }
 
@@ -512,27 +502,10 @@ std::vector<PendingInfection> DomainCommunicator::unpackAndApplyIncoming(
     if (r == rank_) continue;
     const char* ptr = rbuf.data() + rd[r];
     for (int i = 0; i < recv_counts[r]; ++i) {
-      decltype(PendingInfection::person_id) pid;
-      decltype(PendingInfection::infector_id) infector_id;
-      decltype(PendingInfection::infection_time) t;
-      decltype(PendingInfection::venue_type_id) v_type;
-      decltype(PendingInfection::encounter_type_id) enc_type_id;
-      decltype(PendingInfection::venue_id) v_id;
-      decltype(PendingInfection::infector_symptom_id) infector_symptom_id = 0;
-      decltype(PendingInfection::transmission_mode_index)
-          transmission_mode_index = 0;
-      ptr = unpackField(ptr, pid);
-      ptr = unpackField(ptr, infector_id);
-      ptr = unpackField(ptr, t);
-      ptr = unpackField(ptr, v_type);
-      ptr = unpackField(ptr, enc_type_id);
-      ptr = unpackField(ptr, v_id);
-      ptr = unpackField(ptr, infector_symptom_id);
-      ptr = unpackField(ptr, transmission_mode_index);
+      PendingInfection record;
+      ptr = kInfectionWire.unpack(ptr, record);
 
-      if (auto applied = applyOnePendingInfection(
-              pid, infector_id, t, v_type, enc_type_id, v_id,
-              infector_symptom_id, transmission_mode_index)) {
+      if (auto applied = applyOnePendingInfection(record)) {
         newly_infected.push_back(*applied);
       }
     }
@@ -559,17 +532,16 @@ void DomainCommunicator::routePendingByHomeRank(
 }
 
 std::optional<PendingInfection> DomainCommunicator::applyOnePendingInfection(
-    PersonId pid, PersonId infector_id, double t, uint8_t v_type,
-    uint8_t enc_type_id, VenueId v_id, uint8_t infector_symptom_id,
-    uint8_t transmission_mode_index) {
-  Person* person = world_.getPerson(pid);
-  if (!person || person->infection || !domain_.ownsPerson(pid) || !disease_) {
+    const PendingInfection& pending) {
+  Person* person = world_.getPerson(pending.person_id);
+  if (!person || person->infection || !domain_.ownsPerson(pending.person_id) ||
+      !disease_) {
     return std::nullopt;
   }
 
   std::string venue_type_name = "";
-  if (v_type < world_.venue_type_names.size()) {
-    venue_type_name = world_.venue_type_names[v_type];
+  if (pending.venue_type_id < world_.venue_type_names.size()) {
+    venue_type_name = world_.venue_type_names[pending.venue_type_id];
   }
 
   float severity_factor = 1.0f;
@@ -580,28 +552,21 @@ std::optional<PendingInfection> DomainCommunicator::applyOnePendingInfection(
   // (interaction_manager.cpp): for virtual venues (id <= -1000), extract
   // the host's person_id so the infection seed is deterministic
   // regardless of which rank creates it.
-  uint64_t venue_key = static_cast<uint64_t>(v_id);
-  if (v_id <= -1000) {
-    venue_key = static_cast<uint64_t>(-static_cast<int64_t>(v_id) - 1000);
+  uint64_t venue_key = static_cast<uint64_t>(pending.venue_id);
+  if (pending.venue_id <= -1000) {
+    venue_key =
+        static_cast<uint64_t>(-static_cast<int64_t>(pending.venue_id) - 1000);
   }
   uint64_t infection_seed =
-      mix_seed(config_.simulation.random_seed, pid,
-               static_cast<uint64_t>(t * 1000), venue_key);
+      mix_seed(config_.simulation.random_seed, pending.person_id,
+               static_cast<uint64_t>(pending.infection_time * 1000), venue_key);
   person->infection = std::make_unique<Infection>(
-      disease_, t, person, static_cast<unsigned int>(infection_seed), &world_,
-      venue_type_name, v_id, severity_factor, infector_symptom_id, "", "",
-      transmission_mode_index);
+      disease_, pending.infection_time, person,
+      static_cast<unsigned int>(infection_seed), &world_, venue_type_name,
+      pending.venue_id, severity_factor, pending.infector_symptom_id, "", "",
+      pending.transmission_mode_index);
 
-  PendingInfection applied;
-  applied.person_id = pid;
-  applied.infector_id = infector_id;
-  applied.infection_time = t;
-  applied.venue_type_id = v_type;
-  applied.encounter_type_id = enc_type_id;
-  applied.venue_id = v_id;
-  applied.infector_symptom_id = infector_symptom_id;
-  applied.transmission_mode_index = transmission_mode_index;
-  return applied;
+  return pending;
 }
 
 // =============================================================================

@@ -72,7 +72,10 @@ TEST_CASE("FoI: Single infectious person, single susceptible, single mode") {
   double contacts = 0.3;
   double delta_hours = 4.0;
   ContactMatrixConfig cm;
-  cm.default_contacts = contacts;
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{contacts}};
+  cm.default_matrix = default_contact_matrix;
   SimulationConfig sim_cfg;
   ParallelConfig parallel_config;
 
@@ -103,6 +106,8 @@ TEST_CASE("FoI: Single infectious person, single susceptible, single mode") {
 
     SimulationConfig trial_cfg;
     trial_cfg.random_seed = static_cast<uint64_t>(trial);
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world, disease);
     InteractionManager im(world, cm, trial_cfg, parallel_config, &disease,
                           nullptr);
     std::vector<PersonLocation> locs;
@@ -116,7 +121,8 @@ TEST_CASE("FoI: Single infectious person, single susceptible, single mode") {
   double empirical_prob = static_cast<double>(num_infected) / num_trials;
 
   MESSAGE("Expected prob: ", expected_prob, ", Empirical: ", empirical_prob);
-  // Allow 5% tolerance for stochastic test (with 5000 trials, std error ≈ 0.65%)
+  // Allow 5% tolerance for stochastic test (with 5000 trials, std error ≈
+  // 0.65%)
   CHECK(empirical_prob == doctest::Approx(expected_prob).epsilon(0.05));
 }
 
@@ -164,13 +170,18 @@ TEST_CASE("FoI: Zero susceptibility means zero infections") {
   world.people[1].immunity.natural_waning_rate = 0.0;
 
   ContactMatrixConfig cm;
-  cm.default_contacts = 100.0;  // Very high contacts
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{100.0}};
+  cm.default_matrix = default_contact_matrix;  // Very high contacts
   SimulationConfig sim_cfg;
   ParallelConfig parallel_config;
 
   world.people[0].infection = std::make_unique<Infection>(
       &disease, 0.0, &world.people[0], 42, nullptr, "office", 0);
 
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim_cfg, parallel_config, &disease, nullptr);
   std::vector<PersonLocation> locs;
   locs.push_back({0, 0, -1, 0, 255, 0});
@@ -222,7 +233,10 @@ TEST_CASE("FoI: Higher contacts produce higher infection rate") {
                     trans);
 
     ContactMatrixConfig cm;
-    cm.default_contacts = contacts;
+    ContactMatrix default_contact_matrix;
+    default_contact_matrix.bins = {"all"};
+    default_contact_matrix.contacts = {{contacts}};
+    cm.default_matrix = default_contact_matrix;
     SimulationConfig sim_cfg;
     ParallelConfig parallel_config;
 
@@ -235,6 +249,8 @@ TEST_CASE("FoI: Higher contacts produce higher infection rate") {
       SimulationConfig trial_cfg;
       trial_cfg.random_seed = static_cast<uint64_t>(t);
       ParallelConfig parallel_config;
+      cm.allow_default_matrix = true;
+      finalizeContactMatrices(cm, world, disease);
       InteractionManager im(world, cm, trial_cfg, parallel_config, &disease,
                             nullptr);
       std::vector<PersonLocation> locs;
@@ -293,9 +309,14 @@ TEST_CASE("FoI: No infectious people means no infections") {
                   trans);
 
   ContactMatrixConfig cm;
-  cm.default_contacts = 100.0;
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{100.0}};
+  cm.default_matrix = default_contact_matrix;
   SimulationConfig sim_cfg;
   ParallelConfig parallel_config;
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim_cfg, parallel_config, &disease, nullptr);
 
   // Nobody is infected
@@ -335,9 +356,14 @@ TEST_CASE("FoI: Empty venue produces no infections") {
                   trans);
 
   ContactMatrixConfig cm;
-  cm.default_contacts = 100.0;
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{100.0}};
+  cm.default_matrix = default_contact_matrix;
   SimulationConfig sim_cfg;
   ParallelConfig parallel_config;
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim_cfg, parallel_config, &disease, nullptr);
 
   std::vector<PersonLocation> locs;  // Empty

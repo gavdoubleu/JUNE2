@@ -1,9 +1,6 @@
 time:
   start_date: "1348-09-01"
   end_date: "1350-02-01"
-  
-# Disease configuration path
-disease_file: "config/disease_plague.yaml"
 
 config_paths:
 # Configuration paths

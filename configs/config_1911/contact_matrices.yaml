@@ -34,7 +34,7 @@
 #     contacts split per mode: C_resp = C*(1-p), C_phys = C*p
 #
 # disease.yaml's transmission.modes block declares both modes with
-# susceptibility_multiplier 1.0 each (alpha is folded into beta_phys here).
+# mode_transmissibility_multiplier 1.0 each (alpha is folded into beta_phys here).
 #
 default_contacts_matrix:
   modes:
@@ -118,6 +118,43 @@ contact_matrices:
         contacts:
         - [1.5, 0.2]
         - [2.0, 0.30000000000000004]
+
+  # PLACEHOLDER VALUES - NOT CALIBRATED FOR 1911. Copied from the 2021
+  # scenario's school entry to give this type a matrix of its own; review
+  # before drawing any conclusions from a 1911 run.
+  #
+  # school is the parent of every classroom in this world, so this matrix is
+  # what drives school-wide mixing between pupils in different classrooms.
+  # It had no entry at all until now, which meant that mixing was absent
+  # rather than weak. Single-bin because parent mixing does not yet support
+  # a parent matrix with more than one bin.
+  school:
+    modes:
+      respiratory:
+        beta: 0.002625
+        bins: &id012 [all]
+        contacts: &id013
+        - [20]
+      physical_contact:
+        beta: 0.0005833333
+        bins: *id012
+        contacts: *id013
+
+  # PLACEHOLDER VALUES - NOT CALIBRATED FOR 1911. Household betas applied to
+  # a single undifferentiated bin; review before use. One prison venue exists
+  # in this world.
+  prison:
+    modes:
+      respiratory:
+        beta: 0.017333333333333333
+        bins: &id014 [all]
+        contacts: &id015
+        - [20]
+      physical_contact:
+        beta: 0.034666666666666665
+        bins: *id014
+        contacts: *id015
+
   household:
     modes:
       respiratory:

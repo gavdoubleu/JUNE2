@@ -12,7 +12,7 @@
 #include <vector>
 
 #include "activity/coordinated_encounter_types.h"
-#include "activity/runtime_bin_allocator.h"
+#include "activity/runtime_group_allocator.h"
 #include "core/config.h"
 #include "core/world_state.h"
 #include "domain.h"
@@ -35,7 +35,7 @@ class DomainCommunicator {
   void exchangeVisitors(const std::vector<PersonLocation>& locations,
                         const DomainManager& dm, double current_time,
                         double delta_hours = 0.0,
-                        const RuntimeBinAllocator* alloc = nullptr);
+                        const RuntimeGroupAllocator* alloc = nullptr);
 
   // Exchange pending infections across ranks. Returns the PendingInfection
   // records that this rank applied (i.e. for which a new local infection was
@@ -100,9 +100,7 @@ class DomainCommunicator {
   // if the record was skipped (person not owned, already infected, or no
   // disease loaded).
   std::optional<PendingInfection> applyOnePendingInfection(
-      PersonId pid, PersonId infector_id, double t, uint8_t v_type,
-      uint8_t enc_type_id, VenueId v_id, uint8_t infector_symptom_id,
-      uint8_t transmission_mode_index);
+      const PendingInfection& pending);
 
   WorldState& world_;
   const Config& config_;

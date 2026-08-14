@@ -140,7 +140,7 @@ set(JUNE_CORE_SOURCES
     src/core/world_state.cpp
     src/activity/coordinated_encounter_manager.cpp
     src/activity/coordinated_encounter_manager_stats.cpp
-    src/activity/runtime_bin_allocator.cpp
+    src/activity/runtime_group_allocator.cpp
     src/activity/presence_window.cpp
     src/utils/event_logging/event_logger.cpp
     src/utils/filtering.cpp
@@ -290,6 +290,7 @@ if(BUILD_TESTING)
     endif()
   endmacro()
 
+  add_june_test(test_domain_communicator_detail "tests/test_domain_communicator_detail.cpp")
   add_june_test(test_run_dir "tests/test_run_dir.cpp")
   add_june_test(test_world_state "tests/test_world_state.cpp")
   add_june_test(test_infection "tests/test_infection.cpp;src/loaders/disease_loader.cpp")

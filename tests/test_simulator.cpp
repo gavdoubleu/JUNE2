@@ -27,9 +27,18 @@ TEST_CASE("Simulator Initialization") {
   st.slots_by_day_type["workday"].push_back(slot);
   config.schedule.schedule_types.push_back(st);
 
+  // Flat default contact matrix so every disease mode has somewhere to
+  // fall back to (finalizeDefaultModeMatrices requires this).
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{0.2}};
+  config.contact_matrices.default_matrix = default_contact_matrix;
+  // This scenario declares no per-venue-type matrices; it means the default.
+  config.contact_matrices.allow_default_matrix = true;
+
   // Initialise Simulator
-  Simulator sim(world, config, nullptr, "configs/config_2021/infection_seeds.yaml",
-                "test_sim.h5");
+  Simulator sim(world, config, nullptr,
+                "configs/config_2021/infection_seeds.yaml", "test_sim.h5");
 
   CHECK(sim.getEventLogger() != nullptr);
 }
@@ -117,17 +126,22 @@ TEST_CASE("Simulator run() multi-day smoke test") {
   st.participation_by_day_type["rest_day"]["residence"] = 1.0;
   config.schedule.schedule_types.push_back(st);
   config.schedule.day_type_names = {"workday", "rest_day"};
-  config.schedule.day_type_cycle = {"workday", "workday", "workday", "workday", "workday", "rest_day", "rest_day"};
+  config.schedule.day_type_cycle = {"workday", "workday",  "workday", "workday",
+                                    "workday", "rest_day", "rest_day"};
 
-  config.contact_matrices.default_contacts = 0.2;
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{0.2}};
+  config.contact_matrices.default_matrix = default_contact_matrix;
+  // This scenario declares no per-venue-type matrices; it means the default.
+  config.contact_matrices.allow_default_matrix = true;
 
   // Resolve schedule indices (maps string-keyed slots to indexed lookups)
   config.schedule.resolveSlots(world);
 
   // Build and run simulator
   Simulator sim(world, config, nullptr,
-                "configs/config_2021/infection_seeds.yaml",
-                "test_sim_run.h5");
+                "configs/config_2021/infection_seeds.yaml", "test_sim_run.h5");
 
   // This is the critical test: run() should not crash
   REQUIRE_NOTHROW(sim.run());

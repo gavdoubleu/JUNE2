@@ -8,6 +8,7 @@
 #include "epidemiology/disease.h"
 #include "epidemiology/epidemiology.h"
 #include "epidemiology/interaction_manager.h"
+#include "test_utils.h"
 
 using namespace june;
 
@@ -40,7 +41,7 @@ static Disease makeDiseaseWithFomite(double deposition_rate = 1.0,
   TransmissionMode fomite_mode;
   fomite_mode.name = "fomite_env";
   fomite_mode.type = TransmissionModeType::Fomite;
-  fomite_mode.susceptibility_multiplier = fomite_susc_mult;
+  fomite_mode.mode_transmissibility_multiplier = fomite_susc_mult;
   fomite_mode.symptom_curves = {nullptr, nullptr};
 
   FomiteConfig fcfg;
@@ -120,6 +121,8 @@ TEST_CASE("Fomite Deposition") {
   ContactMatrixConfig cm_config;
   SimulationConfig sim_config;
   ParallelConfig parallel_config;
+  cm_config.allow_default_matrix = true;
+  finalizeContactMatrices(cm_config, world, disease);
   InteractionManager im(world, cm_config, sim_config, parallel_config, &disease,
                         nullptr);
 
@@ -169,6 +172,8 @@ TEST_CASE("No Deposition When Healthy") {
   ContactMatrixConfig cm_config;
   SimulationConfig sim_config;
   ParallelConfig parallel_config;
+  cm_config.allow_default_matrix = true;
+  finalizeContactMatrices(cm_config, world, disease);
   InteractionManager im(world, cm_config, sim_config, parallel_config, &disease,
                         nullptr);
 
@@ -259,6 +264,8 @@ TEST_CASE("Fomite Transmission To Susceptible") {
   bool infected = false;
   for (int trial = 0; trial < 20 && !infected; ++trial) {
     world.people[0].infection.reset();
+    cm_config.allow_default_matrix = true;
+    finalizeContactMatrices(cm_config, world, disease);
     InteractionManager im(world, cm_config, sim_config, parallel_config,
                           &disease, nullptr);
     im.processTransmissions(locs, 5.0, 8.0, nullptr);
@@ -308,6 +315,8 @@ TEST_CASE("Fomite-Only Infection (No Direct Infector Present)") {
   bool infected = false;
   for (int trial = 0; trial < 50 && !infected; ++trial) {
     world.people[0].infection.reset();
+    cm_config.allow_default_matrix = true;
+    finalizeContactMatrices(cm_config, world, disease);
     InteractionManager im(world, cm_config, sim_config, parallel_config,
                           &disease, nullptr);
     im.processTransmissions(locs, 5.0, 8.0, nullptr);
@@ -387,7 +396,10 @@ TEST_CASE("No Stale Bin Data Across Venues With Different Bin Counts") {
   // --- Contact matrix for "school": 3 age-based bins with high contacts ---
   ContactMatrixConfig cm_config;
   cm_config.default_beta = 1.0;
-  cm_config.default_contacts = 10.0;
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{10.0}};
+  cm_config.default_matrix = default_contact_matrix;
 
   ContactMatrix school_matrix;
   school_matrix.bins = {"0-30", "31-60", "61+"};
@@ -443,6 +455,8 @@ TEST_CASE("No Stale Bin Data Across Venues With Different Bin Counts") {
       for (auto& hist : venue.fomite_history) hist.clear();
     }
 
+    cm_config.allow_default_matrix = true;
+    finalizeContactMatrices(cm_config, world, disease);
     InteractionManager im(world, cm_config, sim_config, parallel_config,
                           &disease, nullptr);
     im.processTransmissions(locs, 5.0, 8.0, nullptr);

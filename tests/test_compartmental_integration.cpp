@@ -11,6 +11,7 @@
 #include "epidemiology/interaction_manager.h"
 #include "mock_compartmental_model.h"
 #include "simulation/compartmental_model_manager.h"
+#include "test_utils.h"
 
 using namespace june;
 
@@ -33,7 +34,7 @@ static Disease makeIntegrationDisease(double susc_mult = 1.5,
   TransmissionMode uptake_mode;
   uptake_mode.name = "comp_uptake";
   uptake_mode.type = TransmissionModeType::CompartmentalUptake;
-  uptake_mode.susceptibility_multiplier = susc_mult;
+  uptake_mode.mode_transmissibility_multiplier = susc_mult;
   uptake_mode.symptom_curves = {nullptr, nullptr};
   CompartmentalUptakeConfig ucfg;
   ucfg.mode_index = 0;
@@ -155,6 +156,8 @@ TEST_CASE("Integration: per-slot call sequence is correct over 3 slots") {
   ContactMatrixConfig cm;
   SimulationConfig sim;
   ParallelConfig par;
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease);
 
   std::vector<PersonLocation> locs = {
@@ -206,6 +209,8 @@ TEST_CASE(
     SimulationConfig sim;
     sim.random_seed = static_cast<uint64_t>(seed);
     ParallelConfig par;
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world, disease);
     InteractionManager im(world, cm, sim, par, &disease);
 
     std::vector<PersonLocation> locs = {{0, 10, -1, -1, 255, 0}};
@@ -247,6 +252,8 @@ TEST_CASE("Integration: infected person → non-zero deposition write-back") {
   ContactMatrixConfig cm;
   SimulationConfig sim;
   ParallelConfig par;
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease);
 
   std::vector<PersonLocation> locs = {{0, 10, -1, -1, 255, 0}};
@@ -280,6 +287,8 @@ TEST_CASE(
   ContactMatrixConfig cm;
   SimulationConfig sim;
   ParallelConfig par;
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease);
 
   std::vector<PersonLocation> locs = {{0, 10, -1, -1, 255, 0}};
@@ -287,6 +296,8 @@ TEST_CASE(
   for (int seed = 1; seed <= 50; ++seed) {
     world.people[0].infection.reset();
     sim.random_seed = static_cast<uint64_t>(seed);
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world, disease);
     InteractionManager im2(world, cm, sim, par, &disease);
     runOneSlot(im2, *im_mgr.mgr, world, disease, locs, 0.0, 1.0);
     CHECK(world.people[0].infection == nullptr);
@@ -325,6 +336,8 @@ TEST_CASE(
   std::vector<PersonLocation> locs = {{0, 10, -1, -1, 255, 0}};
 
   for (int s = 0; s < 3; ++s) {
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world, disease);
     InteractionManager im(world, cm, sim, par, &disease);
     REQUIRE_NOTHROW(runOneSlot(im, inactive_mgr, world, disease, locs,
                                s * 1.0 / 24.0, 1.0));
@@ -405,6 +418,8 @@ TEST_CASE(
       SimulationConfig sim;
       sim.random_seed = static_cast<uint64_t>(trial + 1);
       ParallelConfig par;
+      cm.allow_default_matrix = true;
+      finalizeContactMatrices(cm, world, disease);
       InteractionManager im(world, cm, sim, par, &disease);
       runOneSlot(im, *mgr, world, disease, locs, 0.0, 1.0);
       if (world.people[0].infection) ++infected;

@@ -56,9 +56,10 @@
 #include <cstdlib>
 #include <iostream>
 #include <numeric>
+#include <stdexcept>
 
 #include "activity/presence_window.h"
-#include "activity/runtime_bin_allocator.h"
+#include "activity/runtime_group_allocator.h"
 #include "simulation/compartmental_model_manager.h"
 #include "utils/deterministic_rng.h"
 #include "utils/event_logging/event_types.h"
@@ -79,6 +80,17 @@ InteractionManager::InteractionManager(
       disease_(disease),
       event_logger_(event_logger),
       base_seed_(simulation_config.random_seed) {
+  // Refuse here rather than at the first lookup. An unresolved lookup throws
+  // mid-slot, and under MPI a rank that throws inside a collective leaves the
+  // others waiting on it forever, so the run hangs instead of failing. Every
+  // rank reaches this constructor, so every rank refuses together.
+  if (!contact_matrices_.isResolved()) {
+    throw std::runtime_error(
+        "InteractionManager: contact matrices have not been resolved. Call "
+        "finalizeResolvedMatrices (Simulator does this at startup; tests can "
+        "use the finalizeContactMatrices helper) before computing "
+        "transmission.");
+  }
   if (const char* dbg = std::getenv("JUNE_DEBUG_PARENT_MIXING")) {
     debug_parent_mixing_ = (dbg[0] != '\0' && dbg[0] != '0');
   }
@@ -252,11 +264,10 @@ void InteractionManager::aggregateOneVenueGroupForParent(
   Venue* parent_venue = world_.getVenue(venue->parent_id);
   if (!parent_venue) return;
   uint8_t parent_type_id = parent_venue->type_id;
-  const ContactMatrix* parent_matrix =
-      contact_matrices_.getMatrix(parent_type_id);
-  if (!parent_matrix) return;
+  const ContactMatrix& parent_bin_structure =
+      contact_matrices_.getBinStructure(parent_type_id);
   int parent_num_bins =
-      std::max(1, static_cast<int>(parent_matrix->bins.size()));
+      std::max(1, static_cast<int>(parent_bin_structure.bins.size()));
 
   ParentAggregate& agg = ensureParentAggregateInitialised(
       venue->parent_id, first.venue_id, parent_type_id, parent_num_bins,
@@ -273,10 +284,10 @@ void InteractionManager::aggregateOneVenueGroupForParent(
 
   std::vector<double> inf_by_mode;
   for (const auto& loc : mem_sorted) {
-    accumulateOneMemberIntoParent(loc, venue, parent_matrix, parent_num_bins,
-                                  agg, csize, cinf, first.venue_id,
-                                  current_time, delta_hours, num_modes,
-                                  visitor_data, inf_by_mode);
+    accumulateOneMemberIntoParent(loc, venue, &parent_bin_structure,
+                                  parent_num_bins, agg, csize, cinf,
+                                  first.venue_id, current_time, delta_hours,
+                                  num_modes, visitor_data, inf_by_mode);
   }
 }
 
@@ -374,8 +385,8 @@ void InteractionManager::filterAndSortActiveLocations(
     // A line takes its members from the allocator's rider table, not from
     // here, because one location cannot express a journey across four of
     // them. Leaving these in would count every rider twice.
-    if (runtime_bin_allocator_ &&
-        runtime_bin_allocator_->isPartialPresenceVenue(loc.venue_id))
+    if (runtime_group_allocator_ &&
+        runtime_group_allocator_->isPartialPresenceVenue(loc.venue_id))
       continue;
     if (loc.venue_id != -1 ||
         loc.encounter_type_id != kDefaultEncounterTypeId) {
@@ -560,20 +571,20 @@ int InteractionManager::processTransmissions(
   return total_new_infections;
 }
 
-double InteractionManager::lookupContactsForBinPair(
-    const ContactMatrix* mode_matrix, const ContactMatrix* fallback_matrix,
-    int susc_bin, int inf_bin) const {
-  if (mode_matrix &&
-      susc_bin < static_cast<int>(mode_matrix->contacts.size()) &&
-      inf_bin < static_cast<int>(mode_matrix->contacts[susc_bin].size())) {
-    return mode_matrix->contacts[susc_bin][inf_bin];
+double InteractionManager::lookupContactsForBinPair(const ContactMatrix& matrix,
+                                                    int susc_bin,
+                                                    int inf_bin) const {
+  if (susc_bin < static_cast<int>(matrix.contacts.size()) &&
+      inf_bin < static_cast<int>(matrix.contacts[susc_bin].size())) {
+    return matrix.contacts[susc_bin][inf_bin];
   }
-  if (fallback_matrix &&
-      susc_bin < static_cast<int>(fallback_matrix->contacts.size()) &&
-      inf_bin < static_cast<int>(fallback_matrix->contacts[susc_bin].size())) {
-    return fallback_matrix->getContacts(susc_bin, inf_bin);
-  }
-  return contact_matrices_.default_contacts;
+  // Bin counts come from the same venue type's bin structure, and every mode
+  // of a type is checked at load to declare the same bins, so an out-of-range
+  // pair here means the caller sized its loops off something else entirely.
+  throw std::runtime_error(
+      "lookupContactsForBinPair: no contact matrix entry for (susc_bin=" +
+      std::to_string(susc_bin) + ", inf_bin=" + std::to_string(inf_bin) +
+      "); matrix has " + std::to_string(matrix.contacts.size()) + " bin rows.");
 }
 
 uint16_t InteractionManager::resolveInfectorSymptomId(

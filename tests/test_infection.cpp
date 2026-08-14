@@ -16,7 +16,6 @@ TEST_CASE("Disease trajectory progression") {
   trans.stage_curves["mild"] = cur;
   trans.symptom_id_curves = {nullptr, cur};
 
-
   std::vector<TrajectoryDefinition> trajectories;
   TrajectoryDefinition td;
   td.description = "Test trajectory";
@@ -86,9 +85,14 @@ TEST_CASE("Sentinel venue_id=-1 filtered by processTransmissions") {
                   trans);
 
   ContactMatrixConfig cm_config;
-  cm_config.default_contacts = 100.0;
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{100.0}};
+  cm_config.default_matrix = default_contact_matrix;
   SimulationConfig sim_config;
   ParallelConfig parallel_config;
+  cm_config.allow_default_matrix = true;
+  finalizeContactMatrices(cm_config, world, disease);
   InteractionManager im(world, cm_config, sim_config, parallel_config, &disease,
                         nullptr);
 
@@ -166,7 +170,10 @@ TEST_CASE("Large venue transmission statistical correctness") {
 
   // Moderate contacts so infection rate is neither 0 nor 100%
   ContactMatrixConfig cm_config;
-  cm_config.default_contacts = 0.05;
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{0.05}};
+  cm_config.default_matrix = default_contact_matrix;
   SimulationConfig sim_config;
   ParallelConfig parallel_config;
 
@@ -181,11 +188,13 @@ TEST_CASE("Large venue transmission statistical correctness") {
 
     // Infect first num_infectious people
     for (int i = 0; i < num_infectious; ++i) {
-      world.people[i].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[i], trial * 1000 + i, nullptr, "office",
-          0);
+      world.people[i].infection =
+          std::make_unique<Infection>(&disease, 0.0, &world.people[i],
+                                      trial * 1000 + i, nullptr, "office", 0);
     }
 
+    cm_config.allow_default_matrix = true;
+    finalizeContactMatrices(cm_config, world, disease);
     InteractionManager im(world, cm_config, sim_config, parallel_config,
                           &disease, nullptr);
 
@@ -222,7 +231,6 @@ TEST_CASE("InteractionManager basic transmission") {
   trans.stage_curves["infectious"] = cur;
   trans.symptom_id_curves = {nullptr, cur};
 
-
   std::vector<TrajectoryDefinition> trajectories;
   TrajectoryDefinition td;
   td.description = "Test trajectory";
@@ -245,10 +253,16 @@ TEST_CASE("InteractionManager basic transmission") {
                   trans);
 
   ContactMatrixConfig cm_config;
-  cm_config.default_contacts = 100.0;  // High contacts for deterministic transmit
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{100.0}};
+  cm_config.default_matrix =
+      default_contact_matrix;  // High contacts for deterministic transmit
   SimulationConfig sim_config;
 
   ParallelConfig parallel_config;
+  cm_config.allow_default_matrix = true;
+  finalizeContactMatrices(cm_config, world, disease);
   InteractionManager im(world, cm_config, sim_config, parallel_config, &disease,
                         nullptr);
 

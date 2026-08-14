@@ -135,12 +135,14 @@ int Simulator::runSlotTransmission(
     // rider on several legs cannot be found from the location table. Every
     // rank walks the lines it owns, then all of them settle the results
     // together so a rider infected on two legs at once gets one infection.
-    if (runtime_bin_allocator_ && runtime_bin_allocator_->isActive()) {
+    if (runtime_group_allocator_ && runtime_group_allocator_->isActive()) {
       std::vector<VenueId> owned_lines;
-      owned_lines.reserve(runtime_bin_allocator_->ridersByVenue().size());
+      owned_lines.reserve(runtime_group_allocator_->ridersByVenue().size());
       for (const auto& [vid, riders] :
-           runtime_bin_allocator_->ridersByVenue()) {
+           runtime_group_allocator_->ridersByVenue()) {
+#ifdef USE_MPI
         if (domain_mgr_ && !domain_mgr_->getDomain().ownsVenue(vid)) continue;
+#endif
         owned_lines.push_back(vid);
       }
       std::sort(owned_lines.begin(), owned_lines.end());
@@ -192,7 +194,7 @@ void Simulator::exchangeVisitorsAndBuildAugmented(
   try {
     ScopedTimer timer("02_MPI_VisitorExchange");
     domain_mgr_->exchangeVisitors(locations_, current_simulation_time_,
-                                  delta_hours, runtime_bin_allocator_.get());
+                                  delta_hours, runtime_group_allocator_.get());
 
     Domain& domain = domain_mgr_->getDomain();
 
@@ -285,12 +287,12 @@ void Simulator::simulateTimeSlot(const TimeSlot& slot, int time_slot_index,
     activity_manager_.setCurrentTime(current_simulation_time_);
     activity_manager_.assignActivitiesFromSchedule(time_slot_index,
                                                    day_type_idx, locations_);
-    // Runtime bin allocation for partial-presence venues (e.g. train
-    // carriages). One-test no-op when SimulationConfig::partial_presence is
+    // Runtime group allocation for partial-presence venues (e.g. train
+    // groups). One-test no-op when SimulationConfig::partial_presence is
     // empty, so non-commute scenarios pay nothing here.
-    runtime_bin_allocator_->allocateForSlot(time_slot_index, day_type_idx, slot,
-                                            current_simulation_time_,
-                                            delta_hours, locations_);
+    runtime_group_allocator_->allocateForSlot(time_slot_index, day_type_idx,
+                                              slot, current_simulation_time_,
+                                              delta_hours, locations_);
   }
 
 #ifdef USE_MPI
@@ -312,14 +314,15 @@ void Simulator::simulateTimeSlot(const TimeSlot& slot, int time_slot_index,
   // Everyone on a line must be a rider of it, and every rider must be on one.
   // Riding without a rider entry was the old ghost: aboard, but infecting
   // nobody and catching nothing. Holding an entry while standing somewhere
-  // else is its mirror image, and would crowd a carriage with someone who
+  // else is its mirror image, and would crowd a group with someone who
   // left. Both are bugs, so say so rather than quietly modelling a phantom.
-  if (runtime_bin_allocator_ && runtime_bin_allocator_->isActive()) {
+  if (runtime_group_allocator_ && runtime_group_allocator_->isActive()) {
     for (const auto& loc : locations_) {
       if (loc.person_id < 0) continue;
       const bool on_line =
-          runtime_bin_allocator_->isPartialPresenceVenue(loc.venue_id);
-      const bool rides = !runtime_bin_allocator_->legsOf(loc.person_id).empty();
+          runtime_group_allocator_->isPartialPresenceVenue(loc.venue_id);
+      const bool rides =
+          !runtime_group_allocator_->legsOf(loc.person_id).empty();
       if (on_line == rides) continue;
 
       const std::string who = "person " + std::to_string(loc.person_id);
@@ -328,11 +331,11 @@ void Simulator::simulateTimeSlot(const TimeSlot& slot, int time_slot_index,
             who + " was placed on partial-presence venue " +
             std::to_string(loc.venue_id) +
             " but rides no leg of it. Something put them on a line after the "
-            "carriages were dealt without telling the allocator.");
+            "groups were dealt without telling the allocator.");
       throw std::runtime_error(
           who + " rides a partial-presence venue but was placed at venue " +
           std::to_string(loc.venue_id) +
-          ". Something moved them off their commute after the carriages were "
+          ". Something moved them off their commute after the groups were "
           "dealt, leaving them aboard a line they are no longer on.");
     }
   }

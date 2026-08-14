@@ -100,18 +100,22 @@ def test_load_enriched_events_loads_each_registry_once(tmp_path, monkeypatch):
     assert call_counts["symptoms"] == 1
 
 
-def test_load_enriched_events_masks_infector_symptom_when_no_infector(tmp_path):
+def test_load_enriched_events_decodes_infector_symptom_sentinel_when_no_infector(tmp_path):
     path = tmp_path / "events.h5"
     with h5py.File(path, "w") as fh:
+        # infector_symptom_id is written directly as kNoSymptomId (255) by the
+        # engine when there is no infector (seed/fomite/compartmental) — no
+        # NaN-masking needed on this side, decode_registry_column's sentinel
+        # handling covers it directly.
         infections = np.array(
-            [(1, -1, -999, 0.5, 255, 0), (2, 1, 10, 1.5, 255, 2)],
+            [(1, -1, -999, 0.5, 255, 255), (2, 1, 10, 1.5, 255, 2)],
             dtype=[
                 ("person_id", "<i4"),
                 ("infector_id", "<i4"),
                 ("venue_id", "<i4"),
                 ("time", "<f8"),
                 ("encounter_type_id", "u1"),
-                ("infector_symptom_id", "<u2"),
+                ("infector_symptom_id", "u1"),
             ],
         )
         fh.create_dataset("events/infections", data=infections)

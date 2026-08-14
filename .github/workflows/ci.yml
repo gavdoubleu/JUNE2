@@ -41,10 +41,37 @@ jobs:
         # Exclude tests that require world HDF5 files not committed to the repo.
         run: ctest --output-on-failure -E mpi_full_reproducibility
 
+  # Serial (non-MPI) build. The matrix above only ever builds with MPI, so a
+  # call reachable only when USE_MPI is off (e.g. an unguarded DomainManager
+  # access that should sit behind #ifdef USE_MPI) can break the serial build
+  # without any matrix job noticing. This job compiles and tests with MPI and
+  # METIS off to catch that class of regression.
+  build_serial:
+    name: Serial build (USE_MPI=OFF)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Install Dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libhdf5-dev libyaml-cpp-dev google-perftools libgoogle-perftools-dev cmake
+
+      - name: Configure CMake (serial)
+        run: cmake -B build-serial -DBUILD_TESTING=ON -DUSE_MPI=OFF -DUSE_METIS=OFF
+
+      - name: Build
+        run: cmake --build build-serial --parallel 4
+
+      - name: Test
+        working-directory: ${{github.workspace}}/build-serial
+        # MPI-execution tests are skipped automatically (MPI_FOUND is false).
+        run: ctest --output-on-failure -E mpi_full_reproducibility
+
   # This job runs after the matrix is done
   check-integrity:
     runs-on: ubuntu-latest
-    needs: build_and_test
+    needs: [build_and_test, build_serial]
     steps:
       - name: All tests passed
         run: echo "The matrix is green!"

@@ -31,10 +31,10 @@ disease:
     mode: Stage-Driven
     modes:
       - name: direct_contact
-        susceptibility_multiplier: 1.0
+        mode_transmissibility_multiplier: 1.0
       - name: compartmental_uptake
         type: compartmental_uptake
-        susceptibility_multiplier: 1.5
+        mode_transmissibility_multiplier: 1.5
       - name: compartmental_deposition
         type: compartmental_deposition
         deposition_stages:
@@ -97,13 +97,13 @@ TEST_CASE("TransmissionParams carries compartmental mode fields") {
 
   TransmissionMode direct;
   direct.name = "direct";
-  direct.susceptibility_multiplier = 1.0;
+  direct.mode_transmissibility_multiplier = 1.0;
   tp.modes.push_back(direct);
 
   TransmissionMode uptake;
   uptake.name = "uptake";
   uptake.type = TransmissionModeType::CompartmentalUptake;
-  uptake.susceptibility_multiplier = 1.5;
+  uptake.mode_transmissibility_multiplier = 1.5;
   CompartmentalUptakeConfig ucfg;
   ucfg.mode_index = 1;
   uptake.config = ucfg;
@@ -150,7 +150,7 @@ TEST_CASE("DiseaseLoader: compartmental_uptake mode parsed") {
   CHECK(tp.modes[2].type != TransmissionModeType::CompartmentalUptake);
   CHECK(std::get<CompartmentalUptakeConfig>(tp.modes[1].config).mode_index ==
         1);
-  CHECK(tp.modes[1].susceptibility_multiplier == doctest::Approx(1.5));
+  CHECK(tp.modes[1].mode_transmissibility_multiplier == doctest::Approx(1.5));
 }
 
 TEST_CASE("DiseaseLoader: compartmental_deposition mode parsed") {

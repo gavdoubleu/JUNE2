@@ -14,33 +14,39 @@ class Config;
 class WorldState;
 struct TimeSlot;
 
-// Per-slot allocator that buckets riders of partial-presence venues into
-// ephemeral runtime bins (e.g. carriages of a train_line). Gated on
+// Per-slot allocator that deals riders of partial-presence venues into
+// ephemeral runtime groups. A whole line is too big to mix as one pool, so its
+// riders are split into disjoint groups that can actually contact each other:
+// a train's carriages, a ferry's decks. Gated on
 // SimulationConfig::partial_presence; an empty config (default) makes
 // allocateForSlot a one-test no-op so non-commute scenarios pay zero cost.
 //
+// These groups are not contact-matrix bins. A bin says what kind of person
+// someone is; a group says which pocket of the venue they are physically in.
+// A rider has both.
+//
 // Multi-presence: a rider with N legs of a single activity (e.g. a 3-leg
-// train commute) is placed in N bins, one per leg, and is a member of all N
+// train commute) is placed in N groups, one per leg, and is a member of all N
 // lines. The rider table this builds IS a line's membership: a person holds a
 // single PersonLocation, which cannot name four lines at once, so the FOI reads
 // its passengers from here instead.
 //
-// Bucketing is config-driven and capacity-free: per slot, the number of
-// bins for a venue emerges as max(1, ceil(N_global_riders /
-// target_group_size)), where target_group_size is a per-venue-type config knob
-// (≈ vehicle occupancy). Bin assignment is a round-robin deal over a canonical
-// hash-sort of the GLOBAL rider list, so bins differ in size by at most 1
-// and bit-identical assignments are computed on every rank for the same
-// rider without exchanging bin indices.
+// Dealing is config-driven and capacity-free: per slot, the number of groups
+// for a venue emerges as max(1, ceil(N_global_riders / target_group_size)),
+// where target_group_size is a per-venue-type config knob (roughly vehicle
+// occupancy). Assignment is a round-robin deal over a canonical hash-sort of
+// the GLOBAL rider list, so groups differ in size by at most 1 and every rank
+// computes bit-identical assignments for the same rider without exchanging
+// indices.
 //
 // MPI: one Allgatherv per slot collects every (rider, leg) across ranks, along
 // with its subset, venue type, window and presence factor. The venue type has
 // to travel with the leg because a rank only holds types for venues in its own
-// halo. Bucketing is then a pure function of (seed, slot_minutes, venue_id,
-// person_id, num_bins) on every rank.
-class RuntimeBinAllocator {
+// halo. Dealing is then a pure function of (seed, slot_minutes, venue_id,
+// person_id, num_groups) on every rank.
+class RuntimeGroupAllocator {
  public:
-  static constexpr uint16_t kNoBin = UINT16_MAX;
+  static constexpr uint16_t kNoGroup = UINT16_MAX;
 
   // One person on one line for one slot. A commuter with four legs is four
   // Riders, one per line. Lines take their membership from these rather than
@@ -49,10 +55,10 @@ class RuntimeBinAllocator {
   struct Rider {
     PersonId pid;
     SubsetIndex subset;
-    uint16_t bin;
+    uint16_t group;
   };
 
-  RuntimeBinAllocator(const WorldState& world, const Config& config);
+  RuntimeGroupAllocator(const WorldState& world, const Config& config);
 
   // Called once per slot, after ActivityManager::assignActivitiesFromSchedule
   // returns. Cheap no-op when partial_presence is disabled.
@@ -76,21 +82,21 @@ class RuntimeBinAllocator {
                        double delta_hours,
                        const std::vector<PersonLocation>& locations);
 
-  // Runtime bin index for a specific (venue, person). Returns kNoBin if the
+  // Runtime group index for a specific (venue, person). Returns kNoGroup if the
   // pair wasn't bucketed this slot.
-  uint16_t getBinIndex(VenueId venue_id, PersonId person_id) const {
+  uint16_t getGroupIndex(VenueId venue_id, PersonId person_id) const {
     const uint64_t key = (static_cast<uint64_t>(venue_id) << 32) |
                          static_cast<uint64_t>(person_id);
-    auto it = bin_by_vid_pid_.find(key);
-    return it == bin_by_vid_pid_.end() ? kNoBin : it->second;
+    auto it = group_by_vid_pid_.find(key);
+    return it == group_by_vid_pid_.end() ? kNoGroup : it->second;
   }
 
   // Number of bins allocated for a venue this slot. Returns 0 if the venue
   // isn't partial-presence or has no riders this slot. Used by the FOI loop
-  // to size per-carriage scratch buffers.
-  uint16_t getNumBins(VenueId venue_id) const {
-    auto it = num_bins_by_venue_.find(venue_id);
-    return it == num_bins_by_venue_.end() ? 0 : it->second;
+  // to size per-group scratch buffers.
+  uint16_t getNumGroups(VenueId venue_id) const {
+    auto it = num_groups_by_venue_.find(venue_id);
+    return it == num_groups_by_venue_.end() ? 0 : it->second;
   }
 
   // Per-(venue, person) effective presence window for this slot, in minutes
@@ -126,7 +132,7 @@ class RuntimeBinAllocator {
   }
 
   // Who rides each line this slot. The same on every rank, and it is what the
-  // FOI walks when it builds a line's carriages.
+  // FOI walks when it builds a line's groups.
   const std::unordered_map<VenueId, std::vector<Rider>>& ridersByVenue() const {
     return riders_by_venue_;
   }
@@ -141,7 +147,7 @@ class RuntimeBinAllocator {
 
   // Seat each follower beside its host. The follower takes over the host's
   // rider entries, so it rides every leg of the host's journey, in the host's
-  // carriage, with the host's window and presence factor. Legs of its own are
+  // group, with the host's window and presence factor. Legs of its own are
   // given up, since it travels with the host instead of on its own route.
   //
   // The pairs are exchanged across ranks before anything is applied, so every
@@ -176,14 +182,14 @@ class RuntimeBinAllocator {
 
   // Global (venue, person) → bin map, identical on every rank.
   // Key layout: (uint64_t(venue_id) << 32) | uint64_t(person_id).
-  std::unordered_map<uint64_t, uint16_t> bin_by_vid_pid_;
+  std::unordered_map<uint64_t, uint16_t> group_by_vid_pid_;
 
   // Per-venue bin count for this slot. Used by the FOI loop to size
-  // per-carriage scratch buffers without re-deriving from rider counts.
-  std::unordered_map<VenueId, uint16_t> num_bins_by_venue_;
+  // per-group scratch buffers without re-deriving from rider counts.
+  std::unordered_map<VenueId, uint16_t> num_groups_by_venue_;
 
   // Global (venue, person) → presence window. Same broadcast as
-  // bin_by_vid_pid_; the FOI loop consults this for both local and
+  // group_by_vid_pid_; the FOI loop consults this for both local and
   // cross-rank visitor riders so windows are identical on every rank.
   std::unordered_map<uint64_t, EffectiveWindow> windows_by_vid_pid_;
 

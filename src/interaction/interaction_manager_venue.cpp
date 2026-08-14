@@ -41,12 +41,22 @@ int InteractionManager::processVenueTransmissions(
 
   std::string venue_type;
   uint8_t venue_type_id = kUnknownVenueTypeId;
-  const ContactMatrix* matrix = nullptr;
+  const ContactMatrix* bin_structure = nullptr;
   resolveVenueTypeAndMatrix(venue, actual_venue_id, encounter_type_id,
-                            venue_type, venue_type_id, matrix);
+                            venue_type, venue_type_id, bin_structure);
   const bool is_virtual_encounter = actual_venue_id < 0;
 
-  int num_bins_needed = matrix ? static_cast<int>(matrix->bins.size()) : 1;
+  // Null means the group was neither a physical venue nor a recognised
+  // virtual encounter, so there is nothing to attribute contacts to. Taking
+  // one bin here would quietly score everyone against contacts[0][0].
+  if (!bin_structure)
+    throw std::runtime_error(
+        "processVenueTransmissions: no venue and no known encounter type for "
+        "venue_id=" +
+        std::to_string(actual_venue_id) +
+        ", encounter_type_id=" + std::to_string((int)encounter_type_id));
+
+  int num_bins_needed = static_cast<int>(bin_structure->bins.size());
   if (num_bins_needed == 0) num_bins_needed = 1;
   int num_modes = std::max(1, disease_->numModes());
   const auto& trans_params = disease_->getTransmissionParams();
@@ -62,8 +72,8 @@ int InteractionManager::processVenueTransmissions(
                     n_sub_per_mode);
 
   std::vector<double> lambda_fomite_by_mode = binMembersAndPrepareBuffers(
-      members, venue, matrix, num_bins_needed, num_modes, num_fomite_modes,
-      fomite_modes, n_sub_per_mode, current_time, delta_hours,
+      members, venue, *bin_structure, num_bins_needed, num_modes,
+      num_fomite_modes, fomite_modes, n_sub_per_mode, current_time, delta_hours,
       encounter_type_id, venue_type, venue_type_id, visitor_data);
 
   if (venueHasNoTransmissionPossible(num_bins_needed, comp_uptake_modes,
@@ -85,7 +95,7 @@ int InteractionManager::processVenueTransmissions(
   for (int susc_bin = 0; susc_bin < num_bins_needed; ++susc_bin) {
     new_infections += processOneSuscBin(
         susc_bin, num_bins_needed, num_modes, num_fomite_modes,
-        is_virtual_encounter, encounter_type_id, venue_type_id, matrix, venue,
+        is_virtual_encounter, encounter_type_id, venue_type_id, venue,
         actual_venue_id, fomite_modes, comp_uptake_modes, lambda_fomite_by_mode,
         trans_params, parent_agg, parent_flat_matrix, comp_model, current_time,
         delta_hours, visitor_data, active_infections, pending_infections);
@@ -104,7 +114,7 @@ int InteractionManager::processVenueTransmissions(
 int InteractionManager::processOneSuscBin(
     int susc_bin, int num_bins_needed, int num_modes, int num_fomite_modes,
     bool is_virtual_encounter, uint8_t encounter_type_id, uint8_t venue_type_id,
-    const ContactMatrix* matrix, Venue* venue, VenueId actual_venue_id,
+    Venue* venue, VenueId actual_venue_id,
     const std::vector<FomiteModeRef>& fomite_modes,
     const std::vector<int>& comp_uptake_modes,
     const std::vector<double>& lambda_fomite_by_mode,
@@ -123,9 +133,9 @@ int InteractionManager::processOneSuscBin(
   source_weights_buffer_.clear();
   double total_lambda_eff = 0.0;
 
-  appendDirectContactSources(
-      susc_bin, num_bins_needed, num_modes, is_virtual_encounter,
-      encounter_type_id, venue_type_id, matrix, trans_params, total_lambda_eff);
+  appendDirectContactSources(susc_bin, num_bins_needed, num_modes,
+                             is_virtual_encounter, encounter_type_id,
+                             venue_type_id, trans_params, total_lambda_eff);
   appendSiblingMixingSources(susc_bin, num_modes, actual_venue_id, venue,
                              parent_agg, parent_flat_matrix, trans_params,
                              total_lambda_eff);
@@ -361,20 +371,19 @@ void InteractionManager::applyVenueInfection(
 void InteractionManager::appendDirectContactSources(
     int susc_bin, int num_bins_needed, int num_modes, bool is_virtual_encounter,
     uint8_t encounter_type_id, uint8_t venue_type_id,
-    const ContactMatrix* matrix, const TransmissionParams& trans_params,
-    double& total_lambda_eff) {
+    const TransmissionParams& trans_params, double& total_lambda_eff) {
   for (int m = 0; m < num_modes; ++m) {
     // Get mode-specific contact matrix. Virtual encounters are keyed by
     // encounter_type_id; physical venues by venue_type_id. The split
     // matters: these are disjoint integer spaces and aliasing them pulls
     // the wrong matrix.
-    const ContactMatrix* mode_matrix =
+    const ContactMatrix& mode_matrix =
         is_virtual_encounter
             ? contact_matrices_.getVirtualMatrix(encounter_type_id, m)
             : contact_matrices_.getMatrix(venue_type_id, m);
     double mode_susc_mult =
         (m < (int)trans_params.modes.size())
-            ? trans_params.modes[m].susceptibility_multiplier
+            ? trans_params.modes[m].mode_transmissibility_multiplier
             : 1.0;
 
     for (int inf_bin = 0; inf_bin < num_bins_needed; ++inf_bin) {
@@ -382,7 +391,7 @@ void InteractionManager::appendDirectContactSources(
       if (inf_group.total_infectiousness_by_mode[m] <= 0.0) continue;
 
       double contacts =
-          lookupContactsForBinPair(mode_matrix, matrix, susc_bin, inf_bin);
+          lookupContactsForBinPair(mode_matrix, susc_bin, inf_bin);
       if (contacts <= 0.0) continue;
 
       int bin_size = bins_buffer_[inf_bin].total_size;
@@ -441,11 +450,10 @@ void InteractionManager::appendSiblingMixingSources(
   int sibling_size = std::max(1, parent_size - own_size);
 
   for (int m = 0; m < num_modes; ++m) {
-    const ContactMatrix* pmm =
+    const ContactMatrix& pmm =
         contact_matrices_.getMatrix(parent_agg->parent_venue_type_id, m);
-    if (!pmm) pmm = parent_flat_matrix;
-    if (!pmm || pmm->contacts.empty() || pmm->contacts[0].empty()) continue;
-    double contacts = pmm->contacts[0][0];
+    if (pmm.contacts.empty() || pmm.contacts[0].empty()) continue;
+    double contacts = pmm.contacts[0][0];
     if (contacts <= 0.0) continue;
 
     double parent_inf = (pbin < (int)parent_agg->total_inf_by_bin_mode.size())
@@ -460,7 +468,7 @@ void InteractionManager::appendSiblingMixingSources(
 
     double mode_susc_mult =
         (m < (int)trans_params.modes.size())
-            ? trans_params.modes[m].susceptibility_multiplier
+            ? trans_params.modes[m].mode_transmissibility_multiplier
             : 1.0;
     double omega = contacts / sibling_size;
     double weighted = omega * sibling_inf * mode_susc_mult;
@@ -487,10 +495,10 @@ void InteractionManager::appendFomiteSources(
   for (int local_fm = 0; local_fm < num_fomite_modes; ++local_fm) {
     if (lambda_fomite_by_mode[local_fm] <= 0.0) continue;
     int fomite_mode_idx = fomite_modes[local_fm].mode_index;
-    double mode_susc_mult =
-        (fomite_mode_idx < (int)trans_params.modes.size())
-            ? trans_params.modes[fomite_mode_idx].susceptibility_multiplier
-            : 1.0;
+    double mode_susc_mult = (fomite_mode_idx < (int)trans_params.modes.size())
+                                ? trans_params.modes[fomite_mode_idx]
+                                      .mode_transmissibility_multiplier
+                                : 1.0;
     double weighted = lambda_fomite_by_mode[local_fm] * mode_susc_mult;
     total_lambda_eff += weighted;
     sources_buffer_.push_back(SourceEntry{fomite_mode_idx, -1});
@@ -514,7 +522,7 @@ void InteractionManager::appendCompUptakeSources(
   for (int mode_idx : comp_uptake_modes) {
     double mode_susc_mult =
         (mode_idx < (int)trans_params.modes.size())
-            ? trans_params.modes[mode_idx].susceptibility_multiplier
+            ? trans_params.modes[mode_idx].mode_transmissibility_multiplier
             : 1.0;
     double weighted = node_output * mode_susc_mult;
     if (weighted <= 0.0) continue;

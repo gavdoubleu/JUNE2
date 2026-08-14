@@ -1,4 +1,4 @@
-#include "activity/runtime_bin_allocator.h"
+#include "activity/runtime_group_allocator.h"
 
 #include <algorithm>
 #include <cmath>
@@ -18,20 +18,20 @@
 
 namespace june {
 
-RuntimeBinAllocator::RuntimeBinAllocator(const WorldState& world,
-                                         const Config& config)
+RuntimeGroupAllocator::RuntimeGroupAllocator(const WorldState& world,
+                                             const Config& config)
     : world_(world), config_(config) {
   venue_type_mask_ =
       config_.simulation.partial_presence.enabled_venue_type_mask;
 }
 
-void RuntimeBinAllocator::allocateForSlot(
+void RuntimeGroupAllocator::allocateForSlot(
     int time_slot_index, int day_type_idx, const TimeSlot& /*slot*/,
     double current_simulation_time, double delta_hours,
     const std::vector<PersonLocation>& locations) {
-  // Clear bin assignments from the previous slot.
-  bin_by_vid_pid_.clear();
-  num_bins_by_venue_.clear();
+  // Clear group assignments from the previous slot.
+  group_by_vid_pid_.clear();
+  num_groups_by_venue_.clear();
   windows_by_vid_pid_.clear();
   f_presence_by_vid_pid_.clear();
   subset_by_vid_pid_.clear();
@@ -174,15 +174,16 @@ void RuntimeBinAllocator::allocateForSlot(
   //
   // The venue type travels with the leg because a rank only knows the types of
   // venues in its own halo. A line reachable only from another rank would
-  // otherwise look untyped here, and the carriage deal below would quietly skip
+  // otherwise look untyped here, and the group deal below would quietly skip
   // it, leaving the rider tables disagreeing between ranks.
   // Every rank receives the SAME bytes the home rank packed → bit-identical
   // float values everywhere, no FP-recomputation drift. f_presence is a pure
   // function of the rider's own legs, so broadcasting it (rather than
   // recomputing per rank) keeps cross-rank visitors bit-identical to the home
   // rank.
-  static_assert(sizeof(float) == sizeof(int32_t),
-                "RuntimeBinAllocator assumes 32-bit float for window packing");
+  static_assert(
+      sizeof(float) == sizeof(int32_t),
+      "RuntimeGroupAllocator assumes 32-bit float for window packing");
   std::vector<int32_t> local_packed;
   local_packed.reserve(local_legs.size() * 7);
   for (const auto& lg : local_legs) {
@@ -222,7 +223,7 @@ void RuntimeBinAllocator::allocateForSlot(
 
   // -------------------------------------------------------------------------
   // Phase 3: decode the global 5-int-per-leg stream, group by venue,
-  // canonical-sort, deal into bins. Also populates windows_by_vid_pid_ and
+  // canonical-sort, deal into groups. Also populates windows_by_vid_pid_ and
   // f_presence_by_vid_pid_ from the broadcast float bytes (every rank sees
   // identical windows + f_p for the same rider, required for MPI determinism
   // on cross-LGU venues).
@@ -248,26 +249,26 @@ void RuntimeBinAllocator::allocateForSlot(
     subset_by_vid_pid_[key] = sub;
   }
 
-  // (venue_id, person_id) → bin. The same person on multiple venues gets a
-  // separate bin per venue (multi-leg). For local riders we then look this
-  // up by their leg's (vid, pid) to populate bin_by_av_idx_.
-  // bin_by_vid_pid_ is a member so the FOI loop (which only has
-  // InteractionMember = {pid, ...}) can look up bins without the flat av_idx.
-  bin_by_vid_pid_.reserve(global_packed.size() / 7);
-  num_bins_by_venue_.reserve(riders_by_venue.size());
+  // (venue_id, person_id) → group. The same person on multiple venues gets a
+  // separate group per venue (multi-leg). For local riders we then look this
+  // up by their leg's (vid, pid) to populate group_by_av_idx_.
+  // group_by_vid_pid_ is a member so the FOI loop (which only has
+  // InteractionMember = {pid, ...}) can look up groups without the flat av_idx.
+  group_by_vid_pid_.reserve(global_packed.size() / 7);
+  num_groups_by_venue_.reserve(riders_by_venue.size());
 
   for (auto& [vid, riders] : riders_by_venue) {
     const uint8_t vt = venue_type_by_vid_.at(vid);
     const int tgs = config_.simulation.partial_presence.getTargetGroupSize(vt);
     if (tgs <= 0)
       throw std::runtime_error(
-          "RuntimeBinAllocator: line " + std::to_string(vid) + " of type " +
+          "RuntimeGroupAllocator: line " + std::to_string(vid) + " of type " +
           std::to_string(static_cast<int>(vt)) +
-          " has riders but no target group size, so its carriages cannot be "
+          " has riders but no target group size, so its groups cannot be "
           "sized");
 
     // Canonical shuffle: sort by hash(seed, slot_minutes, vid, pid). Same
-    // hash on every rank → same order → same bin assignments. PersonId as
+    // hash on every rank → same order → same group assignments. PersonId as
     // a deterministic tiebreaker on the (vanishingly rare) hash collision.
     auto hash_key = [&](PersonId pid) {
       return mix_seed(
@@ -280,16 +281,16 @@ void RuntimeBinAllocator::allocateForSlot(
       return a < b;
     });
 
-    const int num_bins =
+    const int num_groups =
         std::max(1, static_cast<int>((riders.size() + tgs - 1) / tgs));
-    num_bins_by_venue_[vid] = static_cast<uint16_t>(num_bins);
+    num_groups_by_venue_[vid] = static_cast<uint16_t>(num_groups);
 
     for (size_t pos = 0; pos < riders.size(); ++pos) {
       const PersonId pid = riders[pos];
-      const uint16_t bin = static_cast<uint16_t>(pos % num_bins);
+      const uint16_t group = static_cast<uint16_t>(pos % num_groups);
       const uint64_t key =
           (static_cast<uint64_t>(vid) << 32) | static_cast<uint64_t>(pid);
-      bin_by_vid_pid_[key] = bin;
+      group_by_vid_pid_[key] = group;
     }
   }
 
@@ -303,7 +304,7 @@ void RuntimeBinAllocator::allocateForSlot(
   static bool printed_first = false;
   if (!printed_first && !riders_by_venue.empty()) {
     size_t total_global_pairs = 0;
-    size_t max_bins = 0;
+    size_t max_groups = 0;
     size_t multi_leg_local = 0;
     {
       std::unordered_map<PersonId, int> per_pid;
@@ -317,22 +318,22 @@ void RuntimeBinAllocator::allocateForSlot(
           venue_type_by_vid_.at(kv.first));
       if (tgs > 0) {
         size_t nb = std::max<size_t>(1, (kv.second.size() + tgs - 1) / tgs);
-        max_bins = std::max(max_bins, nb);
+        max_groups = std::max(max_groups, nb);
       }
     }
-    std::cout << "[RuntimeBinAllocator] first active slot: time_slot_index="
+    std::cout << "[RuntimeGroupAllocator] first active slot: time_slot_index="
               << time_slot_index << " day_type=" << day_type_idx
               << " partial-presence venues=" << riders_by_venue.size()
               << " global_legs=" << total_global_pairs
               << " local_legs=" << local_legs.size()
               << " local_multi_leg_riders=" << multi_leg_local
-              << " max_bins_in_a_venue=" << max_bins << std::endl;
+              << " max_groups_in_a_venue=" << max_groups << std::endl;
 
     printed_first = true;
   }
 }
 
-uint8_t RuntimeBinAllocator::venueTypeOf(VenueId venue_id) const {
+uint8_t RuntimeGroupAllocator::venueTypeOf(VenueId venue_id) const {
   // A rank only knows the types of venues in its own halo, so for a line
   // somebody else is riding, trust the type that came over the wire with them.
   auto it = venue_type_by_vid_.find(venue_id);
@@ -340,26 +341,26 @@ uint8_t RuntimeBinAllocator::venueTypeOf(VenueId venue_id) const {
   return world_.getVenueTypeId(venue_id);
 }
 
-bool RuntimeBinAllocator::isPartialPresenceVenue(VenueId venue_id) const {
+bool RuntimeGroupAllocator::isPartialPresenceVenue(VenueId venue_id) const {
   if (venue_id < 0) return false;
   const uint8_t vt = venueTypeOf(venue_id);
   return vt < 64 && ((venue_type_mask_ >> vt) & 1ULL) != 0;
 }
 
-void RuntimeBinAllocator::reindexRiders() {
+void RuntimeGroupAllocator::reindexRiders() {
   riders_by_venue_.clear();
   legs_by_person_.clear();
-  riders_by_venue_.reserve(num_bins_by_venue_.size());
+  riders_by_venue_.reserve(num_groups_by_venue_.size());
 
-  for (const auto& [key, bin] : bin_by_vid_pid_) {
+  for (const auto& [key, group] : group_by_vid_pid_) {
     const VenueId vid = static_cast<VenueId>(key >> 32);
     const PersonId pid = static_cast<PersonId>(key & 0xFFFFFFFFull);
     auto sub_it = subset_by_vid_pid_.find(key);
     if (sub_it == subset_by_vid_pid_.end())
       throw std::runtime_error(
-          "RuntimeBinAllocator: rider " + std::to_string(pid) + " on venue " +
-          std::to_string(vid) + " has a carriage but no subset");
-    riders_by_venue_[vid].push_back(Rider{pid, sub_it->second, bin});
+          "RuntimeGroupAllocator: rider " + std::to_string(pid) + " on venue " +
+          std::to_string(vid) + " has a group but no subset");
+    riders_by_venue_[vid].push_back(Rider{pid, sub_it->second, group});
     legs_by_person_[pid].push_back(vid);
   }
 
@@ -372,7 +373,7 @@ void RuntimeBinAllocator::reindexRiders() {
   for (auto& [pid, legs] : legs_by_person_) std::sort(legs.begin(), legs.end());
 }
 
-void RuntimeBinAllocator::attachFollowers(
+void RuntimeGroupAllocator::attachFollowers(
     const std::vector<std::pair<PersonId, PersonId>>& pairs) {
   if (venue_type_mask_ == 0) return;
 
@@ -417,7 +418,8 @@ void RuntimeBinAllocator::attachFollowers(
     const std::vector<VenueId> host_legs = legsOf(host);
     if (host_legs.empty())
       throw std::runtime_error(
-          "RuntimeBinAllocator::attachFollowers: host " + std::to_string(host) +
+          "RuntimeGroupAllocator::attachFollowers: host " +
+          std::to_string(host) +
           " rides no partial-presence venue, so follower " +
           std::to_string(follower) +
           " cannot travel with it. Follow placed the follower on a line the "
@@ -427,7 +429,7 @@ void RuntimeBinAllocator::attachFollowers(
     for (VenueId own : legsOf(follower)) {
       const uint64_t key =
           (static_cast<uint64_t>(own) << 32) | static_cast<uint64_t>(follower);
-      bin_by_vid_pid_.erase(key);
+      group_by_vid_pid_.erase(key);
       windows_by_vid_pid_.erase(key);
       f_presence_by_vid_pid_.erase(key);
       subset_by_vid_pid_.erase(key);
@@ -438,7 +440,7 @@ void RuntimeBinAllocator::attachFollowers(
           (static_cast<uint64_t>(leg) << 32) | static_cast<uint64_t>(host);
       const uint64_t fkey =
           (static_cast<uint64_t>(leg) << 32) | static_cast<uint64_t>(follower);
-      bin_by_vid_pid_[fkey] = bin_by_vid_pid_.at(hkey);
+      group_by_vid_pid_[fkey] = group_by_vid_pid_.at(hkey);
       windows_by_vid_pid_[fkey] = windows_by_vid_pid_.at(hkey);
       f_presence_by_vid_pid_[fkey] = f_presence_by_vid_pid_.at(hkey);
       subset_by_vid_pid_[fkey] = subset_by_vid_pid_.at(hkey);

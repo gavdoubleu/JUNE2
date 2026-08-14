@@ -197,16 +197,16 @@ disease:
     # respiratory:  droplet spread; driven by pneumonic stages only.
     modes:
       - name: animal_bite
-        susceptibility_multiplier: 1.0
+        mode_transmissibility_multiplier: 1.0
       - name: respiratory
-        susceptibility_multiplier: 1.0
+        mode_transmissibility_multiplier: 1.0
 
       # Rat-flea reservoir coupling: infectious free fleas (FI) from the
       # compartmental model drive human exposure.
-      # susceptibility_multiplier scales raw FI density to infection probability.
+      # mode_transmissibility_multiplier scales raw FI density to infection probability.
       - name: rat_flea_bite
         type: compartmental_uptake
-        susceptibility_multiplier: 1.0   # calibrate vs. historical mortality
+        mode_transmissibility_multiplier: 1.0   # calibrate vs. historical mortality
 
       # Human bacteraemia deposits infection pressure on susceptible free fleas.
       # Only the bacteraemia stage (peak bacteraemia, fleas can acquire infection).
@@ -219,7 +219,7 @@ disease:
         
       # - name: fomite
       #   type: fomite
-      #   susceptibility_multiplier: 1.0
+      #   mode_transmissibility_multiplier: 1.0
       #   # Infectiousness of surface-deposited material as a function of time since deposition.
       #   # All time values are in DAYS (simulation time units).
       #   # Lognormal: mode = exp(mu - sigma^2) = exp(2.59 - 0.64) ≈ 7 days; decays over ~2 weeks.

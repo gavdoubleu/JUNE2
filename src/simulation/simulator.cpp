@@ -3,7 +3,7 @@
 // live in sibling simulator_*.cpp files (declared in simulation/simulator.h).
 #include "simulation/simulator.h"
 
-#include "activity/runtime_bin_allocator.h"
+#include "activity/runtime_group_allocator.h"
 #ifdef USE_MPI
 #include "parallel/domain_manager.h"
 #endif
@@ -162,7 +162,8 @@ void printDiseaseAudit(const Disease& disease,
   }
   std::cout << "    modes (" << tp.modes.size() << "):";
   for (const auto& tmode : tp.modes) {
-    std::cout << "  " << tmode.name << "=" << tmode.susceptibility_multiplier;
+    std::cout << "  " << tmode.name << "="
+              << tmode.mode_transmissibility_multiplier;
   }
   std::cout << std::endl;
 
@@ -332,7 +333,7 @@ void printStartupAudit(const Disease& disease,
 // Implementation
 // =============================================================================
 
-Simulator::Simulator(WorldState& world, const Config& config,
+Simulator::Simulator(WorldState& world, Config& config,
                      DomainManager* domain_mgr,
                      const std::string& infection_seeds_file,
                      const std::string& output_filename)
@@ -340,8 +341,8 @@ Simulator::Simulator(WorldState& world, const Config& config,
       config_(config),
       domain_mgr_(domain_mgr),
       activity_manager_(world, config),
-      runtime_bin_allocator_(
-          std::make_unique<RuntimeBinAllocator>(world, config)),
+      runtime_group_allocator_(
+          std::make_unique<RuntimeGroupAllocator>(world, config)),
       current_day_num_(0),
       current_simulation_time_(0.0) {
   // GlobalRNG is seeded in main.cpp before any components are created
@@ -392,6 +393,28 @@ Simulator::Simulator(WorldState& world, const Config& config,
 
   world_.symptom_names = disease_->getSymptomNames();
 
+  // Rebuild the default per-mode contact matrix lookup against the disease's
+  // own mode list, so a missing default is caught here (loud, fatal) rather
+  // than surfacing later as a runtime lookup failure. Independent of whether
+  // contact_matrices.mode_names ended up empty.
+  {
+    std::vector<std::string> disease_mode_names;
+    for (const auto& mode : disease_->getTransmissionParams().modes) {
+      disease_mode_names.push_back(mode.name);
+    }
+    config_.contact_matrices.finalizeDefaultModeMatrices(world_,
+                                                         disease_mode_names);
+    // Reconcile ContactMatrixConfig's own mode order (derived from
+    // contact_matrices.yaml) against the disease's mode order, so per-venue
+    // matrix lookups are matched by name rather than by list position.
+    config_.contact_matrices.finalizeDiseaseModeAlignment(disease_mode_names);
+    // Resolve every (type, mode) the world can present, so transmission reads
+    // a complete table instead of walking a fallback chain per lookup, and a
+    // scenario leaning on the scenario-wide default says so here.
+    config_.contact_matrices.finalizeResolvedMatrices(world_,
+                                                      disease_mode_names);
+  }
+
   // Initialize fomite state on venues before epidemiology
   initFomiteState();
 
@@ -420,9 +443,10 @@ Simulator::Simulator(WorldState& world, const Config& config,
   interaction_manager_ = std::make_unique<InteractionManager>(
       world_, config_.contact_matrices, config_.simulation, config_.parallel,
       disease_.get(), &event_logger_);
-  // Wire the runtime bin allocator so processPartialPresenceVenue can
-  // consult carriage assignments. Allocator already constructed above.
-  interaction_manager_->setRuntimeBinAllocator(runtime_bin_allocator_.get());
+  // Wire the runtime group allocator so processPartialPresenceVenue can
+  // consult runtime group assignments. Allocator already constructed above.
+  interaction_manager_->setRuntimeGroupAllocator(
+      runtime_group_allocator_.get());
 
   // Initialize coordinated encounter manager
   const int rank = getRank();

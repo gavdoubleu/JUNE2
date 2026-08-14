@@ -21,8 +21,14 @@ contact_matrices:
       - [1.0]
     bins: ["all"]
 
+default_contacts_matrix:
+  contacts:
+    - [1.0]
+  proportion_physical:
+    - [1.0]
+  bins: ["all"]
+
 default_beta: 0.05
-default_contacts: 0.000001
 default_proportion_physical: 0.1
 default_characteristic_time: 24.0
 alpha_physical: 2.0

@@ -48,12 +48,19 @@ column stores the index, not the string, to keep row size small.
 A reserved id/index value meaning "not applicable" rather than a real
 reference. Two conventions exist in the current schema: `venue_id == -999`
 (`INFECTION_SEED_VENUE_ID` in the engine) marks a seed infection with no
-venue; `255` marks an unset uint8 registry index (e.g. `encounter_type_id`).
-The `255` registry sentinel must be excluded before a registry decode (see
-**Registry decode**), not treated as data. `-999` is different: `lookups/venues`
-carries a real row for `venue_id == -999` (`type == "infection_seed"`), so
-joining on it is not an error case — it resolves to a meaningful label, not
-`NaN`.
+venue; `255` marks an unset uint8 registry index. Two distinct engine
+constants share that `255` value — `kDefaultEncounterTypeId` (`encounter_type_id`,
+meaning "ordinary non-coordinated encounter", not an error) and `kNoSymptomId`
+(`infector_symptom_id`, meaning "no infector to read a symptom from" —
+seed/fomite/compartmental infections). `decode/sentinels.py` keeps them as
+separate named constants (`DEFAULT_ENCOUNTER_TYPE_ID`, `NO_SYMPTOM_ID`)
+mirroring `include/core/types.h`, not one shared value, since a future engine
+change could split their values apart. `old_symptom_id`/`new_symptom_id`
+carry no sentinel — always a real logged transition. Every `255` registry
+sentinel must be excluded before a registry decode (see **Registry decode**),
+not treated as data. `-999` is different: `lookups/venues` carries a real row
+for `venue_id == -999` (`type == "infection_seed"`), so joining on it is not
+an error case — it resolves to a meaningful label, not `NaN`.
 
 **Registry decode**:
 Translating a registry-indexed column (e.g. `encounter_type_id`) into its
@@ -138,6 +145,12 @@ defaults the caller can opt out of, not steps the caller assembles.
   `-999` is a real `venue_id`'s reserved value (int32), `255` is a reserved
   *registry index* (uint8). A generic decode/sentinel helper must take the
   sentinel as a parameter rather than hardcoding one.
+- The `tests/fixtures/simulation_events_fixture.h5` real-data fixture predates
+  the engine's uint8_t narrowing of `infector_symptom_id` (#16): it still
+  stores `infector_symptom_id` as `uint16` and `0` (not `255`) for no-infector
+  rows. Rerun `tests/fixtures/build_fixture.py` against a current
+  `simulation_events.h5` before trusting fixture-based assertions about
+  `infector_symptom_id` decode.
 - `coordinated_encounters` is deliberately out of scope for this library's
   current phase (see ADR [0004](../../docs/adr/0004-size-checked-chunking-for-raw-table-loads.md)
   for why the raw-table loader is chunked at all) — do not add a bare

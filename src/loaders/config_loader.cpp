@@ -249,9 +249,6 @@ void parseContactMatrixScalars(const YAML::Node& root,
   if (root["default_beta"]) {
     config.default_beta = root["default_beta"].as<double>();
   }
-  if (root["default_contacts"]) {
-    config.default_contacts = root["default_contacts"].as<double>();
-  }
   if (root["default_proportion_physical"]) {
     config.default_proportion_physical =
         root["default_proportion_physical"].as<double>();
@@ -282,18 +279,16 @@ void parseContactMatricesList(const YAML::Node& cm_node,
     const auto& matrix_node = matrix_kv.second;
 
     if (matrix_node["modes"]) {
-      // Multi-mode: parse each mode entry
-      bool first_mode = true;
+      // Multi-mode: parse each mode entry. Nothing is copied into the flat
+      // `matrices` map — a type that declares modes is described by those
+      // modes, and mirroring an arbitrary one of them into a mode-free slot
+      // is how a mode-specific matrix used to end up answering mode-free
+      // questions.
       for (const auto& mode_kv : matrix_node["modes"]) {
         std::string mode_name = mode_kv.first.as<std::string>();
         addMode(mode_name);
-        ContactMatrix cm = parseContactMatrix(mode_kv.second);
-        config.mode_matrices[venue_type][mode_name] = cm;
-        // Backward compat: store first mode matrix in the flat matrices map
-        if (first_mode) {
-          config.matrices[venue_type] = cm;
-          first_mode = false;
-        }
+        config.mode_matrices[venue_type][mode_name] =
+            parseContactMatrix(mode_kv.second);
       }
     } else {
       // Single-mode fallback: store as "default" mode and in flat map
@@ -607,12 +602,47 @@ ContactMatrixConfig ConfigLoader::loadContactMatrices(
 
   parseContactMatrixScalars(root, config);
 
-  if (root["default_contacts_matrix"]) {
-    config.default_matrix = parseContactMatrix(root["default_contacts_matrix"]);
-  }
-
   if (root["contact_matrices"]) {
     parseContactMatricesList(root["contact_matrices"], config);
+  }
+
+  if (root["allow_default_matrix"]) {
+    config.allow_default_matrix = root["allow_default_matrix"].as<bool>();
+  }
+
+  if (!root["default_contacts_matrix"]) {
+    throw std::runtime_error(
+        "Contact matrix config '" + filename +
+        "' is missing required key 'default_contacts_matrix'.");
+  }
+  const auto& default_node = root["default_contacts_matrix"];
+
+  if (default_node["modes"]) {
+    std::unordered_map<std::string, ContactMatrix> mode_matrices;
+    for (const auto& mode_kv : default_node["modes"]) {
+      mode_matrices[mode_kv.first.as<std::string>()] =
+          parseContactMatrix(mode_kv.second);
+    }
+
+    std::vector<std::string> missing_modes;
+    for (const auto& mode_name : config.mode_names) {
+      if (!mode_matrices.count(mode_name)) missing_modes.push_back(mode_name);
+    }
+    if (!missing_modes.empty()) {
+      std::string missing_list;
+      for (size_t i = 0; i < missing_modes.size(); ++i) {
+        if (i) missing_list += ", ";
+        missing_list += missing_modes[i];
+      }
+      throw std::runtime_error(
+          "Contact matrix config '" + filename +
+          "': 'default_contacts_matrix' is missing mode(s) [" + missing_list +
+          "] present in 'contact_matrices'.");
+    }
+
+    config.default_mode_matrices = std::move(mode_matrices);
+  } else {
+    config.default_matrix = parseContactMatrix(default_node);
   }
 
   return config;

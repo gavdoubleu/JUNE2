@@ -6,7 +6,7 @@
 #include <numeric>
 
 #include "activity/presence_window.h"
-#include "activity/runtime_bin_allocator.h"
+#include "activity/runtime_group_allocator.h"
 #include "epidemiology/interaction_manager.h"
 #include "simulation/compartmental_model_manager.h"
 #include "utils/deterministic_rng.h"
@@ -34,10 +34,10 @@ std::optional<int> InteractionManager::dispatchPartialPresenceIfApplicable(
     const std::unordered_map<PersonId, VisitorInfo>* visitor_data,
     uint8_t encounter_type_id, const CompartmentalModelManager* comp_model) {
   // Partial-presence venues (commute lines, etc.) take a different FOI path:
-  // sub-interval-aware, carriage-grouped, with per-rider effective presence
+  // sub-interval-aware, group-grouped, with per-rider effective presence
   // windows. The gate is a single bit-mask test; venue types not declared in
   // SimulationConfig::partial_presence pay no cost here.
-  if (!runtime_bin_allocator_ || actual_venue_id < 0 || !venue) return {};
+  if (!runtime_group_allocator_ || actual_venue_id < 0 || !venue) return {};
   const uint8_t vt = venue->type_id;
   const uint64_t mask =
       simulation_config_.partial_presence.enabled_venue_type_mask;
@@ -48,15 +48,15 @@ std::optional<int> InteractionManager::dispatchPartialPresenceIfApplicable(
       encounter_type_id, comp_model);
 }
 
-void InteractionManager::accumulateOneCarriage(
-    const std::vector<CarriageMember>& car, float slot_duration_min,
+void InteractionManager::accumulateOneGroup(
+    const std::vector<RuntimeGroupMember>& group, float slot_duration_min,
     double current_time, double delta_hours, int num_modes, int num_bins_needed,
-    uint8_t venue_type_id, const ContactMatrix* matrix,
+    uint8_t venue_type_id, const ContactMatrix& bin_structure,
     const TransmissionParams& trans_params,
     std::vector<PartialPresenceSubBin>& sub_bins,
     PartialPresenceLambdaResult& result) const {
   std::vector<float> events =
-      collectSubIntervalEventTimes(car, slot_duration_min);
+      collectSubIntervalEventTimes(group, slot_duration_min);
   if (events.size() < 2) return;
 
   for (size_t si = 0; si + 1 < events.size(); ++si) {
@@ -69,23 +69,23 @@ void InteractionManager::accumulateOneCarriage(
     for (auto& sb : sub_bins) sb.reset(num_modes);
 
     // Track per-bin susceptibles in this sub-interval (rebuilt each pass).
-    std::vector<std::vector<const CarriageMember*>> susc_by_bin(
+    std::vector<std::vector<const RuntimeGroupMember*>> susc_by_bin(
         num_bins_needed);
 
-    classifyMembersInSubInterval(car, t0, t1, scale, current_time, delta_hours,
-                                 num_modes, sub_bins, susc_by_bin);
+    classifyMembersInSubInterval(group, t0, t1, scale, current_time,
+                                 delta_hours, num_modes, sub_bins, susc_by_bin);
 
     accumulatePartialLambdaContributions(sub_bins, susc_by_bin, venue_type_id,
-                                         matrix, num_bins_needed, num_modes,
-                                         trans_params, result);
+                                         bin_structure, num_bins_needed,
+                                         num_modes, trans_params, result);
   }
 }
 
 void InteractionManager::accumulatePartialLambdaContributions(
     const std::vector<PartialPresenceSubBin>& sub_bins,
-    const std::vector<std::vector<const CarriageMember*>>& susc_by_bin,
-    uint8_t venue_type_id, const ContactMatrix* matrix, int num_bins_needed,
-    int num_modes, const TransmissionParams& trans_params,
+    const std::vector<std::vector<const RuntimeGroupMember*>>& susc_by_bin,
+    uint8_t venue_type_id, const ContactMatrix& bin_structure,
+    int num_bins_needed, int num_modes, const TransmissionParams& trans_params,
     PartialPresenceLambdaResult& result) const {
   using AccumSource = PartialPresenceAccumSource;
   auto& susc_lambda = result.susc_lambda;
@@ -95,11 +95,11 @@ void InteractionManager::accumulatePartialLambdaContributions(
     if (susc_by_bin[susc_bin].empty()) continue;
 
     for (int mode = 0; mode < num_modes; ++mode) {
-      const ContactMatrix* mode_matrix =
+      const ContactMatrix& mode_matrix =
           contact_matrices_.getMatrix(venue_type_id, mode);
       double mode_susc_mult =
           (mode < static_cast<int>(trans_params.modes.size()))
-              ? trans_params.modes[mode].susceptibility_multiplier
+              ? trans_params.modes[mode].mode_transmissibility_multiplier
               : 1.0;
 
       for (int inf_bin = 0; inf_bin < num_bins_needed; ++inf_bin) {
@@ -107,7 +107,7 @@ void InteractionManager::accumulatePartialLambdaContributions(
         if (!(total_inf > 0.0)) continue;
 
         double contacts =
-            lookupContactsForBinPair(mode_matrix, matrix, susc_bin, inf_bin);
+            lookupContactsForBinPair(mode_matrix, susc_bin, inf_bin);
         if (!(contacts > 0.0)) continue;
 
         int bin_size = sub_bins[inf_bin].total_size;
@@ -116,7 +116,7 @@ void InteractionManager::accumulatePartialLambdaContributions(
         double contrib = omega * total_inf * mode_susc_mult;
         if (!(contrib > 0.0)) continue;
 
-        for (const CarriageMember* sm : susc_by_bin[susc_bin]) {
+        for (const RuntimeGroupMember* sm : susc_by_bin[susc_bin]) {
           // f_S: this susceptible's own presence cap (1.0 unless over-long).
           // Channel-symmetric with f_I (baked into total_inf via inf_sub): a
           // contact carries f_I·f_S in both directions. The source weights `w`
@@ -144,11 +144,11 @@ void InteractionManager::accumulatePartialLambdaContributions(
 }
 
 void InteractionManager::classifyMembersInSubInterval(
-    const std::vector<CarriageMember>& car, float t0, float t1, double scale,
-    double current_time, double delta_hours, int num_modes,
+    const std::vector<RuntimeGroupMember>& group, float t0, float t1,
+    double scale, double current_time, double delta_hours, int num_modes,
     std::vector<PartialPresenceSubBin>& sub_bins,
-    std::vector<std::vector<const CarriageMember*>>& susc_by_bin) const {
-  for (const auto& m : car) {
+    std::vector<std::vector<const RuntimeGroupMember*>>& susc_by_bin) const {
+  for (const auto& m : group) {
     // Present iff [eff_board, eff_alight) covers [t0, t1).
     if (!(m.eff_board <= t0 + 1e-5f && m.eff_alight + 1e-5f >= t1)) continue;
 
@@ -208,7 +208,8 @@ void InteractionManager::classifyMembersInSubInterval(
 }
 
 std::vector<float> InteractionManager::collectSubIntervalEventTimes(
-    const std::vector<CarriageMember>& car, float slot_duration_min) const {
+    const std::vector<RuntimeGroupMember>& group,
+    float slot_duration_min) const {
   // Slice sub-intervals over the venue's OWN [min board, max alight] range
   // (NOT [0, slot]): the windows are raw line-local offsets in this venue's
   // clock, so the boundaries are exactly the members' board/alight points.
@@ -217,8 +218,8 @@ std::vector<float> InteractionManager::collectSubIntervalEventTimes(
   // per-rider presence cap f_p — not a slot clamp — conserves the day budget.
   (void)slot_duration_min;
   std::vector<float> events;
-  events.reserve(2 * car.size());
-  for (const auto& m : car) {
+  events.reserve(2 * group.size());
+  for (const auto& m : group) {
     events.push_back(m.eff_board);
     events.push_back(m.eff_alight);
   }
@@ -230,26 +231,26 @@ std::vector<float> InteractionManager::collectSubIntervalEventTimes(
   return events;
 }
 
-std::vector<std::vector<CarriageMember>>
-InteractionManager::buildPartialPresenceCarriages(
+std::vector<std::vector<RuntimeGroupMember>>
+InteractionManager::buildPartialPresenceGroups(
     const std::vector<InteractionMember>& members, Venue* venue,
-    VenueId actual_venue_id, const ContactMatrix* matrix, int num_bins_needed,
-    uint16_t num_bins,
+    VenueId actual_venue_id, const ContactMatrix& bin_structure,
+    int num_bins_needed, uint16_t num_groups,
     const std::unordered_map<PersonId, VisitorInfo>* visitor_data) const {
-  std::vector<std::vector<CarriageMember>> carriages(num_bins);
+  std::vector<std::vector<RuntimeGroupMember>> groups(num_groups);
 
   for (const auto& m : members) {
-    const uint16_t carriage =
-        runtime_bin_allocator_->getBinIndex(actual_venue_id, m.id);
-    // Members come from the rider table, so a missing or out-of-range carriage
+    const uint16_t group =
+        runtime_group_allocator_->getGroupIndex(actual_venue_id, m.id);
+    // Members come from the rider table, so a missing or out-of-range group
     // means the two disagree. Skipping here is what used to put people on a
     // line with no force of infection in either direction, so it throws.
-    if (carriage == RuntimeBinAllocator::kNoBin || carriage >= num_bins)
+    if (group == RuntimeGroupAllocator::kNoGroup || group >= num_groups)
       throw std::runtime_error("partial-presence venue " +
                                std::to_string(actual_venue_id) + ": rider " +
-                               std::to_string(m.id) + " has no carriage (got " +
-                               std::to_string(static_cast<int>(carriage)) +
-                               " of " + std::to_string(num_bins) + ")");
+                               std::to_string(m.id) + " has no group (got " +
+                               std::to_string(static_cast<int>(group)) +
+                               " of " + std::to_string(num_groups) + ")");
 
     Person* person = nullptr;
     const VisitorInfo* visitor = nullptr;
@@ -265,27 +266,27 @@ InteractionManager::buildPartialPresenceCarriages(
     // Window + presence cap from the allocator's global broadcast: identical
     // on every rank for the same (venue, person) pair.
     const EffectiveWindow win =
-        runtime_bin_allocator_->getPresenceWindow(actual_venue_id, m.id);
+        runtime_group_allocator_->getPresenceWindow(actual_venue_id, m.id);
     const float f_presence =
-        runtime_bin_allocator_->getPresenceFactor(actual_venue_id, m.id);
+        runtime_group_allocator_->getPresenceFactor(actual_venue_id, m.id);
 
     int matrix_bin = computeBinIndexForMatrix(person, venue, m.subset_index,
-                                              matrix, num_bins_needed);
+                                              &bin_structure, num_bins_needed);
     if (matrix_bin < 0 || matrix_bin >= num_bins_needed) matrix_bin = 0;
 
-    carriages[carriage].push_back(CarriageMember{
+    groups[group].push_back(RuntimeGroupMember{
         m.id, m.array_index, m.subset_index, m.encounter_type_id, person,
         visitor, win.eff_board, win.eff_alight, f_presence, matrix_bin});
   }
 
-  // Deterministic per-carriage order (FP-stable accumulation across ranks).
-  for (auto& car : carriages) {
-    std::sort(car.begin(), car.end(),
-              [](const CarriageMember& a, const CarriageMember& b) {
+  // Deterministic per-group order (FP-stable accumulation across ranks).
+  for (auto& group : groups) {
+    std::sort(group.begin(), group.end(),
+              [](const RuntimeGroupMember& a, const RuntimeGroupMember& b) {
                 return a.pid < b.pid;
               });
   }
-  return carriages;
+  return groups;
 }
 
 void InteractionManager::validatePartialPresencePreconditions(
@@ -305,9 +306,9 @@ void InteractionManager::validatePartialPresencePreconditions(
     throw std::runtime_error(
         "computePartialPresenceLambda: parent-venue mixing not supported on "
         "partial-presence types in v1");
-  if (!runtime_bin_allocator_)
+  if (!runtime_group_allocator_)
     throw std::runtime_error(
-        "computePartialPresenceLambda: runtime_bin_allocator_ is null (gate "
+        "computePartialPresenceLambda: runtime_group_allocator_ is null (gate "
         "should have prevented this call)");
 }
 
@@ -323,13 +324,10 @@ InteractionManager::computePartialPresenceLambda(
                                        encounter_type_id);
 
   const uint8_t venue_type_id = venue->type_id;
-  const ContactMatrix* matrix = contact_matrices_.getMatrix(venue_type_id);
-  if (!matrix)
-    throw std::runtime_error(
-        "computePartialPresenceLambda: no contact matrix for venue_type_id=" +
-        std::to_string(static_cast<int>(venue_type_id)));
+  const ContactMatrix& bin_structure =
+      contact_matrices_.getBinStructure(venue_type_id);
   const int num_bins_needed =
-      std::max(1, static_cast<int>(matrix->bins.size()));
+      std::max(1, static_cast<int>(bin_structure.bins.size()));
 
   int num_modes = disease_->numModes();
   if (num_modes == 0) num_modes = 1;
@@ -342,22 +340,24 @@ InteractionManager::computePartialPresenceLambda(
   // them on each rider's home rank (raw line-local windows; f_p from the full
   // leg list) and broadcasts globally, so a cross-rank visitor's window and
   // f_p are identical to what the home rank would have computed locally.
-  const uint16_t num_bins = runtime_bin_allocator_->getNumBins(actual_venue_id);
-  if (num_bins == 0) return result;
+  const uint16_t num_groups =
+      runtime_group_allocator_->getNumGroups(actual_venue_id);
+  if (num_groups == 0) return result;
 
-  std::vector<std::vector<CarriageMember>> carriages =
-      buildPartialPresenceCarriages(members, venue, actual_venue_id, matrix,
-                                    num_bins_needed, num_bins, visitor_data);
+  std::vector<std::vector<RuntimeGroupMember>> groups =
+      buildPartialPresenceGroups(members, venue, actual_venue_id, bin_structure,
+                                 num_bins_needed, num_groups, visitor_data);
 
-  // Per-bin scratch reused across sub-intervals (cleared per sub-interval).
+  // Per-matrix-bin scratch reused across sub-intervals (cleared per
+  // sub-interval).
   std::vector<PartialPresenceSubBin> sub_bins(num_bins_needed);
 
-  for (uint16_t c = 0; c < num_bins; ++c) {
-    const auto& car = carriages[c];
-    if (car.empty()) continue;
-    accumulateOneCarriage(car, slot_duration_min, current_time, delta_hours,
-                          num_modes, num_bins_needed, venue_type_id, matrix,
-                          trans_params, sub_bins, result);
+  for (uint16_t c = 0; c < num_groups; ++c) {
+    const auto& group = groups[c];
+    if (group.empty()) continue;
+    accumulateOneGroup(group, slot_duration_min, current_time, delta_hours,
+                       num_modes, num_bins_needed, venue_type_id, bin_structure,
+                       trans_params, sub_bins, result);
   }
 
   return result;
@@ -389,7 +389,7 @@ int InteractionManager::processPartialPresenceLines(
     double delta_hours, std::unordered_set<PersonId>* active_infections,
     const std::unordered_map<PersonId, VisitorInfo>* visitor_data) {
   pp_candidates_.clear();
-  if (!runtime_bin_allocator_ || owned_lines.empty()) return 0;
+  if (!runtime_group_allocator_ || owned_lines.empty()) return 0;
 
   std::vector<InteractionMember> members;
   for (VenueId vid : owned_lines) {
@@ -399,7 +399,7 @@ int InteractionManager::processPartialPresenceLines(
                                std::to_string(vid) +
                                " but the venue is not in its world");
 
-    const auto& riders = runtime_bin_allocator_->ridersByVenue().at(vid);
+    const auto& riders = runtime_group_allocator_->ridersByVenue().at(vid);
     members.clear();
     members.reserve(riders.size());
     for (const auto& r : riders) {

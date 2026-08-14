@@ -8,6 +8,7 @@
 #include "epidemiology/disease.h"
 #include "epidemiology/interaction_manager.h"
 #include "loaders/config_loader.h"
+#include "test_utils.h"
 
 using namespace june;
 
@@ -38,13 +39,17 @@ TEST_CASE("InteractionManager - Venue Matrix Lookups via Resolved Config") {
   world.people[1].geo_unit_id = -1;
   world.buildIndices();
 
-  // 3. Resolve the config! This establishes the uint8_t lookup vector
-  // matrices_by_id
-  cm.resolve(world);
+  // 3. Set up low default contacts — if the matrix lookup is skipped, this
+  // default matrix's contacts get used instead of the office matrix's (5.0).
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{0.000001}};
+  cm.default_matrix = default_contact_matrix;
 
-  // 4. Set up low default contacts — if the matrix lookup is skipped,
-  // default_contacts will be used instead of the matrix's contacts (5.0)
-  cm.default_contacts = 0.000001;
+  // 4. Resolve every (venue type, mode) into the table transmission reads.
+  // household has no matrix of its own here, so accept the default for it.
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world);
 
   // 5. Set up disease
   TransmissionParams trans;
@@ -141,29 +146,29 @@ TEST_CASE(
   // looks up virtual matrices by encounter_type_id, not by name, so this
   // map is the canonical entry point.
   cm.virtual_matrix_names[0] = "romantic_encounter";
+  cm.virtual_encounter_type_ids = {0};
 
   // 4. Resolve config
-  cm.resolve(world);
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world);
 
   // Direct pointer assertions: the lookup keyed by encounter_type_id must
   // resolve to the romantic_encounter matrix (C=1.0), NOT the office
   // matrix (C=9.0) that sits at the colliding venue_type_id. Before the
   // fix, venue-keyed and encounter-keyed lookups were conflated and this
   // would return the office matrix.
-  const ContactMatrix* by_enc = cm.getVirtualMatrix(0);
-  REQUIRE(by_enc != nullptr);
-  REQUIRE(!by_enc->contacts.empty());
-  REQUIRE(!by_enc->contacts[0].empty());
-  CHECK(by_enc->contacts[0][0] == doctest::Approx(1.0));
+  const ContactMatrix& by_enc = cm.getVirtualBinStructure(0);
+  REQUIRE(!by_enc.contacts.empty());
+  REQUIRE(!by_enc.contacts[0].empty());
+  CHECK(by_enc.contacts[0][0] == doctest::Approx(1.0));
 
   // And the venue getter should still return the office matrix at the
   // same integer id — these are two independent lookups now, and the
   // test proves it.
-  const ContactMatrix* by_venue = cm.getMatrix(static_cast<uint8_t>(0));
-  REQUIRE(by_venue != nullptr);
-  REQUIRE(!by_venue->contacts.empty());
-  REQUIRE(!by_venue->contacts[0].empty());
-  CHECK(by_venue->contacts[0][0] == doctest::Approx(9.0));
+  const ContactMatrix& by_venue = cm.getBinStructure(static_cast<uint8_t>(0));
+  REQUIRE(!by_venue.contacts.empty());
+  REQUIRE(!by_venue.contacts[0].empty());
+  CHECK(by_venue.contacts[0][0] == doctest::Approx(9.0));
 
   // 4. Setup disease with high infectiousness
   TransmissionParams trans;
@@ -209,7 +214,7 @@ TEST_CASE(
   locs.push_back(loc1);
 
   // Verify that the romantic_encounter contact matrix (contacts=1.0) is used
-  // for virtual encounters, not the default_contacts.
+  // for virtual encounters, not the default matrix.
   // FoI formula: lambda = delta_hours * C / bin_size * infectiousness *
   // susc_mult With C=1.0 (from matrix), delta=24h, bin_size=1: lambda = 24 →
   // prob ≈ 1.0
@@ -221,4 +226,48 @@ TEST_CASE(
   }
 
   CHECK(infections > 30);
+}
+
+TEST_CASE(
+    "ContactMatrixConfig - encounter type with no matrix of its own is "
+    "refused at load unless the default is opted into") {
+  // An encounter type declared in the world but never given a
+  // virtual_contact_matrix entry (missing config, typo'd name, ...) has no
+  // contact structure of its own. Borrowing the scenario-wide default for it
+  // has to be spelled out in the scenario, because the resulting physics is
+  // not what the scenario says about that encounter type.
+  auto build = [](WorldState& world, ContactMatrixConfig& cm) {
+    world.venue_type_names = {"office"};
+    world.encounter_type_names = {"unconfigured_encounter"};
+    world.buildIndices();
+    // Held at a virtual venue, so it needs a matrix of its own; it just has
+    // not been given one. CoordinatedEncounterConfig::resolve records this
+    // in production.
+    cm.virtual_encounter_type_ids = {0};
+  };
+
+  SUBCASE("strict by default: load refuses and names the encounter type") {
+    ContactMatrixConfig cm = ConfigLoader::loadContactMatrices(
+        "tests/configs/romantic_regression.yaml");
+    WorldState world;
+    build(world, cm);
+    REQUIRE(cm.allow_default_matrix == false);
+    CHECK_THROWS_WITH_AS(finalizeContactMatrices(cm, world),
+                         doctest::Contains("unconfigured_encounter"),
+                         std::runtime_error);
+  }
+
+  SUBCASE("opted in: resolves to the default matrix") {
+    ContactMatrixConfig cm = ConfigLoader::loadContactMatrices(
+        "tests/configs/romantic_regression.yaml");
+    WorldState world;
+    build(world, cm);
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world);
+
+    const ContactMatrix& resolved = cm.getVirtualMatrix(0, 0);
+    REQUIRE(!resolved.contacts.empty());
+    REQUIRE(!resolved.contacts[0].empty());
+    CHECK(resolved.contacts[0][0] == doctest::Approx(1.0));
+  }
 }

@@ -53,7 +53,7 @@
 # ---------------------------------------------------------------------------
 # Disease-config dependency
 # ---------------------------------------------------------------------------
-# disease.yaml's mode_susceptibility_multipliers must be [1.0, 1.0]. The
+# disease.yaml's mode_transmissibility_multipliers must be [1.0, 1.0]. The
 # physical-contact infectiousness multiplier (historically called alpha) has
 # been folded into physical_contact.beta at this file's values, so doubling
 # it again in disease.yaml would double-count.
@@ -221,28 +221,6 @@ contact_matrices:
         - [0.25, 10.0, 10.0]
         - [1.0, 0.0, 0.0]
         - [1.0, 0.0, 0.0]
-  coordinated_encounter:
-    modes:
-      respiratory:
-        beta: 0.0
-        bins: &id021 [participant]
-        contacts: &id022
-        - [4.0]
-      physical_contact:
-        beta: 1.8
-        bins: *id021
-        contacts: *id022
-  social_encounter:
-    modes:
-      respiratory:
-        beta: 0.125
-        bins: &id023 [participant]
-        contacts: &id024
-        - [6.0]
-      physical_contact:
-        beta: 0.25
-        bins: *id023
-        contacts: *id024
   company:
     modes:
       respiratory:

@@ -9,6 +9,7 @@
 #include "core/config.h"
 #include "core/types.h"
 #include "core/world_state.h"
+#include "epidemiology/disease.h"
 
 namespace june {
 
@@ -173,7 +174,7 @@ inline VenueId addPartialPresenceVenue(WorldState& world, uint8_t type_id) {
 // in `legs` gets one ActivityMeta with venue_count = number of their legs.
 // All legs become entries in activity_venues; per-leg t_board_min /
 // t_alight_min are written into membership_field_values (the side-table
-// the RuntimeBinAllocator consults).
+// the RuntimeGroupAllocator consults).
 //
 // Pre-condition: each referenced person has activity_meta_count == 0 on entry
 // (helper is for fresh persons; reusing it on the same person would break
@@ -249,6 +250,49 @@ inline std::vector<PersonLocation> makePartialPresenceLocations(
     }
   }
   return locs;
+}
+
+// Run the same contact-matrix finalize chain Simulator runs at startup, for
+// tests that build an InteractionManager directly instead of going through
+// Simulator. Transmission reads a table resolved here, so a test that skips
+// this gets an unresolved-lookup throw rather than silently different physics.
+// `mode_names` defaults to a single unnamed mode, matching a disease that
+// declares none.
+inline void finalizeContactMatrices(
+    ContactMatrixConfig& cm, const WorldState& world,
+    const std::vector<std::string>& mode_names = {}) {
+  // A test that declares no contact structure at all is testing something
+  // other than direct contact (fomite deposition, compartmental uptake, the
+  // partial-presence gate). Give it a matrix that transmits nothing, so
+  // direct contact is off unless a test asks for it: a test that meant to
+  // exercise contact transmission and forgot to declare a matrix then sees
+  // zero infections and fails, rather than picking up a rate from nowhere.
+  if (!cm.default_matrix.has_value() && cm.matrices.empty() &&
+      cm.mode_matrices.empty()) {
+    ContactMatrix silent;
+    silent.bins = {"all"};
+    silent.contacts = {{0.0}};
+    cm.default_matrix = silent;
+    cm.allow_default_matrix = true;
+  }
+  cm.resolve(world);
+  cm.finalizeDefaultModeMatrices(world, mode_names);
+  cm.finalizeDiseaseModeAlignment(mode_names);
+  cm.finalizeResolvedMatrices(world, mode_names);
+}
+
+// Same, taking the mode list from the disease that will drive transmission.
+// The resolved table is indexed by disease mode, so a multi-mode disease needs
+// its modes named here or the force-of-infection loop asks for a mode the
+// table does not have.
+inline void finalizeContactMatrices(ContactMatrixConfig& cm,
+                                    const WorldState& world,
+                                    const Disease& disease) {
+  std::vector<std::string> mode_names;
+  for (const auto& mode : disease.getTransmissionParams().modes) {
+    mode_names.push_back(mode.name);
+  }
+  finalizeContactMatrices(cm, world, mode_names);
 }
 
 }  // namespace june

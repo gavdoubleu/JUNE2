@@ -1,0 +1,11 @@
+default_contacts_matrix:
+  modes:
+    respiratory:
+      beta: 1.5
+      bins: [all]
+      contacts:
+        - [0.004]
+    physical_contact:
+      bins: [all]
+      contacts:
+        - [0.006]

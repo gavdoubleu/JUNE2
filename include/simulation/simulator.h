@@ -12,7 +12,7 @@
 
 #include "activity/coordinated_encounter_manager.h"
 #include "activity/on_the_fly_venue_allocator.h"
-#include "activity/runtime_bin_allocator.h"
+#include "activity/runtime_group_allocator.h"
 #include "core/config.h"
 #include "core/world_state.h"
 #include "epidemiology/calendar_event.h"
@@ -46,8 +46,7 @@ class DomainManager;
 class Simulator {
  public:
   Simulator(
-      WorldState& world, const Config& config,
-      DomainManager* domain_mgr = nullptr,
+      WorldState& world, Config& config, DomainManager* domain_mgr = nullptr,
       const std::string& infection_seeds_file = "config/infection_seeds.yaml",
       const std::string& output_filename = "simulation_events.h5");
 
@@ -74,7 +73,7 @@ class Simulator {
 
  private:
   WorldState& world_;
-  const Config& config_;
+  Config& config_;
   DomainManager*
       domain_mgr_;  // Optional: nullptr for serial mode, set for parallel mode
 
@@ -92,9 +91,9 @@ class Simulator {
   // Activity management
   ActivityManager activity_manager_;
 
-  // Runtime bin allocator (carriages on transport_line venues etc.). Cheap
+  // Runtime group allocator (a train's carriages, a ferry's decks). Cheap
   // no-op when SimulationConfig::partial_presence is empty.
-  std::unique_ptr<RuntimeBinAllocator> runtime_bin_allocator_;
+  std::unique_ptr<RuntimeGroupAllocator> runtime_group_allocator_;
 
   // Policy management (symptom-based behavior, lockdowns, etc.)
   std::unique_ptr<PolicyManager> policy_manager_;

@@ -3,7 +3,7 @@
 #include <memory>
 #include <vector>
 
-#include "activity/runtime_bin_allocator.h"
+#include "activity/runtime_group_allocator.h"
 #include "core/config.h"
 #include "core/types.h"
 #include "core/world_state.h"
@@ -18,7 +18,7 @@
 
 using namespace june;
 
-// The RuntimeBinAllocator calls MPI_Comm_size during allocateForSlot when
+// The RuntimeGroupAllocator calls MPI_Comm_size during allocateForSlot when
 // the build has USE_MPI defined, even with a single process. Initialise MPI
 // here so a serial doctest run doesn't abort.
 int main(int argc, char** argv) {
@@ -48,6 +48,10 @@ int main(int argc, char** argv) {
 //      declaring partial_presence on a venue type that no venue in the
 //      scenario uses leaves the fast-path FOI behavior identical to the
 //      empty-partial-presence baseline.
+//   4. Default-sourced contact structure:
+//      a partial-presence venue type with no matrix of its own resolves
+//      against the scenario default and accrues that default's contact rate,
+//      instead of failing the moment such a venue transmits.
 //
 // Synthetic worlds with anonymous IDs — see
 // feedback_tests_name_physics_not_scenarios memory: no Durham, no
@@ -83,8 +87,8 @@ std::unique_ptr<Disease> makeUnitConstantDisease() {
 }
 
 // Build a single-bin, single-mode contact matrix for a partial-presence
-// venue type and register it in the config. Calls resolve() so the engine's
-// integer-keyed lookups (matrices_by_id, mode_matrices_by_id) are populated.
+// venue type and register it in the config, then run the same finalize chain
+// Simulator runs so the integer-keyed lookups transmission reads are filled.
 void registerSimpleContactMatrix(ContactMatrixConfig& cm,
                                  const std::string& venue_type_name,
                                  const WorldState& world,
@@ -96,7 +100,7 @@ void registerSimpleContactMatrix(ContactMatrixConfig& cm,
   cm.matrices[venue_type_name] = mat;
   cm.mode_matrices[venue_type_name]["respiratory"] = mat;
   if (cm.mode_names.empty()) cm.mode_names = {"respiratory"};
-  cm.resolve(world);
+  finalizeContactMatrices(cm, world);
 }
 
 // Add a person to the world. Sets only the fields the partial-presence
@@ -192,10 +196,10 @@ TEST_CASE(
                                   /*seed=*/7, &world, "route_line", line);
 
   // Allocator + interaction manager wiring.
-  RuntimeBinAllocator allocator(world, config);
+  RuntimeGroupAllocator allocator(world, config);
   InteractionManager im(world, cm, sim_cfg, parallel_config, disease.get(),
                         nullptr);
-  im.setRuntimeBinAllocator(&allocator);
+  im.setRuntimeGroupAllocator(&allocator);
 
   // Drive allocator for this slot.
   std::vector<PersonLocation> locs =
@@ -206,9 +210,9 @@ TEST_CASE(
                             /*current_simulation_time=*/0.0, delta_hours, locs);
 
   // Sanity: both riders bucketed, single bin.
-  REQUIRE(allocator.getNumBins(line) == 1);
-  REQUIRE(allocator.getBinIndex(line, 0) == 0);
-  REQUIRE(allocator.getBinIndex(line, 1) == 0);
+  REQUIRE(allocator.getNumGroups(line) == 1);
+  REQUIRE(allocator.getGroupIndex(line, 0) == 0);
+  REQUIRE(allocator.getGroupIndex(line, 1) == 0);
 
   // Build the InteractionMember list (one per location, both on `line`).
   std::vector<InteractionMember> members;
@@ -295,10 +299,10 @@ TEST_CASE("partial-presence FOI: bin isolation yields zero cross-bin lambda") {
       std::make_unique<Infection>(disease.get(), 0.0, &world.people[0],
                                   /*seed=*/7, &world, "route_line", line);
 
-  RuntimeBinAllocator allocator(world, config);
+  RuntimeGroupAllocator allocator(world, config);
   InteractionManager im(world, cm, sim_cfg, parallel_config, disease.get(),
                         nullptr);
-  im.setRuntimeBinAllocator(&allocator);
+  im.setRuntimeGroupAllocator(&allocator);
 
   std::vector<PersonLocation> locs =
       makePartialPresenceLocations(world, /*activity_index=*/0);
@@ -308,9 +312,9 @@ TEST_CASE("partial-presence FOI: bin isolation yields zero cross-bin lambda") {
 
   // tgs=1, 2 riders → 2 bins, one rider in each. Different bins is the
   // load-bearing invariant for this test; assert it explicitly.
-  REQUIRE(allocator.getNumBins(line) == 2);
-  const uint16_t bin_a = allocator.getBinIndex(line, 0);
-  const uint16_t bin_b = allocator.getBinIndex(line, 1);
+  REQUIRE(allocator.getNumGroups(line) == 2);
+  const uint16_t bin_a = allocator.getGroupIndex(line, 0);
+  const uint16_t bin_b = allocator.getGroupIndex(line, 1);
   REQUIRE(bin_a != bin_b);
 
   std::vector<InteractionMember> members;
@@ -386,7 +390,10 @@ TEST_CASE(
     world.buildIndices();
 
     ContactMatrixConfig cm;
-    cm.default_contacts = 0.3;
+    ContactMatrix default_contact_matrix;
+    default_contact_matrix.bins = {"all"};
+    default_contact_matrix.contacts = {{0.3}};
+    cm.default_matrix = default_contact_matrix;
 
     Config config;
     SimulationConfig& sim_cfg = config.simulation;
@@ -412,11 +419,13 @@ TEST_CASE(
 
     // Wire an allocator only when partial_presence is declared (mirrors how
     // Simulator wires it conditionally).
-    RuntimeBinAllocator allocator(world, config);
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world, *disease);
+    RuntimeGroupAllocator allocator(world, config);
     InteractionManager im(world, cm, sim_cfg, parallel_config, disease.get(),
                           nullptr);
     if (declare_unrelated_partial_presence) {
-      im.setRuntimeBinAllocator(&allocator);
+      im.setRuntimeGroupAllocator(&allocator);
       TimeSlot slot;
       allocator.allocateForSlot(0, 0, slot, /*current_time=*/0.0,
                                 /*delta_hours=*/4.0, /*locations=*/{});
@@ -437,5 +446,115 @@ TEST_CASE(
     const bool baseline = run_one(/*declare=*/false, seed);
     const bool gated = run_one(/*declare=*/true, seed);
     CHECK_MESSAGE(baseline == gated, "seed=", seed);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Test 4: A partial-presence venue type whose contact structure comes from the
+// scenario default, not from an entry of its own.
+//
+// The full-presence path has always tolerated this: a venue type with no
+// matrix of its own picks up the scenario default. The partial-presence path
+// used a lookup that could not see the default at all, so the same scenario
+// killed the run the first time such a venue transmitted.
+//
+// The physics asserted here is the same partial-overlap property as Test 1 —
+// λ accrues only over the shared window — with the contact rate sourced from
+// the default matrix. Two riders, windows [0,20) and [10,20), slot 60 min:
+//   λ_B = contacts * (overlap / slot) * (full_inf / N_bin)
+//       = 6.0 * (10 / 60) * (1.0 / 1) = 1.0
+// -----------------------------------------------------------------------------
+TEST_CASE(
+    "partial-presence FOI: venue type with only a default contact matrix "
+    "resolves and accrues the default's contact rate") {
+  auto buildWorld = [](WorldState& world, Config& config) -> VenueId {
+    registerScaffolding(world);
+    const uint8_t line_type_id = addPartialPresenceVenueType(
+        world, config.simulation, "route_line", /*target_group_size=*/100);
+    const VenueId line = addPartialPresenceVenue(world, line_type_id);
+    addAdult(world, /*pid=*/0);  // infectious
+    addAdult(world, /*pid=*/1);  // susceptible
+    std::vector<PartialPresenceLegSpec> legs;
+    legs.push_back(PartialPresenceLegSpec{0, line, 0.0f, 20.0f});
+    legs.push_back(PartialPresenceLegSpec{1, line, 10.0f, 20.0f});
+    addPartialPresenceLegs(world, /*activity_index=*/0, legs);
+    world.buildIndices();
+    return line;
+  };
+
+  // The only contact structure in the scenario: no per-venue-type entry.
+  auto defaultOnlyMatrices = []() {
+    ContactMatrixConfig cm;
+    ContactMatrix mat;
+    mat.bins = {"rider"};
+    mat.contacts = {{6.0}};
+    mat.proportion_physical = {{0.0}};
+    cm.default_matrix = mat;
+    return cm;
+  };
+
+  SUBCASE("leaning on the default is refused at load unless stated") {
+    WorldState world;
+    Config config;
+    buildWorld(world, config);
+    ContactMatrixConfig cm = defaultOnlyMatrices();
+    REQUIRE(cm.allow_default_matrix == false);
+    CHECK_THROWS_WITH_AS(finalizeContactMatrices(cm, world),
+                         doctest::Contains("route_line"), std::runtime_error);
+  }
+
+  SUBCASE("stated: lambda accrues over the shared window at the default rate") {
+    WorldState world;
+    Config config;
+    SimulationConfig& sim_cfg = config.simulation;
+    sim_cfg.random_seed = 12345;
+    const VenueId line = buildWorld(world, config);
+
+    ContactMatrixConfig cm = defaultOnlyMatrices();
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world);
+
+    auto disease = makeUnitConstantDisease();
+    ParallelConfig parallel_config;
+    world.people[0].infection =
+        std::make_unique<Infection>(disease.get(), 0.0, &world.people[0],
+                                    /*seed=*/7, &world, "route_line", line);
+
+    RuntimeGroupAllocator allocator(world, config);
+    InteractionManager im(world, cm, sim_cfg, parallel_config, disease.get(),
+                          nullptr);
+    im.setRuntimeGroupAllocator(&allocator);
+
+    std::vector<PersonLocation> locs =
+        makePartialPresenceLocations(world, /*activity_index=*/0);
+    TimeSlot slot;
+    const double delta_hours = 1.0;
+    allocator.allocateForSlot(/*time_slot_index=*/0, /*day_type_idx=*/0, slot,
+                              /*current_simulation_time=*/0.0, delta_hours,
+                              locs);
+    REQUIRE(allocator.getNumGroups(line) == 1);
+
+    std::vector<InteractionMember> members;
+    for (const auto& l : locs) {
+      InteractionMember m;
+      m.id = l.person_id;
+      m.array_index = l.person_array_index;
+      m.subset_index = l.subset_index;
+      m.encounter_type_id = l.encounter_type_id;
+      members.push_back(m);
+    }
+
+    Venue* venue_ptr = world.getVenue(line);
+    REQUIRE(venue_ptr != nullptr);
+
+    auto acc = im.computePartialPresenceLambda(
+        members, venue_ptr, line, /*current_time=*/5.0, delta_hours,
+        /*visitor_data=*/nullptr, /*encounter_type_id=*/255);
+
+    const double expected_lambda_b = 6.0 * (10.0 / 60.0) * 1.0;
+    REQUIRE(acc.susc_lambda.count(/*B=*/1) == 1);
+    CHECK(acc.susc_lambda.at(1) ==
+          doctest::Approx(expected_lambda_b).epsilon(1e-6));
+    CHECK(acc.susc_lambda.count(/*A=*/0) == 0);
   }
 }

@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "activity/activity_manager.h"
-#include "activity/runtime_bin_allocator.h"
+#include "activity/runtime_group_allocator.h"
 #include "core/config.h"
 #include "core/world_state.h"
 #include "disease.h"
@@ -138,11 +138,11 @@ struct ParentAggregate {
 };
 
 // =============================================================================
-// CarriageMember: per-member record in a runtime carriage of a
-// partial-presence venue. Built by buildPartialPresenceCarriages, consumed
+// RuntimeGroupMember: per-member record in a runtime group of a
+// partial-presence venue. Built by buildPartialPresenceGroups, consumed
 // by the sub-interval accumulator inside computePartialPresenceLambda.
 // =============================================================================
-struct CarriageMember {
+struct RuntimeGroupMember {
   PersonId pid;
   size_t array_index;
   SubsetIndex subset_index;
@@ -231,13 +231,13 @@ class InteractionManager {
   // Set the current day type index (used by EventLogger for per-type stats)
   void setCurrentDayTypeIdx(int idx) { current_day_type_idx_ = idx; }
 
-  // Wire the runtime bin allocator so partial-presence venues (commute lines,
-  // etc.) can resolve per-rider carriage assignments and presence windows.
+  // Wire the runtime group allocator so partial-presence venues (commute lines,
+  // etc.) can resolve per-rider group assignments and presence windows.
   // Caller (the Simulator) sets this once after both objects exist. Null is
   // a valid state; partial-presence venues degrade to full-slot FOI without
   // an allocator.
-  void setRuntimeBinAllocator(const RuntimeBinAllocator* a) {
-    runtime_bin_allocator_ = a;
+  void setRuntimeGroupAllocator(const RuntimeGroupAllocator* a) {
+    runtime_group_allocator_ = a;
   }
 
   // The force-of-infection pass for transport lines, run after the ordinary
@@ -276,7 +276,7 @@ class InteractionManager {
   };
 
   // Steps 1–2 of partial-presence transmission processing, extracted as a
-  // pure accumulator: bucket members into runtime bins ("carriages"), walk
+  // pure accumulator: bucket members into runtime bins ("groups"), walk
   // sub-intervals delimited by effective presence windows, accumulate
   // per-susceptible λ and per-source attribution weights. No infection
   // side-effects, no RNG. Preconditions are enforced here (throws on
@@ -369,70 +369,72 @@ class InteractionManager {
       const std::vector<InteractionMember>& members, const Venue* venue,
       VenueId actual_venue_id, uint8_t encounter_type_id) const;
 
-  // Step 1 of computePartialPresenceLambda: resolve each member's carriage
-  // (via runtime_bin_allocator_), matrix_bin, and effective presence window,
-  // and group them into one carriage bucket each. Each bucket is sorted by
-  // person_id at the end so per-carriage FP accumulation matches across
-  // ranks. Returns one bucket per carriage; some may be empty.
-  std::vector<std::vector<CarriageMember>> buildPartialPresenceCarriages(
+  // Step 1 of computePartialPresenceLambda: resolve each member's group
+  // (via runtime_group_allocator_), matrix_bin, and effective presence window,
+  // and group them into one group bucket each. Each bucket is sorted by
+  // person_id at the end so per-group FP accumulation matches across
+  // ranks. Returns one bucket per group; some may be empty.
+  std::vector<std::vector<RuntimeGroupMember>> buildPartialPresenceGroups(
       const std::vector<InteractionMember>& members, Venue* venue,
-      VenueId actual_venue_id, const ContactMatrix* matrix, int num_bins_needed,
-      uint16_t num_bins,
+      VenueId actual_venue_id, const ContactMatrix& bin_structure,
+      int num_bins_needed, uint16_t num_groups,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data) const;
 
-  // Collect the carriage's raw {eff_board, eff_alight} offsets as event times,
+  // Collect the group's raw {eff_board, eff_alight} offsets as event times,
   // sort and de-duplicate within 1e-5 tolerance. Sub-intervals span the
   // venue's own [min board, max alight] range (the windows are raw line-local
   // offsets, not [0, slot]). The accumulator walks the sub-intervals delimited
   // by consecutive entries. Returns the deduped event times.
   std::vector<float> collectSubIntervalEventTimes(
-      const std::vector<CarriageMember>& car, float slot_duration_min) const;
+      const std::vector<RuntimeGroupMember>& group,
+      float slot_duration_min) const;
 
-  // For sub-interval [t0, t1) of carriage `car`, walk every member present
+  // For sub-interval [t0, t1) of group `group`, walk every member present
   // throughout the sub-interval and classify it: (a) infectious, append to
   // sub_bins[bin].infectious_ids + push per-mode integrated infectiousness
   // scaled by `scale`; (b) susceptible, append &member to
   // susc_by_bin[bin]; (c) dead/no role, only update headcount. sub_bins is
   // pre-reset by the caller for this sub-interval.
   void classifyMembersInSubInterval(
-      const std::vector<CarriageMember>& car, float t0, float t1, double scale,
-      double current_time, double delta_hours, int num_modes,
+      const std::vector<RuntimeGroupMember>& group, float t0, float t1,
+      double scale, double current_time, double delta_hours, int num_modes,
       std::vector<PartialPresenceSubBin>& sub_bins,
-      std::vector<std::vector<const CarriageMember*>>& susc_by_bin) const;
+      std::vector<std::vector<const RuntimeGroupMember*>>& susc_by_bin) const;
 
   // Return the contacts entry for (susc_bin, inf_bin), preferring
-  // mode_matrix->contacts[][] when in bounds, falling back to
-  // fallback_matrix->getContacts(...), else contact_matrices_.default_contacts.
-  // Encapsulates the per-(mode, bin-pair) lookup with the same three-step
-  // fallback chain used in both the main FOI loop and partial-presence.
-  double lookupContactsForBinPair(const ContactMatrix* mode_matrix,
-                                  const ContactMatrix* fallback_matrix,
-                                  int susc_bin, int inf_bin) const;
+  // The per-(mode, bin-pair) contacts lookup used by both the main FOI loop
+  // and partial-presence. The matrix is whatever getMatrix/getVirtualMatrix
+  // resolved for this (type, mode), which is always a complete matrix, so an
+  // out-of-range bin pair is a real bug (loops sized off the wrong thing) and
+  // throws rather than inventing a contact rate.
+  double lookupContactsForBinPair(const ContactMatrix& matrix, int susc_bin,
+                                  int inf_bin) const;
 
-  // For one (carriage, sub-interval), iterate (susc_bin, mode, inf_bin) over
+  // For one (group, sub-interval), iterate (susc_bin, mode, inf_bin) over
   // pre-classified sub_bins + susc_by_bin and accumulate per-susceptible λ
   // contributions into susc_lambda and per-(susc, source) attribution
   // AccumSources into susc_sources. Pure FOI-math step; no infection writes,
-  // no RNG. mode_matrix lookup, default-contacts fallback, and the
-  // own-bin minus-one adjustment match the main-loop semantics.
+  // no RNG. The mode-matrix lookup and the own-bin minus-one adjustment
+  // match the main-loop semantics.
   void accumulatePartialLambdaContributions(
       const std::vector<PartialPresenceSubBin>& sub_bins,
-      const std::vector<std::vector<const CarriageMember*>>& susc_by_bin,
-      uint8_t venue_type_id, const ContactMatrix* matrix, int num_bins_needed,
-      int num_modes, const TransmissionParams& trans_params,
+      const std::vector<std::vector<const RuntimeGroupMember*>>& susc_by_bin,
+      uint8_t venue_type_id, const ContactMatrix& bin_structure,
+      int num_bins_needed, int num_modes,
+      const TransmissionParams& trans_params,
       PartialPresenceLambdaResult& result) const;
 
-  // Walk the sub-intervals of one carriage, classifying members and
+  // Walk the sub-intervals of one group, classifying members and
   // accumulating per-susceptible λ + AccumSources into result. sub_bins is
   // the caller-owned scratch buffer reused per sub-interval.
-  void accumulateOneCarriage(const std::vector<CarriageMember>& car,
-                             float slot_duration_min, double current_time,
-                             double delta_hours, int num_modes,
-                             int num_bins_needed, uint8_t venue_type_id,
-                             const ContactMatrix* matrix,
-                             const TransmissionParams& trans_params,
-                             std::vector<PartialPresenceSubBin>& sub_bins,
-                             PartialPresenceLambdaResult& result) const;
+  void accumulateOneGroup(const std::vector<RuntimeGroupMember>& group,
+                          float slot_duration_min, double current_time,
+                          double delta_hours, int num_modes,
+                          int num_bins_needed, uint8_t venue_type_id,
+                          const ContactMatrix& bin_structure,
+                          const TransmissionParams& trans_params,
+                          std::vector<PartialPresenceSubBin>& sub_bins,
+                          PartialPresenceLambdaResult& result) const;
 
   // Per-member body of the parent-aggregate pre-pass: resolve person/visitor,
   // compute parent_bin under parent_matrix, bump headcount in agg/csize,
@@ -502,7 +504,8 @@ class InteractionManager {
   // scheme than the child).
   int computeBinIndexForMatrix(const Person* person, const Venue* venue,
                                SubsetIndex subset_index,
-                               const ContactMatrix* matrix, int num_bins) const;
+                               const ContactMatrix* matrix,
+                               int num_groups) const;
 
   // STEP 2c: pre-STEP-3 early exit check. Returns true iff every
   // transmission source is empty (no infectious bin, no positive fomite
@@ -557,7 +560,6 @@ class InteractionManager {
                                   int num_modes, bool is_virtual_encounter,
                                   uint8_t encounter_type_id,
                                   uint8_t venue_type_id,
-                                  const ContactMatrix* matrix,
                                   const TransmissionParams& trans_params,
                                   double& total_lambda_eff);
 
@@ -635,7 +637,7 @@ class InteractionManager {
   // and end-of-call sites of processVenueTransmissions.
   void clearUsedBins(int num_modes);
 
-  // Partial-presence dispatch. If runtime_bin_allocator_ is wired AND the
+  // Partial-presence dispatch. If runtime_group_allocator_ is wired AND the
   // venue's type is enabled in simulation_config_.partial_presence.enabled_
   // venue_type_mask, delegate to processPartialPresenceVenue and return its
   // new_infections. Otherwise returns std::nullopt to signal the caller
@@ -655,7 +657,7 @@ class InteractionManager {
   // step. Returns the per-fomite-mode lambda vector.
   std::vector<double> binMembersAndPrepareBuffers(
       const std::vector<InteractionMember>& members, Venue* venue,
-      const ContactMatrix* matrix, int num_bins_needed, int num_modes,
+      const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
       int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
       const std::vector<int>& n_sub_per_mode, double current_time,
       double delta_hours, uint8_t encounter_type_id,
@@ -670,8 +672,8 @@ class InteractionManager {
   int processOneSuscBin(
       int susc_bin, int num_bins_needed, int num_modes, int num_fomite_modes,
       bool is_virtual_encounter, uint8_t encounter_type_id,
-      uint8_t venue_type_id, const ContactMatrix* matrix, Venue* venue,
-      VenueId actual_venue_id, const std::vector<FomiteModeRef>& fomite_modes,
+      uint8_t venue_type_id, Venue* venue, VenueId actual_venue_id,
+      const std::vector<FomiteModeRef>& fomite_modes,
       const std::vector<int>& comp_uptake_modes,
       const std::vector<double>& lambda_fomite_by_mode,
       const TransmissionParams& trans_params, const ParentAggregate* parent_agg,
@@ -725,8 +727,8 @@ class InteractionManager {
   // DEBUG_TRANSMISSION line if the clamp fired.
   int resolveMemberBinIndex(const InteractionMember& member,
                             const Person* person, Venue* venue,
-                            const ContactMatrix* matrix, int num_bins_needed,
-                            uint8_t encounter_type_id,
+                            const ContactMatrix& bin_structure,
+                            int num_bins_needed, uint8_t encounter_type_id,
                             const std::string& venue_type,
                             uint8_t venue_type_id);
 
@@ -736,7 +738,7 @@ class InteractionManager {
   // fomite deposition, or susceptible.
   void binOneMember(
       const InteractionMember& member, Venue* venue,
-      const ContactMatrix* matrix, int num_bins_needed, int num_modes,
+      const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
       int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
       const std::vector<int>& n_sub_per_mode, double current_time,
       double delta_hours, uint8_t encounter_type_id,
@@ -873,14 +875,15 @@ class InteractionManager {
 
   // Sibling of processVenueTransmissions for partial-presence venues
   // (transport_line, etc.; anything declared in
-  // SimulationConfig::partial_presence). Per-rider carriage assignments come
-  // from the runtime_bin_allocator_; per-rider effective presence windows
+  // SimulationConfig::partial_presence). Per-rider group assignments come
+  // from the runtime_group_allocator_; per-rider effective presence windows
   // come from the membership_metadata side-table + presence_window helper.
   //
   // v1 scope (assumed and enforced; throws on violation):
   //   - Physical venue (actual_venue_id >= 0); not a virtual encounter venue.
   //   - No parent venue (transport lines have none in current MAY output).
-  //   - No coordinated encounter participants (encounter_type_id == kDefaultEncounterTypeId).
+  //   - No coordinated encounter participants (encounter_type_id ==
+  //   kDefaultEncounterTypeId).
   //   - Direct-contact FOI only; no fomite / compartmental uptake on
   //     partial-presence venue types in v1.
   // Violations throw with a descriptive error rather than silently
@@ -936,7 +939,7 @@ class InteractionManager {
   // Wired by Simulator after construction. Null = no partial-presence
   // bucketing (sub-interval FOI is skipped; processVenueTransmissions
   // gate stays a no-op).
-  const RuntimeBinAllocator* runtime_bin_allocator_ = nullptr;
+  const RuntimeGroupAllocator* runtime_group_allocator_ = nullptr;
 
   // Cached env-flag enabling verbose parent-mixing debug prints
   // (JUNE_DEBUG_PARENT_MIXING=1). Read once at construction.

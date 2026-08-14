@@ -441,13 +441,21 @@ struct ContactMatrixConfig {
   // Populated during CoordinatedEncounterConfig::resolve()
   std::unordered_map<uint8_t, std::string> virtual_matrix_names;
 
+  // Encounter type ids that take place at a virtual venue, sorted. Only these
+  // ever consult a virtual matrix: an encounter held at a physical venue mixes
+  // its participants with everyone else there, under that venue's own matrix,
+  // so it needs no matrix of its own. Populated during
+  // CoordinatedEncounterConfig::resolve() for every is_virtual encounter,
+  // including ones that named no matrix, since that omission is exactly what
+  // load-time resolution should catch.
+  std::vector<uint8_t> virtual_encounter_type_ids;
+
   // Deterministic name→id mapping (sorted map ensures consistent IDs across
   // ranks)
   std::map<std::string, int> matrix_name_to_id;
 
   // Default values
   double default_beta = 0.05;
-  double default_contacts = 2.0;
   double default_proportion_physical = 0.1;
   double default_characteristic_time = 24.0;
   double alpha_physical = 1.0;
@@ -461,8 +469,15 @@ struct ContactMatrixConfig {
   // Ordered mode names. Single-mode configs use {"default"}.
   std::vector<std::string> mode_names;
 
-  // default_matrix: fallback for (venue, mode) pairs with no explicit entry.
+  // default_matrix: stands in for (venue, mode) pairs with no entry of their
+  // own, when default_contacts_matrix has no `modes:` block. Reaching it is
+  // refused at load unless allow_default_matrix is set.
   std::optional<ContactMatrix> default_matrix;
+
+  // default_mode_matrices[mode_name] → ContactMatrix: the per-mode form of
+  // the above, used when default_contacts_matrix has a `modes:` block.
+  std::optional<std::unordered_map<std::string, ContactMatrix>>
+      default_mode_matrices;
 
   // mode_matrices[venue_type][mode_name] → ContactMatrix
   std::unordered_map<std::string,
@@ -495,77 +510,135 @@ struct ContactMatrixConfig {
     return nullptr;
   }
 
-  // Get contact matrix by venue type ID
-  const ContactMatrix* getMatrix(uint8_t venue_type_id) const {
-    if (venue_type_id < matrices_by_id.size()) {
-      return matrices_by_id[venue_type_id];
-    }
-    return nullptr;
-  }
-
   int numModes() const { return static_cast<int>(mode_names.size()); }
 
-  /// Get the matrix for (venue_type_id, mode_index).
-  /// Falls back to the single-mode matrix, then to default_matrix.
-  /// Returns nullptr only if no matrix is available at all.
-  const ContactMatrix* getMatrix(uint8_t venue_type_id, int mode_index) const {
-    if (venue_type_id < mode_matrices_by_id.size() &&
-        mode_index < (int)mode_matrices_by_id[venue_type_id].size() &&
-        mode_matrices_by_id[venue_type_id][mode_index] != nullptr) {
-      return mode_matrices_by_id[venue_type_id][mode_index];
+  /// The bin structure of a venue type: which strata its occupants are divided
+  /// into for contact counting. Bins are a property of the venue type and are
+  /// identical across transmission modes (finalizeResolvedMatrices refuses to
+  /// load a scenario where they are not), so this is a mode-free question and
+  /// callers that only need bin counts or bin assignment ask it here rather
+  /// than picking an arbitrary mode's matrix.
+  const ContactMatrix& getBinStructure(uint8_t venue_type_id) const {
+    if (venue_type_id >= bin_structure_by_id.size() ||
+        bin_structure_by_id[venue_type_id] == nullptr) {
+      throwUnresolved("venue type id", venue_type_id);
     }
-    // Fall back to the flat single-mode matrix
-    const ContactMatrix* flat = getMatrix(venue_type_id);
-    if (flat) return flat;
-    // Fall back to default_matrix
-    return default_matrix.has_value() ? &default_matrix.value() : nullptr;
+    return *bin_structure_by_id[venue_type_id];
   }
 
-  /// Virtual-encounter matrix lookup, keyed by encounter_type_id.
+  /// The contact matrix for (venue type, transmission mode). Every pair the
+  /// world can present was resolved at load, so this is a direct read that
+  /// cannot come back empty; an out-of-range id or mode means the caller
+  /// built one that no world registry produced.
+  const ContactMatrix& getMatrix(uint8_t venue_type_id, int mode_index) const {
+    if (venue_type_id >= resolved_by_id.size() || mode_index < 0 ||
+        mode_index >= (int)resolved_by_id[venue_type_id].size() ||
+        resolved_by_id[venue_type_id][mode_index] == nullptr) {
+      throwUnresolved("venue type id", venue_type_id, mode_index);
+    }
+    return *resolved_by_id[venue_type_id][mode_index];
+  }
+
+  /// The bin structure of a virtual encounter type, the encounter-keyed
+  /// counterpart of getBinStructure.
   ///
-  /// Virtual encounters (group_sex, romantic_encounter, etc.) live
-  /// under string keys in `matrices`/`mode_matrices` and are NOT venue
-  /// types, so they have no entry in the venue-indexed `matrices_by_id` /
-  /// `mode_matrices_by_id`. These parallel arrays are populated in
-  /// resolve() from the virtual_matrix_names map so the hot path stays
-  /// integer-keyed with the same cache profile as the venue path.
-  const ContactMatrix* getVirtualMatrix(uint8_t encounter_type_id) const {
-    if (encounter_type_id < virtual_matrices_by_encounter_id.size()) {
-      return virtual_matrices_by_encounter_id[encounter_type_id];
+  /// Virtual encounters (group_sex, romantic_encounter, etc.) live under
+  /// string keys in `matrices`/`mode_matrices` and are NOT venue types, so
+  /// they are resolved into their own encounter-keyed table. Encounter ids
+  /// and venue type ids are disjoint integer spaces: reading one with the
+  /// other's id silently pulls whatever matrix happens to sit at that slot.
+  const ContactMatrix& getVirtualBinStructure(uint8_t encounter_type_id) const {
+    if (encounter_type_id >= virtual_bin_structure_by_id.size() ||
+        virtual_bin_structure_by_id[encounter_type_id] == nullptr) {
+      throwUnresolved("encounter type id", encounter_type_id);
     }
-    return nullptr;
+    return *virtual_bin_structure_by_id[encounter_type_id];
   }
 
-  const ContactMatrix* getVirtualMatrix(uint8_t encounter_type_id,
+  /// The contact matrix for (virtual encounter type, transmission mode).
+  /// Resolved at load like the venue-keyed table, so this is a direct read.
+  /// Only encounters held at a virtual venue appear here; one held at a
+  /// physical venue mixes under that venue's matrix instead.
+  const ContactMatrix& getVirtualMatrix(uint8_t encounter_type_id,
                                         int mode_index) const {
-    if (encounter_type_id < virtual_mode_matrices_by_encounter_id.size() &&
-        mode_index <
-            (int)virtual_mode_matrices_by_encounter_id[encounter_type_id]
-                .size() &&
-        virtual_mode_matrices_by_encounter_id[encounter_type_id][mode_index] !=
-            nullptr) {
-      return virtual_mode_matrices_by_encounter_id[encounter_type_id]
-                                                  [mode_index];
+    if (encounter_type_id >= resolved_virtual_by_id.size() || mode_index < 0 ||
+        mode_index >= (int)resolved_virtual_by_id[encounter_type_id].size() ||
+        resolved_virtual_by_id[encounter_type_id][mode_index] == nullptr) {
+      throwUnresolved("encounter type id", encounter_type_id, mode_index);
     }
-    // Fall back to the flat virtual matrix (note: for multi-mode virtual
-    // matrices this only holds the first listed mode. Useful for bin
-    // layout but not for transmission rates).
-    return getVirtualMatrix(encounter_type_id);
+    return *resolved_virtual_by_id[encounter_type_id][mode_index];
   }
 
   void resolve(const WorldState& world);
 
+  /// Rebuilds default_mode_matrices_by_id keyed to the disease's own mode
+  /// order, so the per-mode default is reachable regardless of what (or
+  /// whether) contact_matrices.mode_names declared. Throws if a disease mode
+  /// has neither a default_mode_matrices entry nor a flat default_matrix.
+  void finalizeDefaultModeMatrices(
+      const WorldState& world,
+      const std::vector<std::string>& disease_mode_names);
+
+  /// Resolves every (venue type, mode) and (encounter type, mode) pair the
+  /// world can present into a concrete matrix, once, so the hot path is a
+  /// direct read with no fallback chain to walk.
+  ///
+  /// Two things are enforced here rather than discovered at run time:
+  /// a venue type's bins must agree across every mode (bins describe who the
+  /// occupants are, which no transmission route can change), and any pair
+  /// that could only be filled by borrowing the scenario default is reported
+  /// by name and refused unless `allow_default_matrix` is set. Borrowing the
+  /// default is not an error in itself; doing so unnoticed is, because the
+  /// resulting physics is not what the scenario says about that venue type.
+  ///
+  /// Keyed to the world's global registries, never to which venues happen to
+  /// live on this rank, so a scenario loads everywhere or fails everywhere.
+  void finalizeResolvedMatrices(
+      const WorldState& world,
+      const std::vector<std::string>& disease_mode_names);
+
+  /// Validates the disease's mode list against this config's own: duplicate
+  /// disease mode names throw, and a contact_matrices.yaml mode that no
+  /// disease mode claims is orphaned and warns via stderr. Matrices are
+  /// matched to modes by name in finalizeResolvedMatrices, so nothing here
+  /// depends on the two files' independently-derived list orders.
+  void finalizeDiseaseModeAlignment(
+      const std::vector<std::string>& disease_mode_names);
+
+  /// Set by a scenario that deliberately wants venue types with no matrix of
+  /// their own to borrow the scenario-wide default. Off by default, so
+  /// defaulting is something a scenario states rather than something that
+  /// happens to it.
+  bool allow_default_matrix = false;
+
+  /// Whether finalizeResolvedMatrices has run. Anything that computes
+  /// transmission checks this up front: an unresolved lookup would otherwise
+  /// throw partway through a slot, and under MPI a single rank throwing
+  /// inside a collective hangs the whole job instead of failing it.
+  bool isResolved() const { return resolved_finalized_; }
+
  private:
+  bool resolved_finalized_ = false;
+  [[noreturn]] void throwUnresolved(const char* what, int id,
+                                    int mode_index = -1) const;
+
+  // Built by finalizeResolvedMatrices and read by every hot-path lookup.
+  // [venue_type_id][disease_mode_index] and [encounter_type_id][mode]; both
+  // are fully populated for every id the world registered, so a null entry
+  // means the id came from somewhere other than a world registry.
+  std::vector<std::vector<const ContactMatrix*>> resolved_by_id;
+  std::vector<std::vector<const ContactMatrix*>> resolved_virtual_by_id;
+  // [id] → the matrix whose bins define that type's stratification. Points at
+  // one of the resolved matrices; separate because bins are a mode-free
+  // property and callers asking for them should not have to name a mode.
+  std::vector<const ContactMatrix*> bin_structure_by_id;
+  std::vector<const ContactMatrix*> virtual_bin_structure_by_id;
+
   std::vector<double> betas_by_id;
-  std::vector<const ContactMatrix*> matrices_by_id;
-  // [venue_type_id][mode_index] → ContactMatrix* (may be nullptr if absent)
-  std::vector<std::vector<const ContactMatrix*>> mode_matrices_by_id;
-  // [encounter_type_id] → ContactMatrix* for virtual encounters (may be
-  // nullptr if absent). Indexed by encounter_type_id, not venue_type_id.
-  std::vector<const ContactMatrix*> virtual_matrices_by_encounter_id;
-  // [encounter_type_id][mode_index] → ContactMatrix* for virtual encounters.
-  std::vector<std::vector<const ContactMatrix*>>
-      virtual_mode_matrices_by_encounter_id;
+  // [disease_mode_index] → the default matrix for that mode, or nullptr.
+  // Rebuilt against the disease's own mode list by finalizeDefaultModeMatrices
+  // and read while resolving pairs that have no matrix of their own.
+  std::vector<const ContactMatrix*> default_mode_matrices_by_id;
 };
 
 // =============================================================================
@@ -663,14 +736,14 @@ struct SimulationConfig {
     }
   } checkpoint;
 
-  // Partial-presence venues: at each slot, the RuntimeBinAllocator buckets
-  // riders of these venue types into ephemeral runtime bins (e.g. carriages
+  // Partial-presence venues: at each slot, the RuntimeGroupAllocator buckets
+  // riders of these venue types into ephemeral runtime groups (e.g. carriages
   // of a train_line) and the FOI loop drives sub-interval transmission from
   // each rider's per-membership (t_board_min, t_alight_min).
   //
   // Number of bins is emergent, derived at slot time from the global rider
   // count and the per-venue-type `target_group_size`. There is no hard
-  // capacity; bins differ in size by at most 1 (round-robin deal). Empty
+  // capacity; groups differ in size by at most 1 (round-robin deal). Empty
   // map (default) = feature inactive, zero hot-path overhead.
   struct PartialPresenceConfig {
     // YAML-declared: type name → target group size.
@@ -756,8 +829,10 @@ struct CoordinatedEncounterDef {
   ActivityMask trigger_mask = 0;        // Bitmask of trigger activity indices
   ActivityMask allowed_venue_mask = 0;  // Bitmask of allowed venue type indices
   int cached_network_idx = -1;          // Resolved network type index
-  uint8_t cached_encounter_type_id = kDefaultEncounterTypeId;  // Resolved encounter type ID
-  int cached_virtual_venue_type_id = kUnknownVenueTypeId;  // Resolved virtual venue type ID
+  uint8_t cached_encounter_type_id =
+      kDefaultEncounterTypeId;  // Resolved encounter type ID
+  int cached_virtual_venue_type_id =
+      kUnknownVenueTypeId;  // Resolved virtual venue type ID
 };
 
 // Raw row from a frequency-group CSV, resolved for fast per-person lookup.

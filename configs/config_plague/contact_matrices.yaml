@@ -9,14 +9,19 @@
 #              Omega = delta_t * C / N_bin
 #
 
-# ── Fallback matrix ───────────────────────────────────────────────────────────
-# Used whenever a (venue, mode) pair has no explicit entry.
-# Required — the simulation exits if this is absent and a fallback is needed.
+# ── Default matrix ────────────────────────────────────────────────────────────
+# Stands in for any (venue, mode) pair with no entry of its own. Every venue
+# type below declares both modes explicitly, so nothing here is reached; a pair
+# that did reach it would be named at startup and refused, since
+# allow_default_matrix is not set.
 default_contacts_matrix:
-  bins: ["all"]
-  contacts: [[1.0]]
-
-default_contacts: 1.0
+  modes:
+    animal_bite:
+      bins: ["all"]
+      contacts: [[1.0]]
+    respiratory:
+      bins: ["all"]
+      contacts: [[1.0]]
 
 # ── Per-venue, per-mode matrices ──────────────────────────────────────────────
 contact_matrices:

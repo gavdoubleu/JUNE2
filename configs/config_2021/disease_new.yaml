@@ -337,9 +337,9 @@ disease:
       asymptomatic: 0.5
     modes:
     - name: respiratory
-      susceptibility_multiplier: 1.0
+      mode_transmissibility_multiplier: 1.0
     - name: physical_contact
-      susceptibility_multiplier: 1.0
+      mode_transmissibility_multiplier: 1.0
   immunity:
     level: 0.95
     waning_rate: 0.001

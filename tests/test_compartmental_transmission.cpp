@@ -11,6 +11,7 @@
 #include "epidemiology/interaction_manager.h"
 #include "mock_compartmental_model.h"
 #include "simulation/compartmental_model_manager.h"
+#include "test_utils.h"
 
 using namespace june;
 
@@ -35,7 +36,7 @@ static Disease makeDiseaseWithCompartmentalUptake(double susc_mult = 1.5) {
   TransmissionMode uptake;
   uptake.name = "comp_uptake";
   uptake.type = TransmissionModeType::CompartmentalUptake;
-  uptake.susceptibility_multiplier = susc_mult;
+  uptake.mode_transmissibility_multiplier = susc_mult;
   uptake.symptom_curves = {nullptr, nullptr};
   CompartmentalUptakeConfig ucfg;
   ucfg.mode_index = 1;
@@ -119,6 +120,8 @@ TEST_CASE("Compartmental uptake: zero coupling → no compartmental infections")
   ContactMatrixConfig cm;
   SimulationConfig sim;
   ParallelConfig par;
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease);
 
   std::vector<PersonLocation> locs;
@@ -191,6 +194,8 @@ TEST_CASE("Compartmental uptake: lambda = coupling_output * susc_mult") {
     locs.push_back(loc);
 
     sim.random_seed = static_cast<uint64_t>(trial + 1);
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world, disease);
     InteractionManager im(world, cm, sim, par, &disease);
     mgr.advance(0.0f, 0.0f);  // invalidate buffer cache each trial
     im.processTransmissions(locs, 5.0, 1.0, nullptr, nullptr, nullptr, nullptr,
@@ -244,6 +249,8 @@ TEST_CASE(
     locs.push_back(loc);
 
     sim.random_seed = static_cast<uint64_t>(seed);
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world, disease);
     InteractionManager im(world, cm, sim, par, &disease);
     mgr.advance(0.0f, 0.0f);
     im.processTransmissions(locs, 5.0, 1.0, nullptr, nullptr, nullptr, nullptr,
@@ -295,6 +302,8 @@ TEST_CASE("Compartmental uptake: venue not in node → zero lambda") {
     locs.push_back(loc);
 
     sim.random_seed = static_cast<uint64_t>(seed);
+    cm.allow_default_matrix = true;
+    finalizeContactMatrices(cm, world, disease);
     InteractionManager im(world, cm, sim, par, &disease);
     mgr.advance(0.0f, 0.0f);
     im.processTransmissions(locs, 5.0, 1.0, nullptr, nullptr, nullptr, nullptr,
@@ -371,6 +380,8 @@ TEST_CASE(
       SimulationConfig sim;
       sim.random_seed = static_cast<uint64_t>(trial + 1);
       ParallelConfig par;
+      cm.allow_default_matrix = true;
+      finalizeContactMatrices(cm, world, disease);
       InteractionManager im(world, cm, sim, par, &disease);
       mgr.advance(0.0f, 0.0f);
       im.processTransmissions(locs, 5.0, 1.0, nullptr, nullptr, nullptr,
@@ -413,6 +424,8 @@ TEST_CASE(
   ContactMatrixConfig cm;
   SimulationConfig sim;
   ParallelConfig par;
+  cm.allow_default_matrix = true;
+  finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease);
 
   std::vector<PersonLocation> locs = {{0, 10, -1, -1, 255, 0}};

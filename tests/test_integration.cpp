@@ -10,6 +10,7 @@
 #include "epidemiology/epidemiology.h"
 #include "epidemiology/interaction_manager.h"
 #include "epidemiology/vaccine.h"
+#include "test_utils.h"
 
 using namespace june;
 
@@ -59,7 +60,6 @@ struct TestFixture {
     trans.stage_curves["mild"] = constant_curve;
     trans.symptom_id_curves = {nullptr, constant_curve};
 
-
     symptom_tags = {{"healthy", -1, 0}, {"mild", 1, 1}};
 
     TrajectoryDefinition td;
@@ -71,7 +71,10 @@ struct TestFixture {
     // Contact matrix: tuned so omega = contacts * delta / bin_size gives
     // distinguishable infection rates for vaccinated vs unvaccinated.
     // With contacts=0.15, delta=8h, I=1.0, bin_size=1: omega ≈ 1.2
-    cm.default_contacts = 0.15;
+    ContactMatrix default_contact_matrix;
+    default_contact_matrix.bins = {"all"};
+    default_contact_matrix.contacts = {{0.15}};
+    cm.default_matrix = default_contact_matrix;
     cm.default_characteristic_time = 1.0;
   }
 
@@ -120,6 +123,8 @@ double measureInfectionRate(TestFixture& fix, Disease& disease, int N = 500) {
     }
 
     ParallelConfig parallel_config;
+    fix.cm.allow_default_matrix = true;
+    finalizeContactMatrices(fix.cm, fix.world);
     InteractionManager im(fix.world, fix.cm, fix.sim_cfg, parallel_config,
                           &disease, nullptr);
     im.processTransmissions(locs, 5.0, 8.0, nullptr);
@@ -140,7 +145,10 @@ TEST_CASE("Integration: Vaccine reduces transmission probability") {
 
   // Use moderate contacts so unvaccinated rate is high but not 100%
   // omega = 0.15 * 8 / 1 = 1.2 → prob ≈ 0.70
-  fix.cm.default_contacts = 0.15;
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{0.15}};
+  fix.cm.default_matrix = default_contact_matrix;
 
   Disease disease = fix.makeDisease();
 
@@ -345,15 +353,19 @@ TEST_CASE(
     "Integration: Full infection lifecycle — seed, transmit, recover, "
     "reinfect") {
   TestFixture fix;
-  fix.cm.default_contacts = 0.15;
+  ContactMatrix default_contact_matrix;
+  default_contact_matrix.bins = {"all"};
+  default_contact_matrix.contacts = {{0.15}};
+  fix.cm.default_matrix = default_contact_matrix;
 
   // Use a trajectory that recovers in 5 days
   fix.trajectories.clear();
   TrajectoryDefinition td;
   td.selection_key = "general";
   td.severity = 1.0;
-  td.stages.push_back({"mild", {"constant", {{"value", 5.0}}}});    // 5 days mild
-  td.stages.push_back({"healthy", {"constant", {{"value", 100.0}}}});  // recover
+  td.stages.push_back({"mild", {"constant", {{"value", 5.0}}}});  // 5 days mild
+  td.stages.push_back(
+      {"healthy", {"constant", {{"value", 100.0}}}});  // recover
   fix.trajectories.push_back(td);
 
   // Mark "healthy" as recovered stage
@@ -371,10 +383,17 @@ TEST_CASE(
   {
     auto locs = fix.makeColocatedLocations();
     ParallelConfig parallel_config;
+    fix.cm.allow_default_matrix = true;
+    finalizeContactMatrices(fix.cm, fix.world);
     InteractionManager im(fix.world, fix.cm, fix.sim_cfg, parallel_config,
                           &disease, nullptr);
     // Run with high enough contacts to guarantee infection
-    fix.cm.default_contacts = 100.0;
+    ContactMatrix default_contact_matrix;
+    default_contact_matrix.bins = {"all"};
+    default_contact_matrix.contacts = {{100.0}};
+    fix.cm.default_matrix = default_contact_matrix;
+    fix.cm.allow_default_matrix = true;
+    finalizeContactMatrices(fix.cm, fix.world);
     InteractionManager im_high(fix.world, fix.cm, fix.sim_cfg, parallel_config,
                                &disease, nullptr);
     im_high.processTransmissions(locs, 1.0, 8.0, nullptr);
@@ -385,7 +404,8 @@ TEST_CASE(
   Epidemiology epi(fix.world, &disease);
   epi.trackInfection(1);
   std::vector<PersonLocation> empty_locs;
-  epi.updateInfectionStates(10.0, empty_locs);  // At t=10, person 1 should be recovered
+  epi.updateInfectionStates(
+      10.0, empty_locs);  // At t=10, person 1 should be recovered
 
   // Verify recovery
   CHECK(fix.world.people[1].infection == nullptr);
@@ -401,17 +421,22 @@ TEST_CASE(
   CHECK(susc_after_recovery < 0.1);  // ~5% susceptibility
 
   // Measure reinfection rate with moderate contacts
-  fix.cm.default_contacts = 0.15;
+  ContactMatrix reinfection_contact_matrix;
+  reinfection_contact_matrix.bins = {"all"};
+  reinfection_contact_matrix.contacts = {{0.15}};
+  fix.cm.default_matrix = reinfection_contact_matrix;
   int reinfections = 0;
   int trials = 500;
   for (int trial = 0; trial < trials; ++trial) {
     fix.world.people[1].infection.reset();
-    fix.world.people[0].infection = std::make_unique<Infection>(
-        &disease, 11.0, &fix.world.people[0], 200 + trial, nullptr, "office",
-        0);
+    fix.world.people[0].infection =
+        std::make_unique<Infection>(&disease, 11.0, &fix.world.people[0],
+                                    200 + trial, nullptr, "office", 0);
 
     auto locs = fix.makeColocatedLocations();
     ParallelConfig parallel_config;
+    fix.cm.allow_default_matrix = true;
+    finalizeContactMatrices(fix.cm, fix.world);
     InteractionManager im(fix.world, fix.cm, fix.sim_cfg, parallel_config,
                           &disease, nullptr);
     im.processTransmissions(locs, 12.0, 8.0, nullptr);
@@ -484,6 +509,8 @@ TEST_CASE(
   }
 
   ParallelConfig parallel_config;
+  fix.cm.allow_default_matrix = true;
+  finalizeContactMatrices(fix.cm, fix.world);
   InteractionManager im(fix.world, fix.cm, fix.sim_cfg, parallel_config,
                         &disease, &logger);
 

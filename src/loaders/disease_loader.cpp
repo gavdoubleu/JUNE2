@@ -403,9 +403,9 @@ void DiseaseLoader::parseStageDrivenModes(
     TransmissionMode tmode;
     tmode.name =
         mode_node["name"] ? mode_node["name"].as<std::string>() : "default";
-    tmode.susceptibility_multiplier =
-        mode_node["susceptibility_multiplier"]
-            ? mode_node["susceptibility_multiplier"].as<double>()
+    tmode.mode_transmissibility_multiplier =
+        mode_node["mode_transmissibility_multiplier"]
+            ? mode_node["mode_transmissibility_multiplier"].as<double>()
             : 1.0;
 
     std::string mode_type =
@@ -485,9 +485,9 @@ void DiseaseLoader::loadTransmissionTrajectoryDriven(
       TransmissionMode tmode;
       tmode.name =
           mode_node["name"] ? mode_node["name"].as<std::string>() : "default";
-      tmode.susceptibility_multiplier =
-          mode_node["susceptibility_multiplier"]
-              ? mode_node["susceptibility_multiplier"].as<double>()
+      tmode.mode_transmissibility_multiplier =
+          mode_node["mode_transmissibility_multiplier"]
+              ? mode_node["mode_transmissibility_multiplier"].as<double>()
               : 1.0;
       transmission.modes.push_back(std::move(tmode));
     }

@@ -485,7 +485,7 @@ void DomainManager::loadGlobalPersonMetadata() {
 
 void DomainManager::exchangeVisitors(
     const std::vector<PersonLocation>& locations, double current_time,
-    double delta_hours, const RuntimeBinAllocator* alloc) {
+    double delta_hours, const RuntimeGroupAllocator* alloc) {
   communicator_->exchangeVisitors(locations, *this, current_time, delta_hours,
                                   alloc);
 }
