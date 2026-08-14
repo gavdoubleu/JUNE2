@@ -53,8 +53,9 @@ struct ActivityExemption {
 // Direction of the scheduled-venue gate on a PolicyAction. The two directions
 // are mutually exclusive, so one mask plus this flag covers both.
 enum class VenueGateDirection : uint8_t {
-  None = 0,       // no venue filter: override at any venue type
-  RestrictTo = 1  // override only at the listed venue types
+  None = 0,        // no venue filter: override at any venue type
+  RestrictTo = 1,  // override only at the listed venue types
+  ExemptFrom = 2   // override everywhere except the listed venue types
 };
 
 struct PolicyAction {
@@ -67,6 +68,12 @@ struct PolicyAction {
   // ANDed with the activity mask: one Activity reaches many Venue types, so
   // this is what lets pubs close while groceries stay open.
   std::unordered_set<std::string> override_venue_types;
+
+  // Venue types the override is exempt from (empty = no exemption). The
+  // inverse direction: close everything except the listed types. Mutually
+  // exclusive with override_venue_types, so both share one mask.
+  std::unordered_set<std::string> exempt_venue_types;
+
   uint64_t venue_gate_mask = 0;  // BITMASK: support up to 64 venue types
   VenueGateDirection venue_gate_direction = VenueGateDirection::None;
 
@@ -107,12 +114,14 @@ struct PolicyAction {
 
   // Check whether the venue the person actually ends up in passes the gate.
   // kUnknownVenueTypeId (255, also used for "no venue") is never in the mask,
-  // so an absent venue uniformly reads as "type not listed".
+  // so an absent venue uniformly reads as "type not listed": no override under
+  // restrict-to, override under exempt-from.
   bool passesVenueGate(uint8_t venue_type_id) const {
     if (venue_gate_direction == VenueGateDirection::None) return true;
     const bool is_listed =
         venue_type_id < 64 && (venue_gate_mask & (1ULL << venue_type_id));
-    return is_listed;
+    return venue_gate_direction == VenueGateDirection::RestrictTo ? is_listed
+                                                                  : !is_listed;
   }
 
   // Check if this action has an exemption for a given activity
@@ -161,11 +170,21 @@ struct PolicyAction {
   void resolve(const WorldState& world, const std::string& policy_name = "") {
     venue_gate_mask = 0;
     venue_gate_direction = VenueGateDirection::None;
+    if (!override_venue_types.empty() && !exempt_venue_types.empty()) {
+      throw std::runtime_error(
+          "PolicyAction::resolve: policy '" + policy_name +
+          "' sets both override_venue_types and exempt_venue_types; the two "
+          "directions are mutually exclusive.");
+    }
     if (!override_venue_types.empty()) {
       venue_gate_mask = resolveVenueTypeMask(world, override_venue_types,
                                              "override_venue_types",
                                              policy_name);
       venue_gate_direction = VenueGateDirection::RestrictTo;
+    } else if (!exempt_venue_types.empty()) {
+      venue_gate_mask = resolveVenueTypeMask(world, exempt_venue_types,
+                                             "exempt_venue_types", policy_name);
+      venue_gate_direction = VenueGateDirection::ExemptFrom;
     }
 
     if (override_activities.empty() || override_activities.count("*") > 0) {
