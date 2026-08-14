@@ -57,6 +57,21 @@ std::optional<PersonLocation> PolicyManager::getOverride(
     Person& person, int16_t scheduled_activity_index,
     VenueId scheduled_venue_id, SubsetIndex scheduled_subset_index,
     double current_time, int time_slot_index, const Person* partner) {
+  // Venue type of the slot the person actually ends up in, resolved lazily so
+  // ungated policies pay nothing. kUnknownVenueTypeId covers both "no venue"
+  // and a cross-rank lookup miss; both read as absent at the gate.
+  uint8_t scheduled_venue_type_id = kUnknownVenueTypeId;
+  bool venue_type_resolved = false;
+  auto scheduledVenueTypeId = [&]() {
+    if (!venue_type_resolved) {
+      if (scheduled_venue_id >= 0) {
+        scheduled_venue_type_id = world_.getVenueTypeId(scheduled_venue_id);
+      }
+      venue_type_resolved = true;
+    }
+    return scheduled_venue_type_id;
+  };
+
   // Priority 1: symptom-based policies
   if (person.infection != nullptr) {
     uint16_t current_symptom_id =
@@ -126,6 +141,11 @@ std::optional<PersonLocation> PolicyManager::getOverride(
       if (!is_participating) continue;
 
       if (!policy.action.shouldOverride(scheduled_activity_index)) {
+        continue;
+      }
+
+      if (policy.action.hasVenueGate() &&
+          !policy.action.passesVenueGate(scheduledVenueTypeId())) {
         continue;
       }
 
@@ -220,6 +240,11 @@ std::optional<PersonLocation> PolicyManager::getOverride(
     if (!is_participating) continue;
 
     if (!policy.action.shouldOverride(scheduled_activity_index)) {
+      continue;
+    }
+
+    if (policy.action.hasVenueGate() &&
+        !policy.action.passesVenueGate(scheduledVenueTypeId())) {
       continue;
     }
 

@@ -132,6 +132,20 @@ inline PolicyAction PolicyLoader::loadPolicyAction(const YAML::Node& node) {
     }
   }
 
+  // Restrict the override to a set of venue types (absent = any venue type).
+  // Same scalar-or-sequence idiom as override_activities.
+  if (node["override_venue_types"]) {
+    if (node["override_venue_types"].IsSequence()) {
+      auto venue_types_vec =
+          node["override_venue_types"].as<std::vector<std::string>>();
+      action.override_venue_types = std::unordered_set<std::string>(
+          venue_types_vec.begin(), venue_types_vec.end());
+    } else {
+      action.override_venue_types.insert(
+          node["override_venue_types"].as<std::string>());
+    }
+  }
+
   // Replacement activity (ignored when replacement_schedule is set)
   if (node["replacement"]) {
     action.replacement_activity = node["replacement"].as<std::string>();

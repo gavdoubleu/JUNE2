@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -49,11 +50,25 @@ struct ActivityExemption {
   }
 };
 
+// Direction of the scheduled-venue gate on a PolicyAction. The two directions
+// are mutually exclusive, so one mask plus this flag covers both.
+enum class VenueGateDirection : uint8_t {
+  None = 0,       // no venue filter: override at any venue type
+  RestrictTo = 1  // override only at the listed venue types
+};
+
 struct PolicyAction {
   // Activities to override (empty = override all activities with "*")
   std::unordered_set<std::string> override_activities;
   uint64_t override_activity_mask = 0;  // BITMASK: support up to 64 activities
   bool override_all = false;
+
+  // Venue types the override is restricted to (empty = any venue type).
+  // ANDed with the activity mask: one Activity reaches many Venue types, so
+  // this is what lets pubs close while groceries stay open.
+  std::unordered_set<std::string> override_venue_types;
+  uint64_t venue_gate_mask = 0;  // BITMASK: support up to 64 venue types
+  VenueGateDirection venue_gate_direction = VenueGateDirection::None;
 
   // Generic exemptions
   std::vector<ActivityExemption> exemptions;
@@ -84,6 +99,22 @@ struct PolicyAction {
     return (override_activity_mask & (1ULL << activity_index));
   }
 
+  // True when a venue filter is configured at all. Cheap guard so ungated
+  // actions never pay for a venue-type lookup.
+  bool hasVenueGate() const {
+    return venue_gate_direction != VenueGateDirection::None;
+  }
+
+  // Check whether the venue the person actually ends up in passes the gate.
+  // kUnknownVenueTypeId (255, also used for "no venue") is never in the mask,
+  // so an absent venue uniformly reads as "type not listed".
+  bool passesVenueGate(uint8_t venue_type_id) const {
+    if (venue_gate_direction == VenueGateDirection::None) return true;
+    const bool is_listed =
+        venue_type_id < 64 && (venue_gate_mask & (1ULL << venue_type_id));
+    return is_listed;
+  }
+
   // Check if this action has an exemption for a given activity
   bool isExempt(const Person& person, int16_t activity_index,
                 const WorldState* world = nullptr,
@@ -98,7 +129,45 @@ struct PolicyAction {
     return false;
   }
 
-  void resolve(const WorldState& world) {
+  // Resolve venue type names to a bitmask. Unlike SimulationConfig::resolve,
+  // which silently ignores unknown venue types, an unknown name here throws: a
+  // misspelt type would otherwise mean "nobody qualifies" and the policy would
+  // quietly do nothing. Consequence: a policies.yaml naming 'pub' hard-fails on
+  // a pub-less world.
+  static uint64_t resolveVenueTypeMask(
+      const WorldState& world,
+      const std::unordered_set<std::string>& venue_type_names,
+      const std::string& field_name, const std::string& policy_name) {
+    uint64_t mask = 0;
+    for (const auto& venue_type : venue_type_names) {
+      int index = world.getVenueTypeIndex(venue_type);
+      if (index < 0) {
+        throw std::runtime_error("PolicyAction::resolve: policy '" +
+                                 policy_name + "' lists unknown venue type '" +
+                                 venue_type + "' in " + field_name + ".");
+      }
+      if (index >= 64) {
+        throw std::runtime_error(
+            "PolicyAction::resolve: policy '" + policy_name + "' venue type id " +
+            std::to_string(index) + " ('" + venue_type + "') in " + field_name +
+            " exceeds 64-bit mask width; promote venue_gate_mask to a wider "
+            "bitset.");
+      }
+      mask |= (1ULL << index);
+    }
+    return mask;
+  }
+
+  void resolve(const WorldState& world, const std::string& policy_name = "") {
+    venue_gate_mask = 0;
+    venue_gate_direction = VenueGateDirection::None;
+    if (!override_venue_types.empty()) {
+      venue_gate_mask = resolveVenueTypeMask(world, override_venue_types,
+                                             "override_venue_types",
+                                             policy_name);
+      venue_gate_direction = VenueGateDirection::RestrictTo;
+    }
+
     if (override_activities.empty() || override_activities.count("*") > 0) {
       override_all = true;
     } else {
@@ -194,7 +263,7 @@ struct SymptomPolicy {
     }
 
     // Intern action
-    action.resolve(world);
+    action.resolve(world, name);
 
     // Intern symptoms
     trigger_symptom_mask = 0;
@@ -260,7 +329,7 @@ struct TemporalPolicy {
     for (auto& crit : applies_to) {
       crit.resolve(world);
     }
-    action.resolve(world);
+    action.resolve(world, name);
   }
 };
 
