@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "simulation/encounters/eligibility.h"
 #include "simulation/follow_bindings.h"
 #include "simulation/simulator.h"
 #include "utils/deterministic_rng.h"
@@ -17,43 +18,12 @@
 
 namespace june {
 
+using encounters::buildEncounterLookups;
+using encounters::computeLocalEligibility;
+using encounters::EncounterEligibility;
+using encounters::EncounterLookups;
+
 namespace {
-
-// Per-slot lookup tables derived from the coordinated-encounters config:
-// encounter_type_id -> trigger activity indices, and
-// encounter_type_id -> min_attendees threshold.
-struct EncounterLookups {
-  std::unordered_map<uint8_t, std::vector<int16_t>> trigger_activities;
-  std::unordered_map<uint8_t, int> min_attendees;
-};
-
-// Pass-1 result for one daily_encounter: which local participants pass the
-// eligibility checks (alive + not policy-blocked at this slot), how many of
-// them, and the threshold needed before this encounter gets injected.
-struct EncounterEligibility {
-  int encounter_idx;                     // index into daily_encounters
-  std::vector<size_t> eligible_indices;  // local people passing policy
-  int local_eligible;
-  int min_required;
-};
-
-EncounterLookups buildEncounterLookups(
-    const WorldState& world,
-    const std::vector<CoordinatedEncounterDef>& encounters) {
-  EncounterLookups out;
-  for (const auto& def : encounters) {
-    int type_id = world.getEncounterTypeIndex(def.name);
-    if (type_id < 0) continue;
-    std::vector<int16_t> indices;
-    for (const auto& slot_name : def.trigger_slots) {
-      int idx = world.getActivityIndex(slot_name);
-      if (idx >= 0) indices.push_back(static_cast<int16_t>(idx));
-    }
-    out.trigger_activities[static_cast<uint8_t>(type_id)] = std::move(indices);
-    out.min_attendees[static_cast<uint8_t>(type_id)] = def.min_attendees;
-  }
-  return out;
-}
 
 // When both A→B and B→A proposals are accepted in the same slot, two
 // encounters exist for the same pair. Collapse them by keeping the lowest
@@ -84,69 +54,6 @@ std::vector<CoordinatedEncounter> dedupAndSortDailyEncounters(
               return a.encounter_id < b.encounter_id;
             });
   return deduped;
-}
-
-// Pass 1: per-encounter, compute the local participants who survive the
-// alive + policy-block checks. Encounters not scheduled for this slot are
-// skipped. Returned vector is index-aligned with the surviving subset of
-// daily_encounters (each entry stores back into the source via
-// .encounter_idx).
-std::vector<EncounterEligibility> computeLocalEligibility(
-    const std::vector<CoordinatedEncounter>& daily_encounters,
-    int time_slot_index, double current_simulation_time,
-    const std::unordered_map<uint8_t, std::vector<int16_t>>&
-        encounter_trigger_activities,
-    const std::unordered_map<uint8_t, int>& encounter_min_attendees,
-    const WorldState& world, const std::vector<PersonLocation>& locations,
-    PolicyManager* policy_manager) {
-  std::vector<EncounterEligibility> slot_encounters;
-  for (int ei = 0; ei < static_cast<int>(daily_encounters.size()); ++ei) {
-    const auto& enc = daily_encounters[ei];
-    if (enc.slot != time_slot_index) continue;
-
-    auto trig_it = encounter_trigger_activities.find(enc.encounter_type_id);
-
-    std::vector<size_t> eligible_indices;
-    for (PersonId pid : enc.participants) {
-      auto it = world.person_index.find(pid);
-      if (it == world.person_index.end()) continue;
-
-      size_t array_idx = it->second;
-      if (array_idx >= locations.size()) continue;
-
-      const Person& person = world.people[array_idx];
-      if (person.is_dead) continue;
-
-      bool policy_blocked = false;
-      if (policy_manager && trig_it != encounter_trigger_activities.end()) {
-        for (int16_t trigger_act_idx : trig_it->second) {
-          auto override = policy_manager->getOverride(
-              const_cast<Person&>(world.people[array_idx]), trigger_act_idx,
-              locations[array_idx].venue_id, locations[array_idx].subset_index,
-              current_simulation_time, time_slot_index);
-          if (override.has_value()) {
-            policy_blocked = true;
-            break;
-          }
-        }
-      }
-      if (!policy_blocked) eligible_indices.push_back(array_idx);
-    }
-
-    int min_required = 2;
-    auto min_it = encounter_min_attendees.find(enc.encounter_type_id);
-    if (min_it != encounter_min_attendees.end()) {
-      min_required = min_it->second;
-    }
-
-    EncounterEligibility ee;
-    ee.encounter_idx = ei;
-    ee.eligible_indices = std::move(eligible_indices);
-    ee.local_eligible = static_cast<int>(ee.eligible_indices.size());
-    ee.min_required = min_required;
-    slot_encounters.push_back(std::move(ee));
-  }
-  return slot_encounters;
 }
 
 // MPI eligibility exchange. Each rank only knows its local participants'
@@ -376,9 +283,8 @@ void Simulator::injectCoordinatedEncountersIntoSlot(int time_slot_index) {
   // Pass 1: compute each encounter's local eligible-participant set under
   // the alive + policy-block checks.
   std::vector<EncounterEligibility> slot_encounters = computeLocalEligibility(
-      daily_encounters, time_slot_index, current_simulation_time_,
-      lookups.trigger_activities, lookups.min_attendees, world_, locations_,
-      policy_manager_.get());
+      daily_encounters, time_slot_index, current_simulation_time_, lookups,
+      world_, locations_, policy_manager_.get());
 
   // Pass 1.5: in MPI mode, sum local_eligible across ranks for encounters
   // that span ranks so every rank sees the true global count.

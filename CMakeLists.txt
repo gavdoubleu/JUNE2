@@ -155,6 +155,7 @@ set(JUNE_CORE_SOURCES
     src/loaders/calendar_event_loader.cpp
     src/loaders/catchment_rule_loader.cpp
     src/simulation/simulator.cpp
+    src/simulation/encounters/eligibility.cpp
     src/simulation/simulator_checkpoint.cpp
     src/simulation/simulator_encounters.cpp
     src/simulation/simulator_reporting.cpp

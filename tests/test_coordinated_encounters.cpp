@@ -1406,13 +1406,14 @@ TEST_CASE(
 
 #include "epidemiology/disease.h"
 #include "epidemiology/policy.h"
+#include "simulation/encounters/eligibility.h"
 
 /**
- * Simulates the encounter injection loop from simulator.cpp (lines 376-420).
+ * Drives Simulator::injectCoordinatedEncountersIntoSlot without a Simulator.
  *
- * For each finalized encounter matching the given time_slot, it iterates
- * over participants and checks PolicyManager::getOverride(). If no policy
- * blocks the participant, their location is updated to the encounter venue.
+ * Pass 1 is the production seam (june::encounters::computeLocalEligibility);
+ * only the pass-2 injection stamp is reproduced here, minus the MPI-only
+ * global exchange and virtual-venue registration.
  *
  * @param encounters     Finalized encounters
  * @param time_slot      Which time slot to inject for
@@ -1431,80 +1432,21 @@ static std::set<PersonId> simulateEncounterInjection(
     const Config& config, PolicyManager* policy_manager, double current_time) {
   std::set<PersonId> injected;
 
-  // Build encounter_type_id -> trigger activity indices map
-  std::unordered_map<uint8_t, std::vector<int16_t>>
-      encounter_trigger_activities;
-  for (const auto& def : config.coordinated_encounters.encounters) {
-    int type_id = world.getEncounterTypeIndex(def.name);
-    if (type_id >= 0) {
-      std::vector<int16_t> indices;
-      for (const auto& slot_name : def.trigger_slots) {
-        int idx = world.getActivityIndex(slot_name);
-        if (idx >= 0) indices.push_back(static_cast<int16_t>(idx));
-      }
-      encounter_trigger_activities[static_cast<uint8_t>(type_id)] =
-          std::move(indices);
-    }
-  }
+  // Pass 1: the real production eligibility computation.
+  auto lookups = june::encounters::buildEncounterLookups(
+      world, config.coordinated_encounters.encounters);
+  auto slot_encounters = june::encounters::computeLocalEligibility(
+      encounters, time_slot, current_time, lookups, world, locations,
+      policy_manager);
 
-  // Build encounter_type_id -> min_attendees lookup
-  std::unordered_map<uint8_t, int> encounter_min_attendees;
-  for (const auto& def : config.coordinated_encounters.encounters) {
-    int type_id = world.getEncounterTypeIndex(def.name);
-    if (type_id >= 0) {
-      encounter_min_attendees[static_cast<uint8_t>(type_id)] =
-          def.min_attendees;
-    }
-  }
-
-  for (const auto& enc : encounters) {
-    if (enc.slot != time_slot) continue;
-
-    auto trig_it = encounter_trigger_activities.find(enc.encounter_type_id);
-
-    // Pass 1: Determine which participants are eligible (not policy-blocked)
-    std::vector<size_t> eligible_indices;
-    for (PersonId pid : enc.participants) {
-      auto it = world.person_index.find(pid);
-      if (it == world.person_index.end()) continue;
-
-      size_t array_idx = it->second;
-      if (array_idx >= locations.size()) continue;
-
-      Person& person = world.people[array_idx];
-      if (person.is_dead) continue;
-
-      // POLICY CHECK — mirrors simulator.cpp
-      bool policy_blocked = false;
-      if (policy_manager && trig_it != encounter_trigger_activities.end()) {
-        for (int16_t trigger_act_idx : trig_it->second) {
-          auto override = policy_manager->getOverride(
-              person, trigger_act_idx, locations[array_idx].venue_id,
-              locations[array_idx].subset_index, current_time, time_slot);
-          if (override.has_value()) {
-            policy_blocked = true;
-            break;
-          }
-        }
-      }
-      if (!policy_blocked) {
-        eligible_indices.push_back(array_idx);
-      }
-    }
-
-    // Pass 2: Only inject if enough participants survived policy checks
-    int min_required = 2;  // default
-    auto min_it = encounter_min_attendees.find(enc.encounter_type_id);
-    if (min_it != encounter_min_attendees.end()) {
-      min_required = min_it->second;
-    }
-
-    if (static_cast<int>(eligible_indices.size()) >= min_required) {
-      for (size_t array_idx : eligible_indices) {
-        locations[array_idx].venue_id = enc.venue_id;
-        locations[array_idx].encounter_type_id = enc.encounter_type_id;
-        injected.insert(world.people[array_idx].id);
-      }
+  // Pass 2: inject the encounters that met their threshold.
+  for (const auto& eligibility : slot_encounters) {
+    const auto& enc = encounters[eligibility.encounter_idx];
+    if (eligibility.local_eligible < eligibility.min_required) continue;
+    for (size_t array_idx : eligibility.eligible_indices) {
+      locations[array_idx].venue_id = enc.venue_id;
+      locations[array_idx].encounter_type_id = enc.encounter_type_id;
+      injected.insert(world.people[array_idx].id);
     }
   }
   return injected;
