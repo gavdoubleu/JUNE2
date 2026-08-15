@@ -353,9 +353,11 @@ bool venueExcepted(const FollowConfig& fc, uint8_t venue_type) {
 
 bool mirrorSuppressed(const FollowConfig& fc, int16_t host_activity,
                       uint8_t host_venue_type, int16_t follower_activity) {
-  // The host's type travels on the broadcastHostLocations wire, so an
-  // unresolvable one here is a defect. Answering it would fail open and mirror
-  // the follower into a venue whose type nobody knows.
+  // Every rank types every Venue, and the host is known to have one, so an
+  // unresolvable type here can only be an id naming no Venue at all — a defect
+  // under every configuration, gated rule or not. Unconditional deliberately:
+  // arming it on venue_exceptions would warn a gated rule its world is corrupt
+  // while silently mirroring an ungated follower into an unnameable venue.
   if (host_venue_type == kUnknownVenueTypeId)
     throw std::runtime_error(
         "follow: host venue type is unresolvable at the mirror gate");
@@ -676,9 +678,10 @@ void broadcastHostLocations(WorldState& world,
     uint8_t venue_type = static_cast<uint8_t>(all[i + 4]);
     active_now.insert(h);
     if (v < 0) continue;
-    // The sender packs only its own hosts, and a locally-owned person's
-    // location venue always types, so an unknown type arriving here means the
-    // wire and the sender's venue registry have diverged.
+    // The sender typed this venue against its own all-venue type map, and the
+    // v < 0 check above has already excluded venue-less hosts, so an unknown
+    // type arriving here means the wire and the sender's venue registry have
+    // diverged.
     if (venue_type == kUnknownVenueTypeId)
       throw std::runtime_error(
           "follow: host " + std::to_string(h) +

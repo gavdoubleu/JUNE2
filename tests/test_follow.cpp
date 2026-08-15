@@ -492,10 +492,10 @@ TEST_CASE("a follower with an excepted activity of its own keeps it") {
 }
 
 TEST_CASE("an unresolvable host venue type is not silently followable") {
-  // A host venue this rank cannot type must never reach the gate: answering
-  // "not excepted" would fail open and mirror the follower into a venue whose
-  // type nobody knows. The host's type travels on the broadcast wire precisely
-  // so this cannot happen, so a 255 arriving here is a defect, not an outcome.
+  // An untypeable host venue must never reach the gate: answering "not
+  // excepted" would fail open and mirror the follower into a venue whose type
+  // nobody knows. Every rank types every Venue in the world, so a 255 here
+  // names no Venue at all — a defect, not an outcome.
   FollowConfig fc = exceptionRule({}, {7}, {});
   CHECK_THROWS_AS(
       follow_detail::mirrorSuppressed(fc, 2, kUnknownVenueTypeId, -1),

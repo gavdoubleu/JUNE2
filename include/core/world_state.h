@@ -197,6 +197,10 @@ class WorldState {
   // buildGlobalVenueMaps() fills them from world.venues during buildIndices().
   // Single source of truth — getVenuesInGeoUnit() uses only these maps so the
   // candidate pool is identical in serial and parallel runs.
+  //
+  // global_venue_type_map is empty in serial mode (getVenue() is total there)
+  // and holds every Venue in the world in MPI mode — not just this rank's, so
+  // that kUnknownVenueTypeId means "no such Venue" and never "not mine".
   std::unordered_map<VenueId, uint8_t> global_venue_type_map;
   std::unordered_map<VenueId, GeoUnitId> global_venue_geo_unit_map;
   // type_name → sorted list of all VenueIds of that type (globally)
@@ -255,10 +259,10 @@ class WorldState {
   // Returns -1 if not found.
   GeoUnitId ancestorAtLevel(GeoUnitId id, std::string_view level_name) const;
 
-  // Halo prototype: free the two all-venue maps used only by
-  // getVenuesInGeoUnit, after the OTF allocator has precomputed every pool it
-  // needs. Logs freed sizes. global_venue_type_map is kept (it is the
-  // halo-sized FOI lookup).
+  // Free the two all-venue maps used only by getVenuesInGeoUnit, after the OTF
+  // allocator has precomputed every pool it needs. Logs freed sizes.
+  // global_venue_type_map is kept for the whole run: cross-rank type lookups
+  // happen on every step, and every Venue must stay nameable.
   void dropGlobalVenueMaps();
 
   // Get all people in a geographic unit (including descendants)

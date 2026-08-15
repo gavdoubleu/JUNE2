@@ -622,6 +622,27 @@ void loadVenueSubsets(HDF5Loader& loader,
   }
 }
 
+void fillGlobalVenueMaps(WorldState& world,
+                         const std::vector<int32_t>& venue_ids,
+                         const std::vector<uint8_t>& venue_type_ids,
+                         const std::vector<GeoUnitId>& venue_geo_unit_ids) {
+  const size_t n = venue_ids.size();
+
+  // All three maps cover every Venue in the world. The type map is kept for the
+  // whole run (see dropGlobalVenueMaps): a rank must be able to name the type
+  // of a Venue it does not own, or kUnknownVenueTypeId means both "no such
+  // Venue" and "not decomposed onto me". The geo/by-type maps are only needed
+  // until the OTF allocator has precomputed its pools, then freed.
+  world.global_venue_type_map.reserve(n);
+  world.global_venue_geo_unit_map.reserve(n);
+  for (size_t i = 0; i < n; ++i) {
+    world.global_venue_type_map[venue_ids[i]] = venue_type_ids[i];
+    world.global_venue_geo_unit_map[venue_ids[i]] = venue_geo_unit_ids[i];
+    world.addVenueToTypeIndex(venue_ids[i], venue_type_ids[i]);
+  }
+  world.sortGlobalVenuesByTypeName();
+}
+
 void buildGlobalVenueMaps(HDF5Loader& loader) {
   auto all_ids = loader.readNumericDataset<int32_t>("/venues/ids");
   auto all_types = loader.readNumericDataset<uint8_t>("/venues/types");
@@ -640,27 +661,7 @@ void buildGlobalVenueMaps(HDF5Loader& loader) {
     for (int32_t k = 0; k < counts[g]; ++k)
       venue_geo[static_cast<size_t>(starts[g]) + k] = gu_ids[g];
 
-  auto& world = loader.world_;
-  size_t n = all_ids.size();
-
-  // global_venue_type_map only needs the foreign venues a local person can
-  // reach (locals resolve via getVenue first). The geo/by-type maps are built
-  // full here — the OTF allocator needs them to precompute pools — then freed
-  // by dropGlobalVenueMaps() once the pools are warm.
-  std::unordered_set<VenueId> halo;
-  for (const auto& [vid, sub] : world.activity_venues)
-    if (world.venue_index.find(vid) == world.venue_index.end())
-      halo.insert(vid);
-
-  world.global_venue_type_map.reserve(halo.size());
-  world.global_venue_geo_unit_map.reserve(n);
-  for (size_t i = 0; i < n; ++i) {
-    if (halo.count(all_ids[i]))
-      world.global_venue_type_map[all_ids[i]] = all_types[i];
-    world.global_venue_geo_unit_map[all_ids[i]] = venue_geo[i];
-    world.addVenueToTypeIndex(all_ids[i], all_types[i]);
-  }
-  world.sortGlobalVenuesByTypeName();
+  fillGlobalVenueMaps(loader.world_, all_ids, all_types, venue_geo);
 }
 
 }  // namespace detail

@@ -366,7 +366,7 @@ TEST_CASE("SlotVenueType - the three states") {
           kPubVenueType);
   }
 
-  SUBCASE("a venue this world cannot type throws rather than yielding 255") {
+  SUBCASE("an id naming no Venue throws rather than yielding 255") {
     CHECK_THROWS_AS(SlotVenueType::fromVenue(9999).resolveAgainst(world),
                     std::runtime_error);
   }
