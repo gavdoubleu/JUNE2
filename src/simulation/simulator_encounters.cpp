@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <map>
 #include <set>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -301,10 +302,13 @@ namespace {
 
 // Where a host is this slot, as seen by its followers. activity is the host's
 // resolved activity, used to decide the follower-side activity exception.
+// venue_type travels with the venue because a follower's rank may not hold the
+// host's venue in its own halo and so cannot type it locally.
 struct HostSlot {
   VenueId venue = -1;
   SubsetIndex subset = -1;
   int16_t activity = -1;
+  uint8_t venue_type = kUnknownVenueTypeId;
 };
 
 }  // namespace
@@ -349,6 +353,12 @@ bool venueExcepted(const FollowConfig& fc, uint8_t venue_type) {
 
 bool mirrorSuppressed(const FollowConfig& fc, int16_t host_activity,
                       uint8_t host_venue_type, int16_t follower_activity) {
+  // The host's type travels on the broadcastHostLocations wire, so an
+  // unresolvable one here is a defect. Answering it would fail open and mirror
+  // the follower into a venue whose type nobody knows.
+  if (host_venue_type == kUnknownVenueTypeId)
+    throw std::runtime_error(
+        "follow: host venue type is unresolvable at the mirror gate");
   auto listed = [](const auto& ids, auto value) {
     return std::find(ids.begin(), ids.end(), value) != ids.end();
   };
@@ -362,16 +372,17 @@ bool mirrorSuppressed(const FollowConfig& fc, int16_t host_activity,
   return false;
 }
 
-bool policySuppressesMirror(PolicyManager* policy_manager, Person& follower,
-                            const PersonLocation& follower_location,
-                            VenueId host_venue, double current_time,
-                            int time_slot_index) {
+bool policySuppressesMirror(PolicyManager* policy_manager,
+                            const Person& follower,
+                            int16_t follower_activity_index,
+                            uint8_t host_venue_type, double current_time) {
   if (!policy_manager) return false;
-  return policy_manager
-      ->getOverride(follower, follower_location.activity_index, host_venue,
-                    follower_location.subset_index, current_time,
-                    time_slot_index)
-      .has_value();
+  // known(), not fromVenue(): the host's type travelled with its venue, so no
+  // local lookup is needed and none would succeed for a cross-rank host. A host
+  // only enters host_loc with a venue, so the type is never absent here.
+  return policy_manager->suppressesParticipation(
+      follower, follower_activity_index, SlotVenueType::known(host_venue_type),
+      current_time);
 }
 
 // The host's candidate pool: co-members of its venue of the configured type, or
@@ -635,6 +646,11 @@ void activateRemoteCriteriaHosts(
 // travels too so the activity exception works cross-rank. Sending only the
 // slot-active hosts (not every enrolled host) keeps an off-hop host from being
 // mirrored on a hop span.
+//
+// Ints per host on the wire. Shared by the packer, the bounds guard and the
+// unpack stride so the two halves cannot drift.
+constexpr size_t kHostLocationInts = 5;
+
 void broadcastHostLocations(WorldState& world,
                             const std::vector<PersonLocation>& locations,
                             std::unordered_map<PersonId, HostSlot>& host_loc,
@@ -648,15 +664,27 @@ void broadcastHostLocations(WorldState& world,
     local.push_back(static_cast<int>(hl.venue_id));
     local.push_back(static_cast<int>(hl.subset_index));
     local.push_back(static_cast<int>(hl.activity_index));
+    local.push_back(static_cast<int>(world.getVenueTypeId(hl.venue_id)));
   }
   std::vector<int> all = allgathervInts(local);
-  for (size_t i = 0; i + 4 <= all.size(); i += 4) {
+  for (size_t i = 0; i + kHostLocationInts <= all.size();
+       i += kHostLocationInts) {
     PersonId h = all[i];
     VenueId v = all[i + 1];
     SubsetIndex s = all[i + 2];
     int16_t act = static_cast<int16_t>(all[i + 3]);
+    uint8_t venue_type = static_cast<uint8_t>(all[i + 4]);
     active_now.insert(h);
-    if (v >= 0) host_loc[h] = {v, s, act};
+    if (v < 0) continue;
+    // The sender packs only its own hosts, and a locally-owned person's
+    // location venue always types, so an unknown type arriving here means the
+    // wire and the sender's venue registry have diverged.
+    if (venue_type == kUnknownVenueTypeId)
+      throw std::runtime_error(
+          "follow: host " + std::to_string(h) +
+          " was broadcast with an unresolvable venue type for venue " +
+          std::to_string(v));
+    host_loc[h] = {v, s, act, venue_type};
   }
 }
 #endif  // USE_MPI
@@ -822,7 +850,8 @@ void Simulator::processFollowRule(
     active_now.insert(*it);
     const PersonLocation& hl = locations_[hi->second];
     if (hl.venue_id >= 0)
-      host_loc[*it] = {hl.venue_id, hl.subset_index, hl.activity_index};
+      host_loc[*it] = {hl.venue_id, hl.subset_index, hl.activity_index,
+                       world_.getVenueTypeId(hl.venue_id)};
     ++it;
   }
 #ifdef USE_MPI
@@ -851,20 +880,23 @@ void Simulator::processFollowRule(
     if (hl == host_loc.end()) continue;  // host active but no venue this slot
 
     PersonLocation& floc = locations_[fi->second];
-    const uint8_t host_venue_type = world_.getVenueTypeId(hl->second.venue);
+    // Off the wire, not a local lookup: a cross-rank host's venue is outside
+    // this rank's halo and would type as unresolvable here.
+    const uint8_t host_venue_type = hl->second.venue_type;
     if (follow_detail::mirrorSuppressed(fc, hl->second.activity,
                                         host_venue_type, floc.activity_index))
       continue;
     // The follower's own policy wins. If a policy would move them (sick and
-    // sent home, say), leave them where the policy put them. The question is
-    // asked about the host's venue, since that is where the mirror is about to
-    // put them; a venue-gated policy asked about their own venue would miss.
-    // Only the named leg is gated — a partial-presence host's other legs are
-    // handled by the venue exceptions below.
+    // sent home, say), decline the mirror and leave them on their own
+    // schedule — ActivityManager has already placed them, and declining to
+    // mirror moves nobody anywhere. The question is asked about the host's
+    // venue type, since that is where the mirror is about to put them; a
+    // venue-gated policy asked about their own venue would miss. Only the
+    // named leg is gated — a partial-presence host's other legs are handled by
+    // the venue exceptions below.
     if (follow_detail::policySuppressesMirror(
-            policy_manager_.get(), world_.people[fi->second], floc,
-            hl->second.venue,
-            current_simulation_time_, time_slot_index))
+            policy_manager_.get(), world_.people[fi->second],
+            floc.activity_index, host_venue_type, current_simulation_time_))
       continue;
 
     // Travelling with the host means riding the host's whole journey, not the

@@ -19,6 +19,7 @@ EncounterLookups buildEncounterLookups(
     }
     out.trigger_activities[static_cast<uint8_t>(type_id)] = std::move(indices);
     out.min_attendees[static_cast<uint8_t>(type_id)] = def.min_attendees;
+    out.is_virtual[static_cast<uint8_t>(type_id)] = def.is_virtual;
   }
   return out;
 }
@@ -36,6 +37,16 @@ std::vector<EncounterEligibility> computeLocalEligibility(
 
     auto trig_it = lookups.trigger_activities.find(enc.encounter_type_id);
 
+    // A virtual encounter occupies no Venue, so it never passes a venue gate.
+    // Reading enc.venue_type_id for one would take a contact-matrix id for a
+    // world venue-type id and gate on an unrelated real venue type.
+    auto virtual_it = lookups.is_virtual.find(enc.encounter_type_id);
+    const bool encounter_is_virtual =
+        virtual_it != lookups.is_virtual.end() && virtual_it->second;
+    const SlotVenueType slot_venue_type =
+        encounter_is_virtual ? SlotVenueType::absent()
+                             : SlotVenueType::known(enc.venue_type_id);
+
     std::vector<size_t> eligible_indices;
     for (PersonId pid : enc.participants) {
       auto it = world.person_index.find(pid);
@@ -50,11 +61,9 @@ std::vector<EncounterEligibility> computeLocalEligibility(
       bool policy_blocked = false;
       if (policy_manager && trig_it != lookups.trigger_activities.end()) {
         for (int16_t trigger_act_idx : trig_it->second) {
-          auto override = policy_manager->getOverride(
-              const_cast<Person&>(world.people[array_idx]), trigger_act_idx,
-              enc.venue_id, locations[array_idx].subset_index,
-              current_simulation_time, time_slot_index);
-          if (override.has_value()) {
+          if (policy_manager->suppressesParticipation(
+                  person, trigger_act_idx, slot_venue_type,
+                  current_simulation_time)) {
             policy_blocked = true;
             break;
           }

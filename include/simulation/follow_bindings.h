@@ -52,16 +52,22 @@ void rebuildCriteriaBindings(
 bool mirrorSuppressed(const FollowConfig& fc, int16_t host_activity,
                       uint8_t host_venue_type, int16_t follower_activity);
 
-// Does the follower's own policy outrank the mirror? The venue put to the
-// policy is the host's — the venue the mirror is about to move the follower
-// to — not the follower's own scheduled one, so a venue-gated policy sees
-// where the follower would end up. The activity and subset stay the
-// follower's, since the mirror leaves those alone. True means a policy fires
-// and the follower stays where the policy put them.
-bool policySuppressesMirror(PolicyManager* policy_manager, Person& follower,
-                            const PersonLocation& follower_location,
-                            VenueId host_venue, double current_time,
-                            int time_slot_index);
+// Does the follower's own policy outrank the mirror? A Policy Suppression
+// query and nothing more: true means a policy would remove the follower from
+// their own activity, so the mirror is declined and they keep their schedule.
+// Deciding not to mirror commits nothing, so no venue is taken — nobody is
+// pinned or moved here (docs/adr/0009).
+//
+// The gate keys on host_venue_type, the type the mirror is about to move the
+// follower to, not the type of their own scheduled venue; a gated policy asked
+// about the latter would miss. The activity stays the follower's, since the
+// mirror leaves it alone. The type comes off the broadcastHostLocations wire,
+// since a cross-rank host's venue is outside this rank's halo and cannot be
+// typed locally. An unresolvable type throws.
+bool policySuppressesMirror(PolicyManager* policy_manager,
+                            const Person& follower,
+                            int16_t follower_activity_index,
+                            uint8_t host_venue_type, double current_time);
 
 // Stochastic enrolment: each host rolls once and gathers followers from its
 // pool. Returns {hosts that gained followers, total local followers enrolled}.

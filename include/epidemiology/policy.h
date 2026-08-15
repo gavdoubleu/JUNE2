@@ -58,6 +58,85 @@ enum class VenueGateDirection : uint8_t {
   ExemptFrom = 2   // override everywhere except the listed venue types
 };
 
+// The type of the Venue a Person physically occupies for one slot: the key a
+// venue-gated PolicyAction is decided on. Deliberately not the Pin Venue,
+// which is only where a freeze_in_place override anchors the Person.
+//
+// Three states, not two. Absent means the Person occupies no Venue this slot
+// (in transit, at a virtual encounter) and never passes the filter, in either
+// direction. Known carries a resolved type. Deferred holds an unresolved
+// VenueId so the world lookup happens only if a gated action is actually
+// consulted — getOverride runs once per Person per slot, so an ungated run
+// must pay nothing.
+//
+// A Venue that exists but cannot be typed on this rank is a defect, not a
+// state: resolveAgainst throws rather than admitting kUnknownVenueTypeId,
+// which is exactly the silent fail-open this type exists to remove.
+enum class SlotVenueTypeState : uint8_t { Absent, Known, Deferred };
+
+class SlotVenueType {
+ public:
+  // Occupies no Venue this slot.
+  static SlotVenueType absent() {
+    return SlotVenueType(SlotVenueTypeState::Absent, kUnknownVenueTypeId,
+                         kInvalidVenueId);
+  }
+
+  // The caller already resolved the type. Handing over kUnknownVenueTypeId
+  // while claiming to know it is the defect this mission exists to catch, so
+  // it throws here, at the producer.
+  static SlotVenueType known(uint8_t type_id) {
+    if (type_id == kUnknownVenueTypeId) {
+      throw std::runtime_error(
+          "SlotVenueType::known: caller claims a known venue type but passed "
+          "kUnknownVenueTypeId (255); the slot venue type is unresolvable.");
+    }
+    return SlotVenueType(SlotVenueTypeState::Known, type_id, kInvalidVenueId);
+  }
+
+  // Look the type up later, if anything asks. A negative id is absent.
+  static SlotVenueType fromVenue(VenueId venue_id) {
+    if (venue_id < 0) return absent();
+    return SlotVenueType(SlotVenueTypeState::Deferred, kUnknownVenueTypeId,
+                         venue_id);
+  }
+
+  // Collapses Deferred to Absent or Known. Throws naming the venue if the
+  // world cannot type it. Absent and Known pass through unchanged.
+  SlotVenueType resolveAgainst(const WorldState& world) const {
+    if (state_ != SlotVenueTypeState::Deferred) return *this;
+    const uint8_t type_id = world.getVenueTypeId(venue_id_);
+    if (type_id == kUnknownVenueTypeId) {
+      throw std::runtime_error(
+          "SlotVenueType::resolveAgainst: venue " + std::to_string(venue_id_) +
+          " exists but this rank cannot name its type; the slot venue type is "
+          "unresolvable.");
+    }
+    return SlotVenueType(SlotVenueTypeState::Known, type_id, venue_id_);
+  }
+
+  bool isAbsent() const { return state_ == SlotVenueTypeState::Absent; }
+
+  // Precondition: Known. A sentinel must never survive to the gate, so an
+  // unresolved value is a programming error rather than a return value.
+  uint8_t typeId() const {
+    if (state_ != SlotVenueTypeState::Known) {
+      throw std::runtime_error(
+          "SlotVenueType::typeId: value is not Known; resolveAgainst() must "
+          "run before the venue gate is consulted.");
+    }
+    return type_id_;
+  }
+
+ private:
+  SlotVenueType(SlotVenueTypeState state, uint8_t type_id, VenueId venue_id)
+      : venue_id_(venue_id), state_(state), type_id_(type_id) {}
+
+  VenueId venue_id_;
+  SlotVenueTypeState state_;
+  uint8_t type_id_;
+};
+
 struct PolicyAction {
   // Activities to override (empty = override all activities with "*")
   std::unordered_set<std::string> override_activities;
@@ -76,6 +155,12 @@ struct PolicyAction {
 
   uint64_t venue_gate_mask = 0;  // BITMASK: support up to 64 venue types
   VenueGateDirection venue_gate_direction = VenueGateDirection::None;
+
+  // Non-empty when a venue gate is configured but has not resolved. Set before
+  // resolution is attempted and cleared only on success, so a swallowed
+  // resolve() failure leaves the gate poisoned rather than silently absent.
+  // Holds the message the gate throws when consulted.
+  std::string venue_gate_error;
 
   // Generic exemptions
   std::vector<ActivityExemption> exemptions;
@@ -107,19 +192,34 @@ struct PolicyAction {
   }
 
   // True when a venue filter is configured at all. Cheap guard so ungated
-  // actions never pay for a venue-type lookup.
+  // actions never pay for a venue-type lookup. A poisoned gate counts as
+  // configured, so an unresolved one is still consulted and still throws.
   bool hasVenueGate() const {
-    return venue_gate_direction != VenueGateDirection::None;
+    return venue_gate_direction != VenueGateDirection::None ||
+           !venue_gate_error.empty();
   }
 
-  // Check whether the venue the person actually ends up in passes the gate.
-  // kUnknownVenueTypeId (255, also used for "no venue") is never in the mask,
-  // so an absent venue uniformly reads as "type not listed": no override under
-  // restrict-to, override under exempt-from.
-  bool passesVenueGate(uint8_t venue_type_id) const {
+  // A configured-but-unresolved gate must never read as "this policy is not
+  // here". Checked before the activity test, not just at the gate: a failed
+  // resolve() also leaves override_activity_mask unbuilt, so the action would
+  // otherwise fall out on shouldOverride and never reach the gate at all.
+  void throwIfVenueGateUnresolved() const {
+    if (!venue_gate_error.empty()) throw std::runtime_error(venue_gate_error);
+  }
+
+  // Check whether the type of the Venue the person physically occupies this
+  // slot passes the gate. A Person occupying no Venue never passes, in either
+  // direction (docs/adr/0008): "not at a listed venue type" and "at no venue
+  // at all" are different questions, and only the first is what exempt-from
+  // asks. An unresolvable type never reaches here — SlotVenueType throws at
+  // the producer instead.
+  bool passesVenueGate(const SlotVenueType& slot_venue_type) const {
+    if (!venue_gate_error.empty()) throw std::runtime_error(venue_gate_error);
     if (venue_gate_direction == VenueGateDirection::None) return true;
+    if (slot_venue_type.isAbsent()) return false;
+    const uint8_t type_id = slot_venue_type.typeId();  // throws if Deferred
     const bool is_listed =
-        venue_type_id < 64 && (venue_gate_mask & (1ULL << venue_type_id));
+        type_id < 64 && (venue_gate_mask & (1ULL << type_id));
     return venue_gate_direction == VenueGateDirection::RestrictTo ? is_listed
                                                                   : !is_listed;
   }
@@ -170,6 +270,18 @@ struct PolicyAction {
   void resolve(const WorldState& world, const std::string& policy_name = "") {
     venue_gate_mask = 0;
     venue_gate_direction = VenueGateDirection::None;
+    // Poison the gate before attempting to resolve it. resolveVenueTypeMask
+    // throws on a misspelt venue type precisely so a policy cannot look
+    // configured yet never fire, and that guarantee must not rest on no caller
+    // anywhere ever wrapping resolve() in a catch. A swallowed failure now
+    // leaves the gate configured-but-unresolved, which throws when consulted
+    // rather than degrading to the silently ungated state.
+    venue_gate_error =
+        (override_venue_types.empty() && exempt_venue_types.empty())
+            ? ""
+            : "PolicyAction: policy '" + policy_name +
+                  "' has a venue gate that never resolved; a resolve() failure "
+                  "was swallowed by a caller.";
     if (!override_venue_types.empty() && !exempt_venue_types.empty()) {
       throw std::runtime_error(
           "PolicyAction::resolve: policy '" + policy_name +
@@ -186,6 +298,7 @@ struct PolicyAction {
                                              "exempt_venue_types", policy_name);
       venue_gate_direction = VenueGateDirection::ExemptFrom;
     }
+    venue_gate_error.clear();  // resolved: only reachable if nothing threw
 
     if (override_activities.empty() || override_activities.count("*") > 0) {
       override_all = true;
@@ -404,14 +517,34 @@ class PolicyManager {
 
   // Main function: Check if a person's scheduled activity should be overridden
   // Returns std::nullopt if no override applies, otherwise returns the override
-  // location
+  // location.
+  //
+  // pin_venue_id/pin_subset_index are the Pin Venue: where a freeze_in_place
+  // override anchors the person. slot_venue_type is the Slot Venue Type: the
+  // key a venue-gated action is decided on. The two are separate arguments
+  // because callers legitimately differ on them — a traveller in transit is
+  // pinned at their last overnight venue while occupying no venue at all.
   std::optional<PersonLocation> getOverride(Person& person,
                                             int16_t scheduled_activity_index,
-                                            VenueId scheduled_venue_id,
-                                            SubsetIndex scheduled_subset_index,
+                                            VenueId pin_venue_id,
+                                            SubsetIndex pin_subset_index,
+                                            SlotVenueType slot_venue_type,
                                             double current_time,
                                             int time_slot_index,
                                             const Person* partner = nullptr);
+
+  // Would a policy remove this Person from `activity_index` this slot? A
+  // question, not an instruction: no freeze is established or released, no
+  // schedule hop swapped, no compliance decision latched. There is deliberately
+  // no Pin Venue argument, because nothing is pinned (docs/adr/0009).
+  //
+  // Asked by the subsystems that only need the verdict — coordinated-encounter
+  // eligibility and follow mirroring — so that reading the answer cannot commit
+  // the consequence of it.
+  bool suppressesParticipation(const Person& person, int16_t activity_index,
+                               const SlotVenueType& slot_venue_type,
+                               double current_time,
+                               const Person* partner = nullptr) const;
 
   // Clear all policies
   void clear() {
@@ -466,9 +599,56 @@ class PolicyManager {
     }
   }
 
-  // Helper: Apply compliance rate (returns true if person complies)
+  // Helper: Apply compliance rate (returns true if person complies).
+  // Const because it is a pure draw: SplitMix64 over (base_seed_, person_id,
+  // policy_index), no stored RNG state, so the same triple always answers the
+  // same way. That is what lets suppressesParticipation reach a verdict for an
+  // undecided Person without latching the decision.
   bool checkCompliance(double compliance_rate, PersonId person_id,
-                       uint32_t policy_index);
+                       uint32_t policy_index) const;
+
+  // Is this Person taking part in policy `policy_bit`, without latching the
+  // answer? getOverride commits the sticky-compliance decision the first time
+  // it asks; this reads a decision already made, and falls back to redrawing
+  // it when none has been. The redraw is safe because checkCompliance is pure:
+  // it returns exactly what getOverride would latch. Reachable only if a query
+  // beats ActivityManager to a Person in a slot, which the timeslot ordering
+  // (activity assignment, then encounters, then follows) does not do.
+  bool isParticipating(uint32_t decisions_mask, uint32_t participation_mask,
+                       size_t policy_bit, double compliance_rate,
+                       PersonId person_id, uint32_t compliance_index) const {
+    if (decisions_mask & (1u << policy_bit)) {
+      return participation_mask & (1u << policy_bit);
+    }
+    return checkCompliance(compliance_rate, person_id, compliance_index);
+  }
+
+  // The part of a policy decision that is a pure question: does this action
+  // reach this Person's activity, at this slot's venue type, unexempted?
+  // Shared by getOverride and suppressesParticipation so the gate ordering and
+  // the docs/adr/0008 unresolved-gate throw exist in exactly one place.
+  //
+  // Takes a resolver rather than a resolved SlotVenueType so an ungated action
+  // never pays for the venue-type lookup — and never throws on a venue this
+  // rank cannot type when no policy was asking about venues in the first place.
+  template <typename SlotVenueTypeResolver>
+  bool actionApplies(const PolicyAction& action, const Person& person,
+                     int16_t activity_index,
+                     SlotVenueTypeResolver&& resolve_slot_venue_type,
+                     const Person* partner) const {
+    action.throwIfVenueGateUnresolved();
+
+    if (!action.shouldOverride(activity_index)) return false;
+
+    if (action.hasVenueGate() &&
+        !action.passesVenueGate(resolve_slot_venue_type())) {
+      return false;
+    }
+
+    if (action.isExempt(person, activity_index, &world_, partner)) return false;
+
+    return true;
+  }
 
   // Helper: Get replacement location for a given activity name
   std::optional<PersonLocation> getReplacementLocation(

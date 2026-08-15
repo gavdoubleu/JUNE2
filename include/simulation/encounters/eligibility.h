@@ -18,11 +18,16 @@ namespace june {
 namespace encounters {
 
 // Per-slot lookup tables derived from the coordinated-encounters config:
-// encounter_type_id -> trigger activity indices, and
-// encounter_type_id -> min_attendees threshold.
+// encounter_type_id -> trigger activity indices, min_attendees threshold, and
+// whether the encounter is virtual.
 struct EncounterLookups {
   std::unordered_map<uint8_t, std::vector<int16_t>> trigger_activities;
   std::unordered_map<uint8_t, int> min_attendees;
+  // CoordinatedEncounter::venue_type_id is polysemous — a world venue-type id
+  // for a physical encounter, a contact-matrix registry id for a virtual one,
+  // and the two registries are independently ordered so the integers alias.
+  // The def's own flag is the authoritative discriminator (docs/adr/0008).
+  std::unordered_map<uint8_t, bool> is_virtual;
 };
 
 // Pass-1 result for one daily_encounter: which local participants pass the
@@ -43,10 +48,15 @@ EncounterLookups buildEncounterLookups(
 // policy-block checks. Encounters not scheduled for this slot are skipped.
 // Each returned entry points back at its source encounter via .encounter_idx.
 //
-// The policy question asked is "would a policy move this person away from the
-// encounter's venue at this slot", so the venue handed to the policy is
-// enc.venue_id — the venue injection is about to put them in — not their
-// currently scheduled one.
+// The policy question asked is "would a policy remove this person from this
+// trigger activity, at the encounter's venue type" — a Policy Suppression
+// query, carrying no consequence. Pass 1 is speculative: the encounter may
+// still be cancelled below min_required, so nothing here may commit a freeze,
+// a hop swap or a compliance latch on the strength of it (docs/adr/0009). No
+// venue is handed to the policy, only the type, because nothing is pinned.
+//
+// A virtual encounter is at no Venue at all, so its Slot Venue Type is absent
+// rather than enc.venue_type_id.
 std::vector<EncounterEligibility> computeLocalEligibility(
     const std::vector<CoordinatedEncounter>& daily_encounters,
     int time_slot_index, double current_simulation_time,

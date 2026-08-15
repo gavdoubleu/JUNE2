@@ -18,6 +18,7 @@
 #include "core/config.h"
 #include "core/world_state.h"
 #include "doctest.h"
+#include "epidemiology/disease.h"
 #include "loaders/config_loader.h"
 #include "simulation/follow_bindings.h"
 
@@ -490,6 +491,17 @@ TEST_CASE("a follower with an excepted activity of its own keeps it") {
   CHECK(follow_detail::mirrorSuppressed(fc, 2, 3, 4) == false);
 }
 
+TEST_CASE("an unresolvable host venue type is not silently followable") {
+  // A host venue this rank cannot type must never reach the gate: answering
+  // "not excepted" would fail open and mirror the follower into a venue whose
+  // type nobody knows. The host's type travels on the broadcast wire precisely
+  // so this cannot happen, so a 255 arriving here is a defect, not an outcome.
+  FollowConfig fc = exceptionRule({}, {7}, {});
+  CHECK_THROWS_AS(
+      follow_detail::mirrorSuppressed(fc, 2, kUnknownVenueTypeId, -1),
+      std::runtime_error);
+}
+
 TEST_CASE("the three exceptions are ORed") {
   FollowConfig fc = exceptionRule({1}, {7}, {1});
   CHECK(follow_detail::mirrorSuppressed(fc, 1, 3, -1) ==
@@ -516,6 +528,9 @@ constexpr int16_t kLeisureActivity = 1;
 constexpr VenueId kHomeVenue = 0;
 constexpr VenueId kPubVenue = 1;
 constexpr VenueId kGroceryVenue = 2;
+
+constexpr uint8_t kPubVenueType = 1;
+constexpr uint8_t kGroceryVenueType = 2;
 
 // One person: residence at home, leisure reachable at the grocery. Venue types
 // household=0, pub=1, grocery=2, so a gate naming "pub" bites on kPubVenue
@@ -584,55 +599,120 @@ void addClosurePolicy(PolicyManager& policy_manager, WorldState& world,
   policy_manager.addTemporalPolicy(policy);
 }
 
-// The follower out at the grocery for leisure — the location the mirror is
-// about to overwrite.
-PersonLocation groceryLeisure() {
-  PersonLocation location;
-  location.person_id = 0;
-  location.venue_id = kGroceryVenue;
-  location.subset_index = 0;
-  location.activity_index = kLeisureActivity;
-  return location;
-}
-
 }  // namespace
 
 TEST_CASE("a venue-gated policy on the host's venue stops the mirror") {
   WorldState world = buildGateWorld();
   PolicyManager policy_manager(world);
   addClosurePolicy(policy_manager, world, {"leisure"}, {"pub"});
-  PersonLocation location = groceryLeisure();
 
   // REGRESSION: asked about the follower's own grocery the gate does not
   // match, and the follower is mirrored into the closed pub.
   CHECK(follow_detail::policySuppressesMirror(&policy_manager, world.people[0],
-                                              location, kPubVenue, 5.0,
-                                              0) == true);
+                                              kLeisureActivity, kPubVenueType,
+                                              5.0) == true);
 
   // Same policy, host somewhere the gate does not name: the mirror stands.
+  CHECK(follow_detail::policySuppressesMirror(
+            &policy_manager, world.people[0], kLeisureActivity,
+            kGroceryVenueType, 5.0) == false);
+}
+
+TEST_CASE("the mirror gate keys on the host's venue type, not the follower's") {
+  WorldState world = buildGateWorld();
+  PolicyManager policy_manager(world);
+
+  // The follower's own leisure venue is the grocery. Gating on the grocery
+  // must not fire: the key is where the mirror would put them, and a
+  // cross-rank host's venue cannot be typed on this rank at all, so the type
+  // that travelled with the host is the only one the gate may use.
+  addClosurePolicy(policy_manager, world, {"leisure"}, {"grocery"});
   CHECK(follow_detail::policySuppressesMirror(&policy_manager, world.people[0],
-                                              location, kGroceryVenue, 5.0,
-                                              0) == false);
+                                              kLeisureActivity, kPubVenueType,
+                                              5.0) == false);
 }
 
 TEST_CASE("an activity-only policy stops the mirror wherever the host is") {
   WorldState world = buildGateWorld();
   PolicyManager policy_manager(world);
   addClosurePolicy(policy_manager, world, {"leisure"}, {});
-  PersonLocation location = groceryLeisure();
 
   CHECK(follow_detail::policySuppressesMirror(&policy_manager, world.people[0],
-                                              location, kPubVenue, 5.0,
-                                              0) == true);
-  CHECK(follow_detail::policySuppressesMirror(&policy_manager, world.people[0],
-                                              location, kGroceryVenue, 5.0,
-                                              0) == true);
+                                              kLeisureActivity, kPubVenueType,
+                                              5.0) == true);
+  CHECK(follow_detail::policySuppressesMirror(
+            &policy_manager, world.people[0], kLeisureActivity,
+            kGroceryVenueType, 5.0) == true);
 }
 
 TEST_CASE("with no policy manager the mirror always stands") {
   WorldState world = buildGateWorld();
-  PersonLocation location = groceryLeisure();
   CHECK(follow_detail::policySuppressesMirror(nullptr, world.people[0],
-                                              location, kPubVenue, 5.0,
-                                              0) == false);
+                                              kLeisureActivity, kPubVenueType,
+                                              5.0) == false);
+}
+
+namespace {
+
+// A Disease whose only stage is "sick", lasting 100 days, so the symptom the
+// policy triggers on is the same at every time the test asks about.
+Disease buildAlwaysSickDisease() {
+  TransmissionParams transmission;
+  transmission.mode = InfectiousnessMode::STAGE_DRIVEN;
+  auto curve = std::make_shared<ConstantCurve>(1.0);
+  transmission.stage_curves["sick"] = curve;
+  transmission.symptom_id_curves = {nullptr, curve};
+
+  std::vector<SymptomTag> symptom_tags = {{"healthy", -1, 0}, {"sick", 1, 1}};
+  DiseaseStageSettings stage_settings;
+  stage_settings.recovered_stages = {"healthy"};
+
+  TrajectoryDefinition trajectory;
+  trajectory.selection_key = "general";
+  trajectory.severity = 1.0;
+  trajectory.stages.push_back({"sick", {"constant", {{"value", 100.0}}}});
+
+  return Disease("TestDisease", symptom_tags, stage_settings, {trajectory}, {},
+                 transmission);
+}
+
+}  // namespace
+
+TEST_CASE("the mirror gate pins nobody at the host's venue") {
+  // A hopped follower, sick, under a freeze_in_place policy. The gate must
+  // answer "a policy outranks the mirror" and stop there. The venue it is
+  // asked about is the host's, so a pin written here anchors the follower at
+  // the host's venue for the whole freeze — and every later slot
+  // ActivityManager finds that entry and teleports them back to it, long
+  // after this slot's mirror was declined.
+  WorldState world = buildGateWorld();
+  Disease disease = buildAlwaysSickDisease();
+
+  PolicyManager policy_manager(world);
+  SymptomPolicy freeze_when_sick;
+  freeze_when_sick.name = "freeze_traveller_when_sick";
+  freeze_when_sick.trigger_symptoms = {"sick"};
+  freeze_when_sick.action.override_activities = {"leisure"};
+  freeze_when_sick.action.replacement_activity = "residence";
+  freeze_when_sick.action.compliance_rate = 1.0;
+  // Set before adding: resolve() only fills this in from a named schedule.
+  freeze_when_sick.action.replacement_schedule_idx = 0;
+  policy_manager.addSymptomPolicy(freeze_when_sick);
+  policy_manager.resolveAll(disease);
+
+  Person& follower = world.people[0];
+  follower.infection = std::make_unique<Infection>(&disease, 0.0, &follower, 42,
+                                                   nullptr, "household", 0);
+  follower.applicable_symptom_policy_mask = 1;
+  constexpr int16_t kHoppedSchedule = 3;
+  constexpr int16_t kReturnSchedule = 1;
+  follower.schedule_hop = ScheduleHop::begin(kHoppedSchedule, kReturnSchedule);
+
+  CHECK(follow_detail::policySuppressesMirror(&policy_manager, follower,
+                                              kLeisureActivity, kPubVenueType,
+                                              5.0) == true);
+
+  CHECK(policy_manager.getFrozenStates().empty());
+  CHECK(follower.schedule_hop.hopped_schedule_id == kHoppedSchedule);
+  CHECK(follower.schedule_hop.return_schedule_id == kReturnSchedule);
 }

@@ -397,6 +397,16 @@ void CoordinatedEncounterManager::emitProposals(
     prop.invitee_id = partner_id;
     prop.venue_id = venue.id;
     prop.venue_owner_rank = mpi_rank_;
+    // The proposal is the single manufacture point for the venue type every
+    // downstream participant reads: the reply copies it, and so does the
+    // finalised encounter. An unresolvable type here would survive as far as
+    // def matching and be dropped as a no-matching-def warning, so refuse it
+    // where the defect is.
+    if (venue.id >= 0 && venue.type_id == kUnknownVenueTypeId)
+      throw std::runtime_error(
+          "coordinated encounters: physical venue " +
+          std::to_string(venue.id) + " for encounter '" + enc_def.name +
+          "' has an unresolvable venue type");
     prop.venue_type_id = venue.type_id;
     prop.slot = slot_idx;
     prop.encounter_type_id = enc_def.cached_encounter_type_id;
