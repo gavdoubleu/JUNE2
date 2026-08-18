@@ -87,9 +87,12 @@ inline std::vector<SelectionCriterion> PolicyLoader::loadSelectionCriteria(
     // Parse value (can be int, float, string, or list)
     const auto& value_node = criterion_node["value"];
     if (value_node.IsSequence()) {
-      // List of ints
-      std::vector<int32_t> values = value_node.as<std::vector<int32_t>>();
-      criterion.value = values;
+      // List of ints, or of strings (e.g. geographical unit names)
+      try {
+        criterion.value = value_node.as<std::vector<int32_t>>();
+      } catch (...) {
+        criterion.value = value_node.as<std::vector<std::string>>();
+      }
     } else if (value_node.IsScalar()) {
       // Try boolean first, then int, then float, then string
       std::string str_val = value_node.as<std::string>();

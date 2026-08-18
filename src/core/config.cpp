@@ -72,6 +72,11 @@ void SelectionCriterion::resolve(const WorldState& world) {
         if (cached_sub_property == "length")
           cached_type = PropertyType::NETWORK_SIZE;
       }
+    } else if (property_path.compare(0, 9, "geo_unit.") == 0) {
+      // Distinct from the exact-match "geo_unit_id" above: that is the
+      // person's own flat unit id, this is their ancestor at a named level.
+      cached_type = PropertyType::GEO_ANCESTOR;
+      cached_sub_property = property_path.substr(9);
     } else if (property_path == "is_alive") {
       cached_type = PropertyType::IS_ALIVE;
     } else if (property_path.compare(0, 19, "partner_in_network(") == 0) {
@@ -120,6 +125,115 @@ void SelectionCriterion::resolve(const WorldState& world) {
       }
     }
   }
+
+  // 3. Ancestor geography: pre-compute membership for every unit in the
+  // world, so evaluate never walks a parent chain.
+  if (cached_type == PropertyType::GEO_ANCESTOR && geo_ancestor_mask.empty() &&
+      geo_resolve_error.empty()) {
+    buildGeoAncestorMask(world);
+  }
+}
+
+void SelectionCriterion::buildGeoAncestorMask(const WorldState& world) const {
+  const std::string& level_name = cached_sub_property;
+
+  auto level_it = std::find(world.geo_level_names.begin(),
+                            world.geo_level_names.end(), level_name);
+  if (level_it == world.geo_level_names.end()) {
+    std::string known;
+    for (const std::string& name : world.geo_level_names) {
+      known += (known.empty() ? "" : ", ") + name;
+    }
+    geo_resolve_error = "geographical level '" + level_name +
+                        "' is not one this world declares (levels: " + known +
+                        ")";
+    return;
+  }
+  const uint8_t level_id =
+      static_cast<uint8_t>(std::distance(world.geo_level_names.begin(), level_it));
+
+  std::vector<std::string> target_names;
+  if (std::holds_alternative<std::string>(value)) {
+    target_names.push_back(std::get<std::string>(value));
+  } else if (std::holds_alternative<std::vector<std::string>>(value)) {
+    target_names = std::get<std::vector<std::string>>(value);
+  } else {
+    geo_resolve_error =
+        "'" + property_path +
+        "' compares against a geographical unit name, not a number or an id";
+    return;
+  }
+
+  std::vector<GeoUnitId> target_ids;
+  for (const std::string& target_name : target_names) {
+    std::vector<GeoUnitId> matches;
+    std::string level_of_other_match;
+    for (const GeographicalUnit& unit : world.geo_units) {
+      if (unit.name != target_name) continue;
+      if (unit.level_id == level_id) {
+        matches.push_back(unit.id);
+      } else if (level_of_other_match.empty() &&
+                 unit.level_id < world.geo_level_names.size()) {
+        level_of_other_match = world.geo_level_names[unit.level_id];
+      }
+    }
+    if (matches.empty()) {
+      geo_resolve_error = "no geographical unit named '" + target_name +
+                          "' at level '" + level_name + "'";
+      if (!level_of_other_match.empty()) {
+        geo_resolve_error += " (it exists at level '" + level_of_other_match +
+                             "' — did you mean that level?)";
+      }
+      return;
+    }
+    if (matches.size() > 1) {
+      geo_resolve_error = "geographical unit name '" + target_name +
+                          "' is ambiguous at level '" + level_name + "' (" +
+                          std::to_string(matches.size()) + " units share it)";
+      return;
+    }
+    target_ids.push_back(matches.front());
+  }
+
+  // Dense id keying is the common case; fall back to indexing by position in
+  // geo_units when the id space is sparse enough for a dense mask to waste
+  // more than it saves.
+  GeoUnitId max_id = -1;
+  for (const GeographicalUnit& unit : world.geo_units) {
+    max_id = std::max(max_id, unit.id);
+  }
+  const size_t dense_size = static_cast<size_t>(max_id + 1);
+  geo_mask_keyed_by_index = dense_size > 4 * world.geo_units.size();
+  geo_ancestor_mask.assign(
+      geo_mask_keyed_by_index ? world.geo_units.size() : dense_size, 2);
+
+  size_t units_with_no_ancestor = 0;
+  for (size_t index = 0; index < world.geo_units.size(); ++index) {
+    const GeographicalUnit& unit = world.geo_units[index];
+    GeoUnitId ancestor = world.ancestorAtLevel(unit.id, level_name);
+    uint8_t state = 2;
+    if (ancestor == -1) {
+      // Only units people actually live in are worth warning about: a unit
+      // coarser than the queried level has no ancestor there by construction.
+      if (world.people_by_geo_unit.count(unit.id) > 0) ++units_with_no_ancestor;
+    } else {
+      state = std::find(target_ids.begin(), target_ids.end(), ancestor) !=
+                      target_ids.end()
+                  ? 1
+                  : 0;
+    }
+    geo_ancestor_mask[geo_mask_keyed_by_index ? index
+                                             : static_cast<size_t>(unit.id)] =
+        state;
+  }
+
+  if (units_with_no_ancestor > 0) {
+    std::cerr << "Warning: '" << property_path << "': "
+              << units_with_no_ancestor
+              << " inhabited geographical units have no ancestor at level '"
+              << level_name << "'; people in them match neither == nor !="
+              << std::endl;
+  }
 }
 
 bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
@@ -141,6 +255,26 @@ bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
   };
   if (cached_type == PropertyType::IS_ALIVE) {
     return eval_bool(!person.is_dead);
+  }
+
+  // Ancestor geography: one array read against the mask built at resolve time.
+  if (cached_type == PropertyType::GEO_ANCESTOR) {
+    if (geo_ancestor_mask.empty()) return false;
+    size_t slot = static_cast<size_t>(person.geo_unit_id);
+    if (geo_mask_keyed_by_index) {
+      if (!world) return false;
+      auto it = world->geo_unit_index.find(person.geo_unit_id);
+      if (it == world->geo_unit_index.end()) return false;
+      slot = it->second;
+    }
+    if (person.geo_unit_id < 0 || slot >= geo_ancestor_mask.size()) return false;
+    const uint8_t state = geo_ancestor_mask[slot];
+    // Absent is an answer, not a missing one: no ancestor at this level fails
+    // in both directions, as a Slot Venue Type does (see docs/CONTEXT.md).
+    if (state == 2) return false;
+    if (operator_type == "==" || operator_type == "in") return state == 1;
+    if (operator_type == "!=") return state == 0;
+    return false;
   }
 
   // 2. Integer comparison for interned properties
@@ -656,7 +790,8 @@ void ContactMatrixConfig::finalizeDiseaseModeAlignment(
 
 void PreferenceProfile::resolve(const WorldState& world) {
   for (auto& crit : selection_criteria) {
-    crit.resolve(world);
+    crit.resolveOrThrow(world,
+                        "activity preference profile for '" + activity + "'");
   }
 
   activity_id = world.getActivityIndex(activity);
@@ -840,7 +975,17 @@ void SelectionCriterion::resolveOrThrow(const WorldState& world,
         "Known forms: age, sex, geo_unit_id, id, is_alive, "
         "properties.<name>, activities.<name>.length, "
         "activities.<name>.venue_type, "
-        "networks.<name>.length, partner_in_network(<n>)");
+        "networks.<name>.length, partner_in_network(<n>), "
+        "geo_unit.<LEVEL>");
+  }
+  if (!geo_resolve_error.empty()) {
+    throw std::runtime_error(context + ": " + geo_resolve_error);
+  }
+  if (cached_type == PropertyType::GEO_ANCESTOR && operator_type != "==" &&
+      operator_type != "!=" && operator_type != "in") {
+    throw std::runtime_error(context + ": '" + property_path +
+                             "' supports only == != in, not '" +
+                             operator_type + "'");
   }
   if (cached_type == PropertyType::CUSTOM_PROPERTY && cached_prop_idx < 0) {
     throw std::runtime_error(context + ": person property '" +
