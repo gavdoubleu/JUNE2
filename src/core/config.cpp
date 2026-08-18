@@ -982,9 +982,23 @@ void CoordinatedEncounterConfig::resolve(
       }
     }
 
-    // Pre-resolve caches for each encounter def
+    // Pre-resolve caches for each encounter def. The loop above guarantees
+    // the name is in the registry, so the only way this lookup can fail is
+    // the registry outgrowing the uint8_t id: 255 is kDefaultEncounterTypeId
+    // and kUnknownVenueTypeId, so an index at or past it would alias onto
+    // "no encounter type" and silently lose the def its trigger activities,
+    // its min_attendees and its contact matrix.
+    const int encounter_type_index = world.getEncounterTypeIndex(enc.name);
+    if (encounter_type_index < 0 || encounter_type_index >= 255) {
+      throw std::runtime_error(
+          "coordinated encounters: encounter type '" + enc.name +
+          "' resolved to index " + std::to_string(encounter_type_index) +
+          "; the encounter type registry holds " +
+          std::to_string(world.encounter_type_names.size()) +
+          " names and is capped at 255");
+    }
     enc.cached_encounter_type_id =
-        static_cast<uint8_t>(world.getEncounterTypeIndex(enc.name));
+        static_cast<uint8_t>(encounter_type_index);
     enc.trigger_mask =
         computeActivityMaskFromNames(enc.trigger_slots, world.activity_names);
 

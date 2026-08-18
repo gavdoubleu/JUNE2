@@ -19,7 +19,6 @@ EncounterLookups buildEncounterLookups(
     }
     out.trigger_activities[static_cast<uint8_t>(type_id)] = std::move(indices);
     out.min_attendees[static_cast<uint8_t>(type_id)] = def.min_attendees;
-    out.is_virtual[static_cast<uint8_t>(type_id)] = def.is_virtual;
   }
   return out;
 }
@@ -39,13 +38,13 @@ std::vector<EncounterEligibility> computeLocalEligibility(
 
     // A virtual encounter occupies no Venue, so it never passes a venue gate.
     // Reading enc.venue_type_id for one would take a contact-matrix id for a
-    // world venue-type id and gate on an unrelated real venue type.
-    auto virtual_it = lookups.is_virtual.find(enc.encounter_type_id);
-    const bool encounter_is_virtual =
-        virtual_it != lookups.is_virtual.end() && virtual_it->second;
+    // world venue-type id and gate on an unrelated real venue type. The
+    // discriminator is the instance's own venue id, which cannot miss a
+    // lookup (docs/adr/0010).
     const SlotVenueType slot_venue_type =
-        encounter_is_virtual ? SlotVenueType::absent()
-                             : SlotVenueType::known(enc.venue_type_id);
+        isVirtualVenue(enc.venue_id)
+            ? SlotVenueType::absent()
+            : SlotVenueType::known(enc.venue_type_id);
 
     std::vector<size_t> eligible_indices;
     for (PersonId pid : enc.participants) {

@@ -18,16 +18,18 @@ namespace june {
 namespace encounters {
 
 // Per-slot lookup tables derived from the coordinated-encounters config:
-// encounter_type_id -> trigger activity indices, min_attendees threshold, and
-// whether the encounter is virtual.
+// encounter_type_id -> trigger activity indices and min_attendees threshold.
+//
+// Deliberately holds no virtual/physical flag. CoordinatedEncounter::
+// venue_type_id is polysemous — a world venue-type id for a physical
+// encounter, a contact-matrix registry id for a virtual one — and the two
+// registries are independently ordered, so the integers alias. Which one it
+// is, is answered by isVirtualVenue(enc.venue_id): a property of the instance,
+// not a config flag reached through a world-registry lookup that can miss
+// (docs/adr/0010).
 struct EncounterLookups {
   std::unordered_map<uint8_t, std::vector<int16_t>> trigger_activities;
   std::unordered_map<uint8_t, int> min_attendees;
-  // CoordinatedEncounter::venue_type_id is polysemous — a world venue-type id
-  // for a physical encounter, a contact-matrix registry id for a virtual one,
-  // and the two registries are independently ordered so the integers alias.
-  // The def's own flag is the authoritative discriminator (docs/adr/0008).
-  std::unordered_map<uint8_t, bool> is_virtual;
 };
 
 // Pass-1 result for one daily_encounter: which local participants pass the

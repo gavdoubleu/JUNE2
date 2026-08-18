@@ -3333,3 +3333,132 @@ TEST_CASE(
   }
   CHECK(any_host_has_both);
 }
+
+// =============================================================================
+// SECTION 9: The virtual-venue id range (docs/adr/0010)
+//
+// Whether a CoordinatedEncounter is virtual is a property of the instance —
+// its reserved negative venue_id — not of a config flag reached through a
+// world-registry lookup that can miss.
+// =============================================================================
+
+TEST_CASE("9a. Virtual venue ids round-trip through their host") {
+  for (PersonId host_id : {0, 1, 42, 630205, 2147482647}) {
+    const VenueId virtual_venue_id = makeVirtualVenueId(host_id);
+    CHECK(isVirtualVenue(virtual_venue_id));
+    CHECK(occupiesNoVenue(virtual_venue_id));
+    CHECK(virtualVenueHost(virtual_venue_id) == host_id);
+  }
+
+  // Distinct by construction: two hosts never share a virtual venue.
+  CHECK(makeVirtualVenueId(0) != makeVirtualVenueId(1));
+}
+
+TEST_CASE("9b. The other negative venue ids are not virtual venues") {
+  // Both are negative — so they occupy no Venue — but neither is in the
+  // reserved range, and reading a host out of either would be nonsense.
+  CHECK(isVirtualVenue(kInvalidVenueId) == false);
+  CHECK(isVirtualVenue(INFECTION_SEED_VENUE_ID) == false);
+  CHECK(occupiesNoVenue(kInvalidVenueId));
+  CHECK(occupiesNoVenue(INFECTION_SEED_VENUE_ID));
+
+  // A real venue is neither.
+  CHECK(isVirtualVenue(0) == false);
+  CHECK(occupiesNoVenue(0) == false);
+
+  // The boundary belongs to host 0.
+  CHECK(isVirtualVenue(kVirtualVenueIdBase));
+  CHECK(isVirtualVenue(kVirtualVenueIdBase + 1) == false);
+}
+
+TEST_CASE("9c. Eligibility reads the instance, not the lookup tables") {
+  /**
+   * SCENARIO:
+   *   A Virtual Encounter whose encounter_type_id is absent from every
+   *   EncounterLookups map — the shape a def name missing from the world's
+   *   encounter-type registry used to produce. Trigger activities are
+   *   supplied by hand so the policy is genuinely consulted; nothing in the
+   *   lookups says the encounter is virtual.
+   *
+   *   The Slot Venue Type must still be absent, so the venue gate on "pub"
+   *   cannot reach the participants and the encounter proceeds.
+   *
+   * REGRESSION: the discriminator was the def's is_virtual flag, looked up on
+   *   encounter_type_id. On a miss the encounter read as physical and handed
+   *   venue_type_id — a contact-matrix registry id — to a Venue-type gate.
+   */
+  auto tw = buildEncounterWorld(
+      2, 1, "pub", "friendships", "pub_meetups", false, "", {"leisure"},
+      InviteDistribution{DistributionType::FIXED, 1.0, 0.5, 1}, 1.0, 1.0);
+
+  PolicyManager pm(tw.world);
+  auto disease = addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0,
+                                     10.0);
+  tw.world.people[0].applicable_temporal_policy_mask = 1;
+  tw.world.people[1].applicable_temporal_policy_mask = 1;
+
+  const uint8_t unregistered_encounter_type = 7;
+
+  CoordinatedEncounter enc;
+  enc.encounter_id = 900;
+  enc.host_id = 0;
+  enc.venue_id = makeVirtualVenueId(0);
+  // Aliases the "pub" venue type on purpose: for a virtual encounter this
+  // field is a contact-matrix id, and nothing may gate on it.
+  enc.venue_type_id = 2;
+  enc.slot = 0;
+  enc.encounter_type_id = unregistered_encounter_type;
+  enc.participants = {0, 1};
+
+  june::encounters::EncounterLookups lookups;
+  lookups.trigger_activities[unregistered_encounter_type] = {
+      static_cast<int16_t>(tw.world.getActivityIndex("leisure"))};
+  lookups.min_attendees[unregistered_encounter_type] = 2;
+
+  auto locations = initLocations(tw.world);
+  auto slot_encounters = june::encounters::computeLocalEligibility(
+      {enc}, 0, 5.0, lookups, tw.world, locations, &pm);
+
+  REQUIRE(slot_encounters.size() == 1);
+  CHECK(slot_encounters[0].local_eligible == 2);
+  CHECK(slot_encounters[0].min_required == 2);
+}
+
+TEST_CASE("9d. A virtual encounter carrying an unresolvable type never gates") {
+  /**
+   * SCENARIO: as 9c, but venue_type_id is kUnknownVenueTypeId — the value
+   * SlotVenueType::known() refuses. Under the old discriminator a lookup miss
+   * sent that straight to known() and aborted the run. It must not be read at
+   * all now.
+   */
+  auto tw = buildEncounterWorld(
+      2, 1, "pub", "friendships", "pub_meetups", false, "", {"leisure"},
+      InviteDistribution{DistributionType::FIXED, 1.0, 0.5, 1}, 1.0, 1.0);
+
+  PolicyManager pm(tw.world);
+  auto disease = addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0,
+                                     10.0);
+  tw.world.people[0].applicable_temporal_policy_mask = 1;
+  tw.world.people[1].applicable_temporal_policy_mask = 1;
+
+  CoordinatedEncounter enc;
+  enc.encounter_id = 901;
+  enc.host_id = 1;
+  enc.venue_id = makeVirtualVenueId(1);
+  enc.venue_type_id = kUnknownVenueTypeId;
+  enc.slot = 0;
+  enc.encounter_type_id = 9;
+  enc.participants = {0, 1};
+
+  june::encounters::EncounterLookups lookups;
+  lookups.trigger_activities[9] = {
+      static_cast<int16_t>(tw.world.getActivityIndex("leisure"))};
+  lookups.min_attendees[9] = 2;
+
+  auto locations = initLocations(tw.world);
+  std::vector<june::encounters::EncounterEligibility> slot_encounters;
+  REQUIRE_NOTHROW(slot_encounters = june::encounters::computeLocalEligibility(
+                      {enc}, 0, 5.0, lookups, tw.world, locations, &pm));
+  REQUIRE(slot_encounters.size() == 1);
+  CHECK(slot_encounters[0].local_eligible == 2);
+}

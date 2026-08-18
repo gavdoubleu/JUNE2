@@ -157,8 +157,9 @@ void applyEncounterInjection(
     // Register virtual venue ownership so the visitor exchange can route
     // cross-rank encounter participants to the host's rank. Physical
     // venues already have ownership via the venue ownership map; virtual
-    // venues (negative IDs) need explicit registration.
-    if (domain_mgr && enc.venue_id < 0) {
+    // venues need explicit registration. isVirtualVenue, to match the test in
+    // Domain::ownsVenue that reads this registry back.
+    if (domain_mgr && isVirtualVenue(enc.venue_id)) {
       int host_rank = domain_mgr->getPersonRank(enc.host_id);
       domain_mgr->setVenueRank(enc.venue_id, host_rank);
       if (host_rank == domain_mgr->getRank()) {
