@@ -45,7 +45,8 @@ struct ActivityExemption {
     activity_index =
         static_cast<int16_t>(world.getActivityIndex(activity_name));
     for (auto& criterion : criteria) {
-      criterion.resolve(world);
+      criterion.resolveOrThrow(world, "policy exemption for activity '" +
+                                          activity_name + "'");
     }
   }
 };
@@ -391,7 +392,7 @@ struct SymptomPolicy {
 
   void resolve(const WorldState& world, const Disease& disease) {
     for (auto& crit : applies_to) {
-      crit.resolve(world);
+      crit.resolveOrThrow(world, "symptom policy '" + name + "' applies_to");
     }
 
     // Intern action
@@ -459,7 +460,7 @@ struct TemporalPolicy {
 
   void resolve(const WorldState& world) {
     for (auto& crit : applies_to) {
-      crit.resolve(world);
+      crit.resolveOrThrow(world, "temporal policy '" + name + "' applies_to");
     }
     action.resolve(world, name);
   }

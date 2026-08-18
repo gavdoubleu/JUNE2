@@ -449,7 +449,8 @@ namespace config_detail {
 
 // Parse a YAML sequence of `{property, operator, value}` entries into a vector
 // of SelectionCriterion. The scalar `value` is dispatched int -> double ->
-// string; sequence `value` becomes vector<int32_t>. Declared in
+// string; a sequence `value` becomes vector<int32_t>, or vector<string> when
+// it does not parse as ints. Declared in
 // loaders/config_loader_detail.h so the vaccination-loader TU can reuse it.
 void parseSelectionCriteria(const YAML::Node& selection_node,
                             std::vector<SelectionCriterion>& out) {
@@ -460,7 +461,12 @@ void parseSelectionCriteria(const YAML::Node& selection_node,
 
     const auto& value_node = criterion_node["value"];
     if (value_node.IsSequence()) {
-      criterion.value = value_node.as<std::vector<int32_t>>();
+      // List of ints, or of strings (e.g. geographical unit names)
+      try {
+        criterion.value = value_node.as<std::vector<int32_t>>();
+      } catch (...) {
+        criterion.value = value_node.as<std::vector<std::string>>();
+      }
     } else if (value_node.IsScalar()) {
       try {
         criterion.value = value_node.as<int>();
