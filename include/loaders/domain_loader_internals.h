@@ -126,12 +126,13 @@ uint32_t matchMembershipRowToFlatIndex(const WorldState& world,
 void loadVenueSubsets(HDF5Loader& loader,
                       const std::unordered_set<GeoUnitId>& owned_geo_units);
 
-// Fill world's three global venue maps (type, geo_unit, by-type-name index)
-// from the world's full venue arrays. The three input vectors are parallel and
-// cover EVERY Venue in the world, not just this rank's: a rank must be able to
-// name the type of a Venue it does not own, otherwise the same value means
-// both "no such Venue" and "not decomposed onto me" and venue-gated policy
-// becomes rank-dependent.
+// Fill world's three global venue structures (VenueId-indexed type vector,
+// geo_unit map, by-type-name index) from the world's full venue arrays. The
+// three input vectors are parallel and cover EVERY Venue in the world, not just
+// this rank's: a rank must be able to name the type of a Venue it does not own,
+// otherwise the same value means both "no such Venue" and "not decomposed onto
+// me" and venue-gated policy becomes rank-dependent. Throws if the three
+// lengths disagree; warns (never throws) if the ids are sparse.
 //
 // Split out from buildGlobalVenueMaps so it can be tested without an
 // HDF5Loader.

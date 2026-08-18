@@ -1,4 +1,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <iostream>
+#include <sstream>
+#include <string>
+
 #include "core/world_state.h"
 #include "doctest.h"
 #include "loaders/domain_loader_internals.h"
@@ -30,18 +34,52 @@ TEST_CASE("fillGlobalVenueMaps types venues this rank does not own") {
 
   detail::fillGlobalVenueMaps(world, {100, 200}, {0, 1}, {10, 10});
 
-  SUBCASE("both venues land in the type map") {
-    REQUIRE(world.global_venue_type_map.count(100) == 1);
-    REQUIRE(world.global_venue_type_map.count(200) == 1);
-    CHECK(world.global_venue_type_map.at(100) == 0);
-    CHECK(world.global_venue_type_map.at(200) == 1);
+  SUBCASE("both venues land in the type index") {
+    REQUIRE(world.venue_type_by_id.size() == 201);
+    CHECK(world.venue_type_by_id[100] == 0);
+    CHECK(world.venue_type_by_id[200] == 1);
   }
 
   SUBCASE("a foreign venue types via getVenueTypeId") {
     CHECK(world.getVenueTypeId(200) == 1);
   }
 
-  SUBCASE("an id naming no Venue is still unresolvable") {
+  SUBCASE("a hole naming no Venue is unresolvable") {
+    CHECK(world.getVenueTypeId(150) == kUnknownVenueTypeId);
+  }
+
+  SUBCASE("an id past the end is unresolvable") {
     CHECK(world.getVenueTypeId(300) == kUnknownVenueTypeId);
   }
+
+  SUBCASE("a negative id is unresolvable") {
+    CHECK(world.getVenueTypeId(makeVirtualVenueId(100)) == kUnknownVenueTypeId);
+  }
+}
+
+// fillGlobalVenueMaps is public API, callable without an HDF5Loader, and reads
+// the type/geo arrays off venue_ids.size(). A short array would read out of
+// bounds, so the length agreement is checked, not assumed.
+TEST_CASE("fillGlobalVenueMaps rejects mismatched input lengths") {
+  WorldState world;
+  world.venue_type_names = {"household", "school"};
+
+  CHECK_THROWS(detail::fillGlobalVenueMaps(world, {100, 200}, {0}, {10, 10}));
+  CHECK_THROWS(detail::fillGlobalVenueMaps(world, {100, 200}, {0, 1}, {10}));
+}
+
+// Sparse /venues/ids costs one byte per hole. That is a warning, never a
+// throw: the load must still succeed and every id must still type correctly.
+TEST_CASE("fillGlobalVenueMaps warns on sparse ids but still loads") {
+  WorldState world;
+  world.venue_type_names = {"household", "school"};
+
+  std::ostringstream captured;
+  std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+  detail::fillGlobalVenueMaps(world, {100, 200}, {0, 1}, {10, 10});
+  std::cerr.rdbuf(previous);
+
+  CHECK(captured.str().find("sparse") != std::string::npos);
+  CHECK(world.getVenueTypeId(100) == 0);
+  CHECK(world.getVenueTypeId(200) == 1);
 }

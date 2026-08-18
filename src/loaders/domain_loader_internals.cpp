@@ -627,16 +627,36 @@ void fillGlobalVenueMaps(WorldState& world,
                          const std::vector<uint8_t>& venue_type_ids,
                          const std::vector<GeoUnitId>& venue_geo_unit_ids) {
   const size_t n = venue_ids.size();
+  if (venue_type_ids.size() != n || venue_geo_unit_ids.size() != n)
+    throw std::runtime_error(
+        "fillGlobalVenueMaps: parallel venue arrays disagree in length (ids=" +
+        std::to_string(n) + " types=" + std::to_string(venue_type_ids.size()) +
+        " geo_units=" + std::to_string(venue_geo_unit_ids.size()) + ")");
 
-  // All three maps cover every Venue in the world. The type map is kept for the
-  // whole run (see dropGlobalVenueMaps): a rank must be able to name the type
-  // of a Venue it does not own, or kUnknownVenueTypeId means both "no such
+  // All three structures cover every Venue in the world. The type index is kept
+  // for the whole run (see dropGlobalVenueMaps): a rank must be able to name the
+  // type of a Venue it does not own, or kUnknownVenueTypeId means both "no such
   // Venue" and "not decomposed onto me". The geo/by-type maps are only needed
   // until the OTF allocator has precomputed its pools, then freed.
-  world.global_venue_type_map.reserve(n);
+  //
+  // Types go in a VenueId-indexed vector, 1 B/entry against ~40 B/entry hashed.
+  // Density is not assumed — a hole costs one byte and already answers
+  // kUnknownVenueTypeId — but very sparse ids waste memory silently, so warn.
+  VenueId max_venue_id = -1;
+  for (VenueId id : venue_ids) max_venue_id = std::max(max_venue_id, id);
+  const size_t type_index_size = static_cast<size_t>(max_venue_id + 1);
+  if (n > 0 && type_index_size > 4 * n)
+    std::cerr << "[HALO] sparse /venues/ids: type index spans "
+              << type_index_size << " slots for " << n << " venues (ratio "
+              << static_cast<double>(type_index_size) / static_cast<double>(n)
+              << "x); the holes cost one byte each\n";
+  world.venue_type_by_id.assign(type_index_size, kUnknownVenueTypeId);
+
   world.global_venue_geo_unit_map.reserve(n);
   for (size_t i = 0; i < n; ++i) {
-    world.global_venue_type_map[venue_ids[i]] = venue_type_ids[i];
+    if (venue_ids[i] >= 0)
+      world.venue_type_by_id[static_cast<size_t>(venue_ids[i])] =
+          venue_type_ids[i];
     world.global_venue_geo_unit_map[venue_ids[i]] = venue_geo_unit_ids[i];
     world.addVenueToTypeIndex(venue_ids[i], venue_type_ids[i]);
   }

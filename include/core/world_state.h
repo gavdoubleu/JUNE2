@@ -192,28 +192,39 @@ class WorldState {
   std::unordered_map<std::string, std::vector<uint32_t>>
       venues_by_type;  // type -> indices
 
-  // Global venue maps: cover ALL venues (local + cross-rank). In MPI mode the
-  // HDF5 loader pre-populates these before buildIndices(); in serial/test mode
-  // buildGlobalVenueMaps() fills them from world.venues during buildIndices().
+  // Global venue maps: cover ALL venues (local + cross-rank). The HDF5 loader
+  // pre-populates these before buildIndices() at every rank count, serial
+  // included; for a hand-built WorldState buildGlobalVenueMaps() fills the
+  // geo-unit and by-type-name ones from world.venues during buildIndices().
   // Single source of truth — getVenuesInGeoUnit() uses only these maps so the
   // candidate pool is identical in serial and parallel runs.
   //
-  // global_venue_type_map is empty in serial mode (getVenue() is total there)
-  // and holds every Venue in the world in MPI mode — not just this rank's, so
-  // that kUnknownVenueTypeId means "no such Venue" and never "not mine".
-  std::unordered_map<VenueId, uint8_t> global_venue_type_map;
+  // venue_type_by_id is indexed by VenueId and covers every Venue in the world,
+  // not just this rank's, so that kUnknownVenueTypeId means "no such Venue" and
+  // never "not mine" (docs/adr/0008). Ids naming no Venue are holes holding
+  // kUnknownVenueTypeId. Empty only for a hand-built WorldState, where
+  // getVenue() is total.
+  std::vector<uint8_t> venue_type_by_id;
   std::unordered_map<VenueId, GeoUnitId> global_venue_geo_unit_map;
   // type_name → sorted list of all VenueIds of that type (globally)
   std::unordered_map<std::string, std::vector<VenueId>>
       global_venues_by_type_name;
 
-  // Helper: get venue type_id, falling back to global map for cross-rank venues
+  // Helper: get venue type_id, falling back to the all-venue index for
+  // cross-rank venues. Ids outside the index — past the end, a hole, or the
+  // negative virtual-venue range — are unresolvable.
   uint8_t getVenueTypeId(VenueId id) const {
     const Venue* v = getVenue(id);
     if (v) return v->type_id;
-    auto it = global_venue_type_map.find(id);
-    return (it != global_venue_type_map.end()) ? it->second : kUnknownVenueTypeId;
+    if (id < 0 || static_cast<size_t>(id) >= venue_type_by_id.size())
+      return kUnknownVenueTypeId;
+    return venue_type_by_id[static_cast<size_t>(id)];
   }
+
+  // Record the type of `venue_id` in venue_type_by_id, growing it with
+  // kUnknownVenueTypeId holes as needed. Negative ids name no Venue and are
+  // ignored. For one-off writes; the loader sizes the index once instead.
+  void setGlobalVenueType(VenueId venue_id, uint8_t type_id);
 
   // Geographic index: geo_unit_id -> indices of people in this unit AND all its
   // descendants
@@ -261,7 +272,7 @@ class WorldState {
 
   // Free the two all-venue maps used only by getVenuesInGeoUnit, after the OTF
   // allocator has precomputed every pool it needs. Logs freed sizes.
-  // global_venue_type_map is kept for the whole run: cross-rank type lookups
+  // venue_type_by_id is kept for the whole run: cross-rank type lookups
   // happen on every step, and every Venue must stay nameable.
   void dropGlobalVenueMaps();
 
