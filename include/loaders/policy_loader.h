@@ -8,6 +8,7 @@
 
 #include "core/config.h"
 #include "epidemiology/policy.h"
+#include "loaders/selection_criterion_value.h"
 #include "utils/time_utils.h"
 
 namespace june {
@@ -94,12 +95,8 @@ inline std::vector<SelectionCriterion> PolicyLoader::loadSelectionCriteria(
     // Parse value (can be int, float, string, or list)
     const auto& value_node = criterion_node["value"];
     if (value_node.IsSequence()) {
-      // List of ints, or of strings (e.g. geographical unit names)
-      try {
-        criterion.value = value_node.as<std::vector<int32_t>>();
-      } catch (...) {
-        criterion.value = value_node.as<std::vector<std::string>>();
-      }
+      criterion.value = config_detail::parseCriterionSequenceValue(
+          value_node, criterion.property_path);
     } else if (value_node.IsScalar()) {
       // Try boolean first, then int, then float, then string
       std::string str_val = value_node.as<std::string>();

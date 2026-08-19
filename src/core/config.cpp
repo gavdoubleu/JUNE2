@@ -36,6 +36,12 @@ const char* distributionTypeToString(DistributionType t) {
   }
 }
 
+bool SelectionCriterion::comparesAgainstUnitNames(
+    const std::string& property_path) {
+  // Must agree with the GEO_ANCESTOR arm of the path dispatch below.
+  return property_path.compare(0, 9, "geo_unit.") == 0;
+}
+
 void SelectionCriterion::resolve(const WorldState& world) {
   // 1. First ensure type is cached
   if (cached_type == PropertyType::UNKNOWN) {
@@ -72,7 +78,7 @@ void SelectionCriterion::resolve(const WorldState& world) {
         if (cached_sub_property == "length")
           cached_type = PropertyType::NETWORK_SIZE;
       }
-    } else if (property_path.compare(0, 9, "geo_unit.") == 0) {
+    } else if (comparesAgainstUnitNames(property_path)) {
       // Distinct from the exact-match "geo_unit_id" above: that is the
       // person's own flat unit id, this is their ancestor at a named level.
       cached_type = PropertyType::GEO_ANCESTOR;

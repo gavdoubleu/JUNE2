@@ -45,6 +45,12 @@ struct SelectionCriterion {
   // block in the error message.
   void resolveOrThrow(const WorldState& world, const std::string& context);
 
+  // True for the property paths whose `value` is a geographical unit name (or
+  // a list of them) rather than a number: `geo_unit.<LEVEL>` and nothing else.
+  // Lexical, so config loaders can ask before a world exists. Kept beside the
+  // path dispatch in resolve() so the two cannot drift.
+  static bool comparesAgainstUnitNames(const std::string& property_path);
+
  private:
   enum class PropertyType {
     UNKNOWN,

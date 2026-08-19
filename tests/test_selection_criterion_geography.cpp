@@ -349,3 +349,73 @@ TEST_CASE("a temporal policy refuses to resolve a filter this world cannot answe
 
   CHECK_THROWS_AS(policy.resolve(world), std::runtime_error);
 }
+
+TEST_CASE("a list value on a non-geographical property must be whole numbers") {
+  // Regression: a `catch (...)` fallback used to reinterpret any list that
+  // failed int conversion as a list of unit names. Only geo_unit.<LEVEL>
+  // reads those, so every other property got a criterion that loaded clean
+  // and then matched nobody — a config mistake reading as "nobody qualifies".
+
+  SUBCASE("a list of strings is rejected") {
+    YAML::Node node = YAML::Load(
+        "- property: \"properties.region\"\n"
+        "  operator: \"in\"\n"
+        "  value: [\"North East\", \"Yorkshire\"]\n");
+
+    std::vector<SelectionCriterion> criteria;
+    CHECK_THROWS_AS(config_detail::parseSelectionCriteria(node, criteria),
+                    std::runtime_error);
+  }
+
+  SUBCASE("a list of floats is rejected") {
+    YAML::Node node = YAML::Load(
+        "- property: \"age\"\n"
+        "  operator: \"in\"\n"
+        "  value: [1.5, 2.5]\n");
+
+    std::vector<SelectionCriterion> criteria;
+    CHECK_THROWS_AS(config_detail::parseSelectionCriteria(node, criteria),
+                    std::runtime_error);
+  }
+
+  SUBCASE("a list of ints still parses") {
+    YAML::Node node = YAML::Load(
+        "- property: \"geo_unit_id\"\n"
+        "  operator: \"in\"\n"
+        "  value: [10, 11]\n");
+
+    std::vector<SelectionCriterion> criteria;
+    config_detail::parseSelectionCriteria(node, criteria);
+
+    REQUIRE(criteria.size() == 1);
+    CHECK(std::holds_alternative<std::vector<int32_t>>(criteria[0].value));
+  }
+}
+
+TEST_CASE("the policy loader rejects the same list values as the schedule loader") {
+  WorldState world = buildNationWorld();
+  world.activity_names = {"residence", "primary_activity"};
+  world.buildIndices();
+
+  const std::string path = "/tmp/june_test_bad_list_policies.yaml";
+  {
+    std::ofstream out(path);
+    out << "policies:\n"
+           "  temporal_policies:\n"
+           "    - name: \"regional_lockdown\"\n"
+           "      start_date: \"2020-03-23\"\n"
+           "      override_activities: [\"primary_activity\"]\n"
+           "      replacement: \"residence\"\n"
+           "      applies_to:\n"
+           "        - property: \"properties.region\"\n"
+           "          operator: \"in\"\n"
+           "          value: [\"North East\", \"Yorkshire\"]\n";
+  }
+
+  PolicyManager policy_manager(world);
+  CHECK_THROWS_AS(
+      PolicyLoader::loadPolicies(policy_manager, path, "2020-01-01"),
+      std::runtime_error);
+
+  std::remove(path.c_str());
+}
