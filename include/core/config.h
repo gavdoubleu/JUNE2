@@ -69,14 +69,20 @@ struct SelectionCriterion {
   // other unit, 1 = under a target unit, 2 = no ancestor at this level
   // (absent — false whichever way the criterion is written).
   mutable std::vector<uint8_t> geo_ancestor_mask;
-  // The mask is keyed by geo_unit_id when ids are dense enough to make that
-  // cheap, and by index into WorldState::geo_units otherwise.
-  mutable bool geo_mask_keyed_by_index = false;
+  // Empty when the mask is keyed by geo_unit_id directly (ids dense enough to
+  // make that cheap). Otherwise holds the world's unit ids in sorted order and
+  // the mask is keyed by position in it, found by binary search. Both forms are
+  // self-contained: evaluate answers from the criterion alone, never from a
+  // WorldState it may not have been handed.
+  mutable std::vector<GeoUnitId> geo_mask_unit_ids;
   // Recorded rather than thrown: evaluate resolves lazily and must not throw
   // from the hot path, so resolveOrThrow is what turns this into an error.
   mutable std::string geo_resolve_error;
 
   void buildGeoAncestorMask(const WorldState& world) const;
+  // Position of `id` in geo_ancestor_mask, or geo_ancestor_mask.size() when the
+  // mask has no entry for it.
+  size_t geoMaskSlot(GeoUnitId id) const;
   mutable PropertyType cached_type = PropertyType::UNKNOWN;
   mutable std::string cached_activity_name;  // (also reused for facet name)
   mutable std::string cached_sub_property;   // (also reused for facet field)
