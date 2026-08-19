@@ -13,11 +13,6 @@ class Node;
 namespace june {
 namespace config_detail {
 
-// True on MPI rank 0 (and unconditionally true when MPI is not initialised
-// or not compiled in). Shared by the rank-gated [CoordEnc] / vaccination
-// load-time log lines that fire from multiple TUs.
-bool logRank0();
-
 // Parse a YAML sequence of `{property, operator, value}` entries into a
 // vector of SelectionCriterion. The scalar `value` is dispatched
 // int -> double -> string; a sequence `value` goes through

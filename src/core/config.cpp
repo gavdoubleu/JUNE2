@@ -12,6 +12,7 @@
 #include "utils/config_checks.h"
 #include "utils/filtered_csv.h"
 #include "utils/filtering.h"
+#include "utils/mpi_logging.h"
 
 namespace june {
 
@@ -227,9 +228,12 @@ void SelectionCriterion::buildGeoAncestorMask(const WorldState& world) const {
     GeoUnitId ancestor = world.ancestorAtLevel(unit.id, level_name);
     uint8_t state = 2;
     if (ancestor == -1) {
-      // Only units people actually live in are worth warning about: a unit
-      // coarser than the queried level has no ancestor there by construction.
-      if (world.people_by_geo_unit.count(unit.id) > 0) ++units_with_no_ancestor;
+      // Only units people are assigned to directly are worth warning about: a
+      // unit coarser than the queried level has no ancestor there by
+      // construction. people_by_geo_unit cannot answer this — it keys people
+      // under their ancestors too, so every coarse unit is in it.
+      if (world.directly_inhabited_geo_units.count(unit.id) > 0)
+        ++units_with_no_ancestor;
     } else {
       state = std::find(target_ids.begin(), target_ids.end(), ancestor) !=
                       target_ids.end()
@@ -239,7 +243,9 @@ void SelectionCriterion::buildGeoAncestorMask(const WorldState& world) const {
     geo_ancestor_mask[geoMaskSlot(unit.id)] = state;
   }
 
-  if (units_with_no_ancestor > 0) {
+  // Rank-gated: geo_units is global on every rank, so only the inhabited-unit
+  // count is rank-local, and one rank's report is enough to flag the geography.
+  if (units_with_no_ancestor > 0 && logRank0()) {
     std::cerr << "Warning: '" << property_path << "': "
               << units_with_no_ancestor
               << " inhabited geographical units have no ancestor at level '"

@@ -8,33 +8,12 @@
 #include <stdexcept>
 #include <string>
 
-#ifdef USE_MPI
-#include <mpi.h>
-#endif
-
 #include "loaders/config_loader_detail.h"
 #include "loaders/selection_criterion_value.h"
 #include "utils/filtered_csv.h"
 #include "utils/filtering.h"
 
 namespace june {
-
-namespace config_detail {
-
-bool logRank0() {
-#ifdef USE_MPI
-  int initialized = 0;
-  MPI_Initialized(&initialized);
-  if (!initialized) return true;
-  int rank = 0;
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-  return rank == 0;
-#else
-  return true;
-#endif
-}
-
-}  // namespace config_detail
 
 namespace {
 
