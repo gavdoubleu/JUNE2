@@ -3,6 +3,9 @@
 
 #include <cstdio>
 #include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
 
 #include "core/config.h"
 #include "core/world_state.h"
@@ -51,6 +54,16 @@ static WorldState buildNationWorld() {
 
   world.buildIndices();
   return world;
+}
+
+// Resolve `criterion` against `world`, returning whatever it wrote to stderr.
+static std::string resolveCapturingStderr(SelectionCriterion& criterion,
+                                          const WorldState& world) {
+  std::ostringstream captured;
+  std::streambuf* previous = std::cerr.rdbuf(captured.rdbuf());
+  criterion.resolveOrThrow(world, "test");
+  std::cerr.rdbuf(previous);
+  return captured.str();
 }
 
 }  // namespace
@@ -154,6 +167,41 @@ TEST_CASE("a person with no ancestor at the level matches neither == nor !=") {
 
   CHECK_FALSE(equals.evaluate(world.people[3], &world));
   CHECK_FALSE(differs.evaluate(world.people[3], &world));
+}
+
+TEST_CASE("the no-ancestor warning fires only for units people live in") {
+  SUBCASE("a correctly specified world stays silent") {
+    WorldState world = buildNationWorld();
+    // The nations have no ancestor at SGU, but nobody lives in one directly.
+    SelectionCriterion criterion;
+    criterion.property_path = "geo_unit.SGU";
+    criterion.operator_type = "==";
+    criterion.value = std::string("S00000001");
+
+    CHECK(resolveCapturingStderr(criterion, world).empty());
+  }
+
+  SUBCASE("a unit people live in with no ancestor at the level warns") {
+    WorldState world = buildNationWorld();
+    GeographicalUnit stateless;
+    stateless.id = 13;
+    stateless.name = "Z00000001";
+    stateless.level_id = 1;
+    stateless.parent_id = -1;
+    world.geo_units.push_back(stateless);
+    Person& person = world.people.emplace_back();
+    person.id = 3;
+    person.geo_unit_id = 13;
+    world.buildIndices();
+
+    SelectionCriterion criterion;
+    criterion.property_path = "geo_unit.XLGU";
+    criterion.operator_type = "==";
+    criterion.value = std::string("Scotland");
+
+    const std::string warning = resolveCapturingStderr(criterion, world);
+    CHECK(warning.find("1 inhabited geographical units") != std::string::npos);
+  }
 }
 
 TEST_CASE("a geo_unit criterion this world cannot answer fails loudly at load") {
