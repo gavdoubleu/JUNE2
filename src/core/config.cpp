@@ -195,21 +195,29 @@ void SelectionCriterion::buildGeoAncestorMask(const WorldState& world) const {
     target_ids.push_back(matches.front());
   }
 
-  // Dense id keying is the common case; fall back to indexing by position in
-  // geo_units when the id space is sparse enough for a dense mask to waste
-  // more than it saves.
+  // Dense id keying is the common case, and makes evaluate a single array read;
+  // fall back to a sorted id table when the id space is sparse enough for a
+  // dense mask to waste more than it saves. Both keyings are self-contained, so
+  // the answer does not depend on the id distribution of the world file.
   GeoUnitId max_id = -1;
   for (const GeographicalUnit& unit : world.geo_units) {
     max_id = std::max(max_id, unit.id);
   }
   const size_t dense_size = static_cast<size_t>(max_id + 1);
-  geo_mask_keyed_by_index = dense_size > 4 * world.geo_units.size();
-  geo_ancestor_mask.assign(
-      geo_mask_keyed_by_index ? world.geo_units.size() : dense_size, 2);
+  geo_mask_unit_ids.clear();
+  if (dense_size > 4 * world.geo_units.size()) {
+    geo_mask_unit_ids.reserve(world.geo_units.size());
+    for (const GeographicalUnit& unit : world.geo_units) {
+      geo_mask_unit_ids.push_back(unit.id);
+    }
+    std::sort(geo_mask_unit_ids.begin(), geo_mask_unit_ids.end());
+    geo_ancestor_mask.assign(geo_mask_unit_ids.size(), 2);
+  } else {
+    geo_ancestor_mask.assign(dense_size, 2);
+  }
 
   size_t units_with_no_ancestor = 0;
-  for (size_t index = 0; index < world.geo_units.size(); ++index) {
-    const GeographicalUnit& unit = world.geo_units[index];
+  for (const GeographicalUnit& unit : world.geo_units) {
     GeoUnitId ancestor = world.ancestorAtLevel(unit.id, level_name);
     uint8_t state = 2;
     if (ancestor == -1) {
@@ -222,9 +230,7 @@ void SelectionCriterion::buildGeoAncestorMask(const WorldState& world) const {
                   ? 1
                   : 0;
     }
-    geo_ancestor_mask[geo_mask_keyed_by_index ? index
-                                             : static_cast<size_t>(unit.id)] =
-        state;
+    geo_ancestor_mask[geoMaskSlot(unit.id)] = state;
   }
 
   if (units_with_no_ancestor > 0) {
@@ -234,6 +240,20 @@ void SelectionCriterion::buildGeoAncestorMask(const WorldState& world) const {
               << level_name << "'; people in them match neither == nor !="
               << std::endl;
   }
+}
+
+size_t SelectionCriterion::geoMaskSlot(GeoUnitId id) const {
+  if (id < 0) return geo_ancestor_mask.size();
+  if (geo_mask_unit_ids.empty()) {
+    const size_t slot = static_cast<size_t>(id);
+    return slot < geo_ancestor_mask.size() ? slot : geo_ancestor_mask.size();
+  }
+  auto it =
+      std::lower_bound(geo_mask_unit_ids.begin(), geo_mask_unit_ids.end(), id);
+  if (it == geo_mask_unit_ids.end() || *it != id) {
+    return geo_ancestor_mask.size();
+  }
+  return static_cast<size_t>(std::distance(geo_mask_unit_ids.begin(), it));
 }
 
 bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
@@ -259,15 +279,8 @@ bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
 
   // Ancestor geography: one array read against the mask built at resolve time.
   if (cached_type == PropertyType::GEO_ANCESTOR) {
-    if (geo_ancestor_mask.empty()) return false;
-    size_t slot = static_cast<size_t>(person.geo_unit_id);
-    if (geo_mask_keyed_by_index) {
-      if (!world) return false;
-      auto it = world->geo_unit_index.find(person.geo_unit_id);
-      if (it == world->geo_unit_index.end()) return false;
-      slot = it->second;
-    }
-    if (person.geo_unit_id < 0 || slot >= geo_ancestor_mask.size()) return false;
+    const size_t slot = geoMaskSlot(person.geo_unit_id);
+    if (slot >= geo_ancestor_mask.size()) return false;
     const uint8_t state = geo_ancestor_mask[slot];
     // Absent is an answer, not a missing one: no ancestor at this level fails
     // in both directions, as a Slot Venue Type does (see docs/CONTEXT.md).

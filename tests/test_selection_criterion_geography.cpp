@@ -66,6 +66,10 @@ TEST_CASE("geo_unit.<LEVEL> == name selects people under that ancestor") {
 
   CHECK(criterion.evaluate(world.people[0], &world));
   CHECK_FALSE(criterion.evaluate(world.people[1], &world));
+
+  // Dense ids, and no world passed: same answers.
+  CHECK(criterion.evaluate(world.people[0]));
+  CHECK_FALSE(criterion.evaluate(world.people[1]));
 }
 
 TEST_CASE("geo_unit.<LEVEL> in a list of names selects people under any of them") {
@@ -256,6 +260,17 @@ TEST_CASE("a sparse geo id space gives the same answers") {
 
   CHECK(criterion.evaluate(world.people[0], &world));
   CHECK_FALSE(criterion.evaluate(world.people[1], &world));
+
+  // Sparse ids force the fallback keying; the answer must not depend on it, nor
+  // on the caller having a WorldState in hand (ActivityManager has none).
+  CHECK(criterion.evaluate(world.people[0]));
+  CHECK_FALSE(criterion.evaluate(world.people[1]));
+
+  // A unit this world does not carry is no ancestor of anything.
+  Person stranger;
+  stranger.id = 2;
+  stranger.geo_unit_id = 3500000;
+  CHECK_FALSE(criterion.evaluate(stranger));
 }
 
 TEST_CASE("a policies.yaml applies_to accepts a list of unit names") {
