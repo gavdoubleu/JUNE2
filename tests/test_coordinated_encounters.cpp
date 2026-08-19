@@ -1567,8 +1567,8 @@ static void addLockdownPolicy(
     const std::vector<ActivityExemption>& exemptions = {}) {
   TemporalPolicy tp;
   tp.name = "test_lockdown";
-  tp.start_time = start_time;
-  tp.end_time = end_time;
+  tp.window.start_time = start_time;
+  tp.window.end_time = end_time;
 
   tp.action.override_all = true;
   tp.action.replacement_activity = "residence";
@@ -1595,8 +1595,8 @@ static std::unique_ptr<Disease> addVenueGatedPolicy(
     double end_time) {
   TemporalPolicy tp;
   tp.name = "close_pubs";
-  tp.start_time = start_time;
-  tp.end_time = end_time;
+  tp.window.start_time = start_time;
+  tp.window.end_time = end_time;
 
   tp.action.override_activities.insert(activities.begin(), activities.end());
   tp.action.override_venue_types.insert(venue_types.begin(),
