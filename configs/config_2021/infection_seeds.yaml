@@ -38,11 +38,14 @@ infection_seeds:
 #     date: "2024-01-02 12:00"
 #     geo_level: "MGU" # Geographic level for 'units'
 #     parameters:
-#       # Filter for demographic groups (Target Groups)
-#       age_groups: ["0-17", "18-64", "65+"] 
-      
+#       # Filter for demographic groups (Target Groups). Omit age_groups
+#       # entirely and a count draws from anyone eligible in the unit.
+#       age_groups: ["0-17", "18-64", "65+"]
+
 #       # units: "unit_id": [cases_per_group_1, cases_per_group_2, ...]
-#       # Or "unit_id": total_cases (distributed across groups)
+#       #   one count per declared age group; a length mismatch is fatal at load.
+#       # Or "unit_id": total_cases
+#       #   a single total, drawn from anyone matching any declared age group.
 #       units:
 #         "E02004292": [5, 10, 2] # 5 kids, 10 adults, 2 seniors
 #         "E02001234": 20        # 20 people total, matching any age group

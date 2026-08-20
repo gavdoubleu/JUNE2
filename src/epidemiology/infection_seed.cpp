@@ -222,12 +222,18 @@ void InfectionSeedConfigLoader::loadBulkCsvSeeds(const std::string& csv_path,
   for (auto& [key, draft] : drafts) {
     if (draft.event.type != InfectionSeedType::UNIFORM) {
       for (const auto& [unit_id, groups] : draft.unit_pending) {
+        // One budget per distinct criteria set, in group order.
         UnitCases uc;
         uc.unit_id = unit_id;
-        uc.cases_per_target_group.resize(
-            draft.event.structured_config.target_groups.size(), 0);
+        for (size_t g_idx = 0;
+             g_idx < draft.event.structured_config.target_groups.size();
+             ++g_idx) {
+          SeedBudget budget;
+          budget.eligible_target_groups = {g_idx};
+          uc.budgets.push_back(budget);
+        }
         for (const auto& [g_idx, count] : groups) {
-          uc.cases_per_target_group[g_idx] += count;
+          uc.budgets[g_idx].cases += count;
         }
         draft.event.structured_config.unit_cases.push_back(uc);
       }
@@ -313,16 +319,36 @@ InfectionSeedConfig InfectionSeedConfigLoader::loadFromFile(
 
             if (params["units"]) {
               for (const auto& entry : params["units"]) {
+                const size_t group_count =
+                    seed.structured_config.target_groups.size();
                 UnitCases uc;
                 uc.unit_id = entry.first.as<std::string>();
                 if (entry.second.IsSequence()) {
-                  for (const auto& cases : entry.second)
-                    uc.cases_per_target_group.push_back(
-                        static_cast<int>(cases.as<double>()));
+                  // A per-group list: each declared group gets its own budget.
+                  if (entry.second.size() != group_count) {
+                    throw std::runtime_error(
+                        "Infection seed '" + seed.name + "', unit '" +
+                        uc.unit_id + "': per-group case list has " +
+                        std::to_string(entry.second.size()) +
+                        " entries but the seed declares " +
+                        std::to_string(group_count) + " target groups");
+                  }
+                  size_t group_index = 0;
+                  for (const auto& cases : entry.second) {
+                    SeedBudget budget;
+                    budget.cases = static_cast<int>(cases.as<double>());
+                    budget.eligible_target_groups = {group_index++};
+                    uc.budgets.push_back(budget);
+                  }
                 } else {
-                  int c = static_cast<int>(entry.second.as<double>());
-                  uc.cases_per_target_group.assign(
-                      seed.structured_config.target_groups.size(), c);
+                  // A scalar: one budget, drawn from anyone matching any
+                  // declared group (or from anyone, if none are declared).
+                  SeedBudget budget;
+                  budget.cases = static_cast<int>(entry.second.as<double>());
+                  budget.eligible_target_groups.resize(group_count);
+                  std::iota(budget.eligible_target_groups.begin(),
+                            budget.eligible_target_groups.end(), size_t{0});
+                  uc.budgets.push_back(budget);
                 }
                 seed.structured_config.unit_cases.push_back(uc);
               }
@@ -448,22 +474,22 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
       continue;
     }
 
-    // Step 2: Apply seeds for each target group
-    for (size_t g_idx = 0; g_idx < seed.structured_config.target_groups.size();
-         ++g_idx) {
-      const auto& group = seed.structured_config.target_groups[g_idx];
-      int num_cases = static_cast<int>(unit_case.cases_per_target_group[g_idx] *
-                                       seed.seed_strength);
+    // Step 2: Apply each budget the unit carries
+    for (size_t budget_index = 0; budget_index < unit_case.budgets.size();
+         ++budget_index) {
+      const auto& budget = unit_case.budgets[budget_index];
+      int num_cases = static_cast<int>(budget.cases * seed.seed_strength);
       if (num_cases <= 0) continue;
 
-      // Filter people in this unit by group and global filters
+      // Filter people in this unit by budget eligibility and global filters
       std::vector<Person*> candidates;
       for (auto* person : candidates_in_unit) {
         if (person->infection == nullptr &&
             person->getSusceptibility(current_simulation_time_,
                                       disease_->getName()) >= 0.01 &&
             matchesAttributes(person, seed.attribute_filters) &&
-            group.matches(*person, &world_)) {
+            budget.accepts(*person, &world_,
+                           seed.structured_config.target_groups)) {
           candidates.push_back(person);
         }
       }
@@ -474,7 +500,8 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
 
       size_t start_idx = infected_ids.size();
       uint64_t unit_hash = std::hash<std::string>{}(unit_case.unit_id);
-      SplitMix64 exact_rng(mix_seed(base_seed_, unit_hash, g_idx, 0xE4AC7));
+      SplitMix64 exact_rng(
+          mix_seed(base_seed_, unit_hash, budget_index, 0xE4AC7));
       std::sort(candidates.begin(), candidates.end(),
                 [](const Person* a, const Person* b) { return a->id < b->id; });
       std::shuffle(candidates.begin(), candidates.end(), exact_rng);
@@ -509,12 +536,11 @@ std::vector<PersonId> InfectionSeeder::applyClusteredSeed(
 
     if (unit_candidates.empty()) continue;
 
-    std::vector<int> target_infections(
-        seed.structured_config.target_groups.size());
+    std::vector<int> target_infections(unit_case.budgets.size());
     int total_target = 0;
     for (size_t i = 0; i < target_infections.size(); ++i) {
-      target_infections[i] = static_cast<int>(
-          unit_case.cases_per_target_group[i] * seed.seed_strength);
+      target_infections[i] =
+          static_cast<int>(unit_case.budgets[i].cases * seed.seed_strength);
       total_target += target_infections[i];
     }
 
@@ -536,11 +562,10 @@ std::vector<PersonId> InfectionSeeder::applyClusteredSeed(
     for (const auto& [hh_id, members] : households) {
       double score = 0.0;
       for (Person* p : members) {
-        for (size_t g_idx = 0;
-             g_idx < seed.structured_config.target_groups.size(); ++g_idx) {
-          if (seed.structured_config.target_groups[g_idx].matches(*p,
-                                                                  &world_)) {
-            score += 1.0;  // Basic score for matching a target group
+        for (const auto& budget : unit_case.budgets) {
+          if (budget.accepts(*p, &world_,
+                             seed.structured_config.target_groups)) {
+            score += 1.0;  // Basic score for being drawable against a budget
             break;
           }
         }
@@ -559,21 +584,19 @@ std::vector<PersonId> InfectionSeeder::applyClusteredSeed(
     // Simulator
 
     int unit_infected = 0;
-    std::vector<int> infected_per_group(
-        seed.structured_config.target_groups.size(), 0);
+    std::vector<int> infected_per_budget(unit_case.budgets.size(), 0);
 
     for (const auto& [hh_id, score] : pool) {
       if (unit_infected >= total_target) break;
 
       for (Person* person : households[hh_id]) {
-        for (size_t g_idx = 0;
-             g_idx < seed.structured_config.target_groups.size(); ++g_idx) {
-          if (infected_per_group[g_idx] < target_infections[g_idx] &&
-              seed.structured_config.target_groups[g_idx].matches(*person,
-                                                                  &world_)) {
+        for (size_t b_idx = 0; b_idx < unit_case.budgets.size(); ++b_idx) {
+          if (infected_per_budget[b_idx] < target_infections[b_idx] &&
+              unit_case.budgets[b_idx].accepts(
+                  *person, &world_, seed.structured_config.target_groups)) {
             infectPerson(person, seed.trajectory_key, seed.start_symptom);
             if (person->infection != nullptr) {
-              infected_per_group[g_idx]++;
+              infected_per_budget[b_idx]++;
               unit_infected++;
               infected_ids.push_back(person->id);
             }

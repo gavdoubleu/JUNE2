@@ -76,7 +76,7 @@ void printSeedAudit(const InfectionSeedConfig& seed_config) {
                 << s.structured_config.target_groups.size() << std::endl;
       for (const auto& uc : s.structured_config.unit_cases) {
         int total = 0;
-        for (int n : uc.cases_per_target_group) total += n;
+        for (const auto& budget : uc.budgets) total += budget.cases;
         std::cout << "        unit=" << uc.unit_id << "  cases=" << total
                   << std::endl;
       }

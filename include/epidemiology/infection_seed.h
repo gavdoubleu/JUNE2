@@ -51,10 +51,30 @@ struct SeedTargetGroup {
   }
 };
 
-// Cases for a specific geographic area and target groups
+// A number of cases to place, plus the target groups a person may match to be
+// drawn against it. An empty eligible_target_groups means no demographic
+// restriction. Budget shape is settled once, at config load:
+//   per-group list -> one budget per declared group;
+//   scalar         -> one budget, eligible across every declared group;
+//   no groups      -> one unrestricted budget.
+struct SeedBudget {
+  int cases = 0;
+  std::vector<size_t> eligible_target_groups;
+
+  bool accepts(const Person& person, const WorldState* world,
+               const std::vector<SeedTargetGroup>& target_groups) const {
+    if (eligible_target_groups.empty()) return true;
+    for (size_t group_index : eligible_target_groups) {
+      if (target_groups[group_index].matches(person, world)) return true;
+    }
+    return false;
+  }
+};
+
+// Cases for a specific geographic area
 struct UnitCases {
   std::string unit_id;  // e.g., geographic unit code or name
-  std::vector<int> cases_per_target_group;  // Number of cases per target group
+  std::vector<SeedBudget> budgets;
 };
 
 // Configuration for exact/clustered seeding
