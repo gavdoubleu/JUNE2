@@ -82,3 +82,15 @@ TEST_CASE("Selector: equal keys break ties by person, not by input order") {
   CHECK(ascending_input.chosen == descending_input.chosen);
   CHECK(split_input.chosen == descending_input.chosen);
 }
+
+TEST_CASE("Selector: a unit held by other ranks alone is not a shortfall") {
+  // The pooled offers are what separate "nobody eligible anywhere" from
+  // "nobody eligible here": a rank holding none of a unit still sees the
+  // offers of the ranks that do, so it reports no shortfall.
+  std::vector<std::vector<SeedOffer>> offer_lists = {{}, kOffers};
+
+  SeedSelection selection = selectSeedWinners(offer_lists, 3);
+
+  CHECK(selection.chosen.size() == 3);
+  CHECK(selection.shortfall == 0);
+}
