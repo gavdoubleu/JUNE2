@@ -1,5 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <algorithm>
+#include <random>
+#include <utility>
 #include <vector>
 
 #include "../include/epidemiology/seeding/seed_selector.h"
@@ -192,4 +194,148 @@ TEST_CASE(
   CHECK(from_one_list.chosen.size() == 5);
   CHECK(chosenPeople(from_four_lists) == chosenPeople(from_one_list));
   CHECK(from_four_lists.filled_per_budget == from_one_list.filled_per_budget);
+}
+
+namespace {
+
+// One person as the exact seeder sees them: the rank holding them, and the
+// key they carry against each budget of the unit they match.
+struct Candidate {
+  PersonId person_id = 0;
+  size_t rank = 0;
+  std::vector<std::pair<uint32_t, uint64_t>> budget_keys;
+};
+
+std::vector<std::vector<SeedOffer>> offersPerRank(
+    const std::vector<Candidate>& candidates, size_t num_ranks) {
+  std::vector<std::vector<SeedOffer>> per_rank(num_ranks);
+  for (const Candidate& candidate : candidates) {
+    for (const auto& [budget_index, key] : candidate.budget_keys) {
+      per_rank[candidate.rank].push_back({key, candidate.person_id,
+                                          budget_index});
+    }
+  }
+  return per_rank;
+}
+
+// What applyExactSeed contributes: each rank counts its own overlapping
+// candidates, then keeps only its best seedOfferDepth offers per budget.
+std::vector<std::vector<SeedOffer>> truncateAsRanksDo(
+    const std::vector<Candidate>& candidates, const std::vector<int>& targets,
+    size_t num_ranks, size_t* deepest_offered) {
+  std::vector<std::vector<SeedOffer>> kept(num_ranks);
+  for (size_t rank = 0; rank < num_ranks; ++rank) {
+    std::vector<int> overlapping_per_budget(targets.size(), 0);
+    std::vector<std::vector<SeedOffer>> per_budget(targets.size());
+    for (const Candidate& candidate : candidates) {
+      if (candidate.rank != rank) continue;
+      for (const auto& [budget_index, key] : candidate.budget_keys) {
+        per_budget[budget_index].push_back({key, candidate.person_id,
+                                            budget_index});
+        if (candidate.budget_keys.size() > 1) {
+          ++overlapping_per_budget[budget_index];
+        }
+      }
+    }
+    for (size_t budget_index = 0; budget_index < targets.size();
+         ++budget_index) {
+      std::vector<SeedOffer>& offers = per_budget[budget_index];
+      const size_t depth =
+          seedOfferDepth(targets, overlapping_per_budget, budget_index);
+      *deepest_offered = std::max(*deepest_offered, depth);
+      std::sort(offers.begin(), offers.end(),
+                [](const SeedOffer& a, const SeedOffer& b) {
+                  if (a.key != b.key) return a.key < b.key;
+                  return a.person_id < b.person_id;
+                });
+      if (offers.size() > depth) offers.resize(depth);
+      kept[rank].insert(kept[rank].end(), offers.begin(), offers.end());
+    }
+  }
+  return kept;
+}
+
+std::vector<std::pair<PersonId, uint32_t>> assignments(
+    const SeedSelection& selection) {
+  std::vector<std::pair<PersonId, uint32_t>> pairs;
+  for (const auto& assignment : selection.chosen) {
+    pairs.emplace_back(assignment.person_id, assignment.budget_index);
+  }
+  return pairs;
+}
+
+}  // namespace
+
+TEST_CASE("Offer depth: truncating at it loses no winner, at any rank count") {
+  // The bound only has to hold against the selector, so drive it with many
+  // shapes of unit rather than one: budget counts, overlaps and rank layouts
+  // that a config could produce.
+  std::mt19937_64 prng(20260820);
+
+  for (int trial = 0; trial < 400; ++trial) {
+    const size_t num_budgets = 1 + prng() % 3;
+    std::vector<int> targets(num_budgets);
+    int total_target = 0;
+    for (size_t budget_index = 0; budget_index < num_budgets; ++budget_index) {
+      targets[budget_index] = static_cast<int>(prng() % 5);
+      total_target += targets[budget_index];
+    }
+
+    const size_t population = 1 + prng() % 40;
+    const size_t num_ranks = 1 + prng() % 4;
+    std::vector<Candidate> candidates;
+    for (size_t index = 0; index < population; ++index) {
+      Candidate candidate;
+      candidate.person_id = static_cast<PersonId>(1000 + index);
+      candidate.rank = prng() % num_ranks;
+      for (size_t budget_index = 0; budget_index < num_budgets;
+           ++budget_index) {
+        // Skewed towards matching, so overlap is common rather than rare.
+        if (targets[budget_index] > 0 && prng() % 3 != 0) {
+          candidate.budget_keys.emplace_back(
+              static_cast<uint32_t>(budget_index), prng() % 512);
+        }
+      }
+      if (!candidate.budget_keys.empty()) candidates.push_back(candidate);
+    }
+
+    size_t deepest_offered = 0;
+    SeedSelection untruncated =
+        selectSeedWinners(offersPerRank(candidates, num_ranks), targets);
+    SeedSelection truncated = selectSeedWinners(
+        truncateAsRanksDo(candidates, targets, num_ranks, &deepest_offered),
+        targets);
+
+    CHECK(assignments(truncated) == assignments(untruncated));
+    CHECK(truncated.filled_per_budget == untruncated.filled_per_budget);
+    // The point of the bound: no rank is ever asked for more offers than the
+    // unit places cases, however large the population behind them.
+    CHECK(deepest_offered <= static_cast<size_t>(total_target));
+  }
+}
+
+TEST_CASE("Offer depth: a nested band is capped by the unit, not the band") {
+  // "0-17" inside "0-64": every candidate of budget 0 also matches budget 1,
+  // so the local overlap count is the whole child population. The depth must
+  // not follow it.
+  const std::vector<int> targets = {500, 2000};
+  std::vector<int> overlapping_per_budget = {30000, 30000};
+
+  CHECK(seedOfferDepth(targets, overlapping_per_budget, 0) == 2500);
+  CHECK(seedOfferDepth(targets, overlapping_per_budget, 1) == 2500);
+}
+
+TEST_CASE("Offer depth: disjoint groups offer exactly as deep as the budget") {
+  const std::vector<int> targets = {5, 10, 2};
+  const std::vector<int> no_overlap = {0, 0, 0};
+
+  CHECK(seedOfferDepth(targets, no_overlap, 0) == 5);
+  CHECK(seedOfferDepth(targets, no_overlap, 1) == 10);
+  CHECK(seedOfferDepth(targets, no_overlap, 2) == 2);
+}
+
+TEST_CASE("Offer depth: a lone budget cannot lose a candidate to anyone") {
+  CHECK(seedOfferDepth({7}, {0}, 0) == 7);
+  // A budget of zero asks for nothing, whatever overlaps it.
+  CHECK(seedOfferDepth({0, 4}, {9, 9}, 0) == 0);
 }

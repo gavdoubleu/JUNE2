@@ -43,4 +43,17 @@ SeedSelection selectSeedWinners(
   return selection;
 }
 
+size_t seedOfferDepth(const std::vector<int>& targets,
+                      const std::vector<int>& overlapping_per_budget,
+                      size_t budget_index) {
+  const int own = targets[budget_index];
+  // A budget placing nothing wins nobody, so it need offer nobody.
+  if (own <= 0) return 0;
+  int total_target = 0;
+  for (int cases : targets) total_target += cases;
+  const int stolen =
+      std::min(overlapping_per_budget[budget_index], total_target - own);
+  return static_cast<size_t>(own + stolen);
+}
+
 }  // namespace june

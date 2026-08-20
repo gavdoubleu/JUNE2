@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
@@ -42,5 +43,20 @@ struct SeedSelection {
 SeedSelection selectSeedWinners(
     const std::vector<std::vector<SeedOffer>>& offer_lists,
     const std::vector<int>& budgets);
+
+// How deep into one rank's own order for a budget an offer can sit and still
+// win globally, so that a rank need contribute no more than this many offers
+// per budget. Two things can outrank a candidate: offers that take a case
+// against the same budget, of which there are at most `targets[budget_index]`,
+// and offers whose person a *different* budget of the unit took, which is only
+// possible for a person matching more than one budget. The second kind is
+// counted locally by `overlapping_per_budget`, but it is also capped by the
+// cases every other budget places, so the unit's total is a bound on both
+// together however the target groups overlap. Without that cap a nested band
+// — every "0-17" is also a "0-64" — makes the depth grow with the population
+// rather than the budgets. See ADR 0011.
+size_t seedOfferDepth(const std::vector<int>& targets,
+                      const std::vector<int>& overlapping_per_budget,
+                      size_t budget_index);
 
 }  // namespace june

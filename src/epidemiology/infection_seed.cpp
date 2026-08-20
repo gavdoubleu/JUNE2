@@ -555,15 +555,17 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
 
     for (size_t budget_index = 0; budget_index < unit.targets.size();
          ++budget_index) {
-      // Offer at most the budget plus the candidates another budget could take
-      // from it: the global best N is a subset of the union of the per-rank
-      // best N, and a locally better candidate is lost only to a budget it
-      // also matches, so this keeps every possible winner while the exchanged
-      // message stays proportional to the budget, not to the population.
+      // Offer at most the budget plus the candidates another budget could
+      // take from it, and no more than the unit places in total: a locally
+      // better candidate is lost only to a budget it also matches, and every
+      // such loss spends a case elsewhere in the unit. That keeps every
+      // possible winner while the exchanged message stays proportional to the
+      // budgets, not to the population — the cap is what holds that under
+      // nested groups, where every candidate of the narrow band overlaps the
+      // wide one. See ADR 0011.
       std::vector<SeedOffer>& offers = offers_per_budget[budget_index];
       const size_t depth =
-          static_cast<size_t>(unit.targets[budget_index]) +
-          static_cast<size_t>(overlapping_per_budget[budget_index]);
+          seedOfferDepth(unit.targets, overlapping_per_budget, budget_index);
       if (offers.size() > depth) {
         std::nth_element(offers.begin(), offers.begin() + depth, offers.end(),
                          [](const SeedOffer& a, const SeedOffer& b) {
