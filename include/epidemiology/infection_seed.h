@@ -12,6 +12,7 @@
 #include "core/config.h"  // For AgeGroup definition
 #include "core/types.h"
 #include "core/world_state.h"
+#include "epidemiology/seeding/seed_shortfall.h"
 #include "utils/event_logging/event_logger.h"
 
 namespace june {
@@ -158,6 +159,13 @@ class InfectionSeeder {
     seed_offer_exchange_ = exchange;
   }
 
+  // Budgets the last seeding step could not fill. Identical on every rank —
+  // the offers they are derived from are pooled — so rank 0 can report them
+  // without a further collective.
+  const std::vector<SeedShortfall>& getSeedShortfalls() const {
+    return seed_shortfalls_;
+  }
+
   // Re-resolve all attribute_filter SelectionCriterion against the current
   // WorldState. Called after the world is fully loaded.
   void resolveConfig(const WorldState& world) { config_.resolve(world); }
@@ -179,6 +187,7 @@ class InfectionSeeder {
   double current_simulation_time_;
   uint64_t base_seed_ = 0;
   const SeedOfferExchange* seed_offer_exchange_ = nullptr;
+  std::vector<SeedShortfall> seed_shortfalls_;
 
   // Track which seeds have been applied
   std::set<std::string> applied_seeds_;

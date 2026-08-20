@@ -386,6 +386,7 @@ std::vector<PersonId> InfectionSeeder::seedInfections(
     const std::string& current_datetime, double simulation_time) {
   current_simulation_time_ = simulation_time;
   std::vector<PersonId> all_infected;
+  seed_shortfalls_.clear();
 
   for (const auto& seed : config_.seeds) {
     // Standardized comparison: skip whitespace/case if needed,
@@ -468,7 +469,13 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
   // ranks. Each rank instead offers its own candidates, keyed off the run seed
   // and the person, and every rank then selects the same winners from the
   // pooled offers. Each rank infects only the winners it holds.
-  std::vector<int> cases_per_slot;
+  // Each (unit, budget) pair is one slot. The slot carries the unit it came
+  // from so a shortfall can name it.
+  struct BudgetSlot {
+    std::string unit_id;
+    int requested = 0;
+  };
+  std::vector<BudgetSlot> slots;
   std::vector<SeedOffer> local_offers;
   std::unordered_map<PersonId, Person*> local_candidates;
 
@@ -484,8 +491,8 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
          ++budget_index) {
       const auto& budget = unit_case.budgets[budget_index];
       const int num_cases = static_cast<int>(budget.cases * seed.seed_strength);
-      const uint32_t slot = static_cast<uint32_t>(cases_per_slot.size());
-      cases_per_slot.push_back(num_cases);
+      const uint32_t slot = static_cast<uint32_t>(slots.size());
+      slots.push_back({unit_case.unit_id, num_cases});
       if (num_cases <= 0) continue;
 
       std::vector<SeedOffer> offers;
@@ -528,7 +535,7 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
       seed_offer_exchange_ ? seed_offer_exchange_->pool(local_offers)
                            : local_offers;
 
-  std::vector<std::vector<SeedOffer>> offers_by_slot(cases_per_slot.size());
+  std::vector<std::vector<SeedOffer>> offers_by_slot(slots.size());
   for (const auto& offer : pooled_offers) {
     if (offer.budget_slot < offers_by_slot.size()) {
       offers_by_slot[offer.budget_slot].push_back(offer);
@@ -536,9 +543,17 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
   }
 
   std::vector<PersonId> infected_ids;
-  for (size_t slot = 0; slot < cases_per_slot.size(); ++slot) {
+  for (size_t slot = 0; slot < slots.size(); ++slot) {
     SeedSelection selection =
-        selectSeedWinners({offers_by_slot[slot]}, cases_per_slot[slot]);
+        selectSeedWinners({offers_by_slot[slot]}, slots[slot].requested);
+    // The pooled offers are every rank's, so a shortfall means nobody eligible
+    // anywhere, not merely nobody here. Recorded, never fatal.
+    if (selection.shortfall > 0) {
+      seed_shortfalls_.push_back(
+          {seed.name, seed.structured_config.geo_level, slots[slot].unit_id,
+           slots[slot].requested,
+           slots[slot].requested - selection.shortfall});
+    }
     for (PersonId winner : selection.chosen) {
       auto held = local_candidates.find(winner);
       if (held == local_candidates.end()) continue;  // another rank holds them
