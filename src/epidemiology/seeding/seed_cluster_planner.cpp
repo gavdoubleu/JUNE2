@@ -43,6 +43,12 @@ ClusterPlan planClusteredSeed(
   std::map<uint64_t, Household> households_by_key;
   for (const auto& offers : offer_lists) {
     for (const auto& offer : offers) {
+      // Slot 0 is a candidate matching no budget and slot n+1 is budget n, so
+      // the last budget's slot is budgets.size() and anything above it names a
+      // budget the unit does not have. Rejected before the household is
+      // touched: an offer we cannot read is no evidence its candidate exists,
+      // so it must not swell the household's size either.
+      if (offer.budget_slot > budgets.size()) continue;
       Household& household = households_by_key[offer.key];
       household.key = offer.key;
       auto& matched_budgets = household.members[offer.person_id];

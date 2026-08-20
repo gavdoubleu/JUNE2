@@ -34,6 +34,11 @@ struct ClusterPlan {
 // candidate's household, shared by all its members, and `budget_slot` is the
 // budget index plus one, or zero for a candidate matching no budget at all —
 // which still counts towards its household's size, never its matched members.
+// The last budget's slot is therefore `budgets.size()`, and an offer above it
+// names a budget the unit does not have. Such an offer is dropped whole, as
+// `selectSeedWinners` drops one out of range on the exact path — not read as a
+// candidate matching nothing, because an offer we cannot read is no evidence
+// its candidate exists, and counting it would swell the household it claims.
 // Pure: the result depends only on the multiset of offers, never on how they
 // were split across the input lists — with one caveat. A candidate matching
 // several budgets takes the first still open in the order its own offers

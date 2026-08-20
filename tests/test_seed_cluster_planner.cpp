@@ -121,6 +121,53 @@ TEST_CASE("Planner: a budget nobody matches loses nothing") {
   CHECK(plan.lost_per_budget == std::vector<int>{0, 0});
 }
 
+TEST_CASE("Planner: an offer naming a budget the unit lacks is discarded") {
+  // Slot n+1 means budget n, so with one budget only slots 0 and 1 exist.
+  // Slot 2 names a budget that is not there: the plan must come out as though
+  // that offer had never arrived, rather than indexing past the budgets.
+  const std::vector<SeedOffer> well_formed = {{0x30ULL, 1, 1}, {0x30ULL, 2, 1}};
+  std::vector<SeedOffer> with_stray = well_formed;
+  with_stray.push_back({0x30ULL, 3, 2});
+
+  ClusterPlan plan = planClusteredSeed({with_stray}, {2});
+
+  CHECK(named(plan) == named(planClusteredSeed({well_formed}, {2})));
+  CHECK(plan.filled_per_budget == std::vector<int>{2});
+  CHECK(plan.lost_per_budget == std::vector<int>{0});
+}
+
+TEST_CASE("Planner: the last budget's slot is one past the budget count") {
+  // The boundary the encoding's plus-one puts in an awkward place: with two
+  // budgets the valid slots are 0, 1 and 2, and slot 2 is budget 1. A bound
+  // borrowed from the exact path, where the slot is the index itself, would
+  // read this as out of range and quietly starve the last budget declared.
+  const std::vector<SeedOffer> offers = {{0x30ULL, 1, 2}};
+
+  ClusterPlan plan = planClusteredSeed({offers}, {1, 1});
+
+  CHECK(named(plan) == std::vector<std::pair<PersonId, uint32_t>>{{1, 1}});
+  CHECK(plan.filled_per_budget == std::vector<int>{0, 1});
+}
+
+TEST_CASE("Planner: a rejected offer does not count towards household size") {
+  // A discarded offer is not a candidate who matched nothing — it is a
+  // candidate we never heard of. The distinction is visible only in the
+  // density order, so it is pinned there. Household 0x22 holds one matched
+  // member and one whose sole offer names a budget that does not exist;
+  // household 0x11 holds one matched member and one genuine slot-0 member.
+  // Read as never heard of, 0x22 is a household of one and outranks 0x11.
+  // Read as matched nothing, the two are both households of two, tie on
+  // density, and the lower key takes the case instead.
+  const std::vector<SeedOffer> offers = {
+      {0x22ULL, 1, 1}, {0x22ULL, 2, 3},  // person 2's budget does not exist
+      {0x11ULL, 3, 1}, {0x11ULL, 4, 0},  // person 4 matched no budget
+  };
+
+  ClusterPlan plan = planClusteredSeed({offers}, {1});
+
+  CHECK(named(plan) == std::vector<std::pair<PersonId, uint32_t>>{{1, 0}});
+}
+
 TEST_CASE("Planner: a budget passed over while full is not counted as a loss") {
   // Budget 0 fills, then the next member skips past it to budget 1. Budget 0
   // did not lose them to anything — it was closed — so no ordering rule would
