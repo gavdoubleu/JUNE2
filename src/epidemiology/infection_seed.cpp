@@ -695,12 +695,6 @@ void InfectionSeeder::infectPerson(Person* person,
         current_simulation_time_, kDefaultEncounterTypeId,
         kNoSymptomId);  // no infector for seeds
   }
-
-  // Per-seed audit: id, sex, age at t=seed.
-  std::cout << "[SeedAudit] id=" << person->id
-            << " sex=" << static_cast<int>(person->sex)
-            << " age=" << person->age << " t=" << current_simulation_time_
-            << std::endl;
 }
 
 }  // namespace june
