@@ -40,7 +40,10 @@ infection_seeds:
 #     parameters:
 #       # Filter for demographic groups (Target Groups). Omit age_groups
 #       # entirely and a count draws from anyone eligible in the unit.
-#       age_groups: ["0-17", "18-64", "65+"]
+#       # Each band must be a closed "min-max" range: an open band such as
+#       # "65+" is read as an exact age value, matches nobody, and seeds
+#       # nothing.
+#       age_groups: ["0-17", "18-64", "65-120"]
 
 #       # units: "unit_id": [cases_per_group_1, cases_per_group_2, ...]
 #       #   one count per declared age group; a length mismatch is fatal at load.
