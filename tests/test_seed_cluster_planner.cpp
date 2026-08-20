@@ -1,9 +1,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include "doctest.h"
-
 #include <vector>
 
 #include "../include/epidemiology/seeding/seed_cluster_planner.h"
+#include "doctest.h"
 
 using namespace june;
 
@@ -46,9 +45,8 @@ TEST_CASE("Planner: the plan does not depend on how offers are partitioned") {
       planClusteredSeed(splitInto(kOffers, 3), budgets);
 
   // Densest household first, then the next, until the total budget is met.
-  CHECK(named(from_one_list) ==
-        std::vector<std::pair<PersonId, uint32_t>>{{1, 0}, {2, 0}, {4, 1},
-                                                   {5, 1}});
+  CHECK(named(from_one_list) == std::vector<std::pair<PersonId, uint32_t>>{
+                                    {1, 0}, {2, 0}, {4, 1}, {5, 1}});
   CHECK(named(from_three_lists) == named(from_one_list));
   CHECK(from_one_list.filled_per_budget == std::vector<int>{2, 2});
 }
@@ -95,6 +93,6 @@ TEST_CASE("Planner: a household offered by several ranks is planned as one") {
 
   ClusterPlan plan = planClusteredSeed(offer_lists, {3});
 
-  CHECK(named(plan) == std::vector<std::pair<PersonId, uint32_t>>{
-                           {1, 0}, {2, 0}, {3, 0}});
+  CHECK(named(plan) ==
+        std::vector<std::pair<PersonId, uint32_t>>{{1, 0}, {2, 0}, {3, 0}});
 }

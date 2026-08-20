@@ -9,6 +9,7 @@
 #include <unordered_map>
 
 #include "epidemiology/disease.h"
+#include "epidemiology/seeding/seed_cluster_planner.h"
 #include "epidemiology/seeding/seed_offer_exchange.h"
 #include "epidemiology/seeding/seed_selector.h"
 #include "utils/deterministic_rng.h"
@@ -566,90 +567,166 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
 
 std::vector<PersonId> InfectionSeeder::applyClusteredSeed(
     const InfectionSeedEvent& seed) {
-  std::vector<PersonId> infected_ids;
+  // Like an exact seed, a clustered seed's count is absolute, so it cannot be
+  // resolved from one rank's slice of a unit above the partition level. Each
+  // rank offers the households it holds and every rank then replays the same
+  // greedy fill over the pooled offers, infecting only the people it holds.
+  // A household is offered as one offer per (member, budget the member
+  // matches), sharing the household's key; a member matching no budget is
+  // offered against the unit's slot 0, so it counts towards the household's
+  // size but never its matched members.
+  // No rank may return early: every rank walks every unit and reaches the one
+  // exchange below, contributing an empty slice where it holds nothing.
+  struct ClusterUnit {
+    std::string unit_id;
+    std::vector<int> targets;  // cases per budget, after seed strength
+    uint32_t first_slot = 0;   // targets.size() + 1 slots, 0 = no budget
+  };
+  struct LocalMember {
+    Person* person = nullptr;
+    std::vector<uint32_t> matched_budgets;
+  };
+  struct LocalHousehold {
+    uint64_t key = 0;
+    std::vector<LocalMember> members;
+    size_t matched = 0;
+  };
+
+  const uint64_t event_base =
+      mix_seed(base_seed_, std::hash<std::string>{}(seed.name));
+
+  std::vector<ClusterUnit> units;
+  std::vector<uint32_t> unit_of_slot;
+  std::vector<SeedOffer> local_offers;
+  std::unordered_map<PersonId, Person*> local_candidates;
 
   for (const auto& unit_case : seed.structured_config.unit_cases) {
-    std::vector<Person*> unit_people_raw = world_.getPeopleInUnit(
-        seed.structured_config.geo_level, unit_case.unit_id);
-    std::vector<Person*> unit_candidates;
-    for (Person* person : unit_people_raw) {
-      if (person->infection == nullptr &&
-          person->getSusceptibility(current_simulation_time_,
-                                    disease_->getName()) >= 0.01 &&
-          matchesAttributes(person, seed.attribute_filters)) {
-        unit_candidates.push_back(person);
-      }
-    }
-
-    if (unit_candidates.empty()) continue;
-
-    std::vector<int> target_infections(unit_case.budgets.size());
+    ClusterUnit unit;
+    unit.unit_id = unit_case.unit_id;
+    unit.first_slot = static_cast<uint32_t>(unit_of_slot.size());
     int total_target = 0;
-    for (size_t i = 0; i < target_infections.size(); ++i) {
-      target_infections[i] =
-          static_cast<int>(unit_case.budgets[i].cases * seed.seed_strength);
-      total_target += target_infections[i];
+    for (const auto& budget : unit_case.budgets) {
+      unit.targets.push_back(
+          static_cast<int>(budget.cases * seed.seed_strength));
+      total_target += unit.targets.back();
     }
-
+    unit_of_slot.resize(unit_of_slot.size() + unit.targets.size() + 1,
+                        static_cast<uint32_t>(units.size()));
+    units.push_back(unit);
     if (total_target <= 0) continue;
 
-    // Group people by household
-    std::map<VenueId, std::vector<Person*>> households;
-    for (Person* person : unit_candidates) {
+    const uint64_t unit_hash = std::hash<std::string>{}(unit_case.unit_id);
+    std::map<VenueId, LocalHousehold> households;
+    for (Person* person : world_.getPeopleInUnit(
+             seed.structured_config.geo_level, unit_case.unit_id)) {
+      if (person->infection != nullptr) continue;
+      if (person->getSusceptibility(current_simulation_time_,
+                                    disease_->getName()) < 0.01)
+        continue;
+      if (!matchesAttributes(person, seed.attribute_filters)) continue;
       auto residence = world_.getActivityVenues(*person, "residence");
-      if (!residence.empty()) {
-        households[residence[0].first].push_back(person);
-      }
-    }
+      if (residence.empty()) continue;
 
-    if (households.empty()) continue;
-
-    // Scoring and selection logic
-    std::vector<std::pair<VenueId, double>> pool;
-    for (const auto& [hh_id, members] : households) {
-      double score = 0.0;
-      for (Person* p : members) {
-        for (const auto& budget : unit_case.budgets) {
-          if (budget.accepts(*p, &world_,
-                             seed.structured_config.target_groups)) {
-            score += 1.0;  // Basic score for being drawable against a budget
-            break;
-          }
+      LocalHousehold& household = households[residence[0].first];
+      // Household ids are global, so both halves of a straddling household
+      // derive the same key.
+      household.key = mix_seed(event_base, unit_hash,
+                               static_cast<uint64_t>(residence[0].first));
+      LocalMember member{person, {}};
+      for (size_t budget_index = 0; budget_index < unit_case.budgets.size();
+           ++budget_index) {
+        if (unit_case.budgets[budget_index].accepts(
+                *person, &world_, seed.structured_config.target_groups)) {
+          member.matched_budgets.push_back(static_cast<uint32_t>(budget_index));
         }
       }
-      if (score > 0)
-        pool.push_back({hh_id, score / std::sqrt((double)members.size())});
+      if (!member.matched_budgets.empty()) ++household.matched;
+      household.members.push_back(std::move(member));
     }
 
-    uint64_t cluster_unit_hash = std::hash<std::string>{}(unit_case.unit_id);
-    SplitMix64 cluster_rng(mix_seed(base_seed_, cluster_unit_hash, 0xC1057E8));
-    std::shuffle(pool.begin(), pool.end(), cluster_rng);
-    std::sort(pool.begin(), pool.end(),
-              [](const auto& a, const auto& b) { return a.second > b.second; });
+    std::vector<const LocalHousehold*> densest_first;
+    for (const auto& [venue_id, household] : households) {
+      (void)venue_id;
+      if (household.matched > 0) densest_first.push_back(&household);
+    }
+    std::sort(
+        densest_first.begin(), densest_first.end(),
+        [](const LocalHousehold* a, const LocalHousehold* b) {
+          const uint64_t left = a->matched * a->matched * b->members.size();
+          const uint64_t right = b->matched * b->matched * a->members.size();
+          if (left != right) return left > right;
+          return a->key < b->key;
+        });
 
-    // Per-unit clustered seed message removed; global count reported by
-    // Simulator
-
-    int unit_infected = 0;
-    std::vector<int> infected_per_budget(unit_case.budgets.size(), 0);
-
-    for (const auto& [hh_id, score] : pool) {
-      if (unit_infected >= total_target) break;
-
-      for (Person* person : households[hh_id]) {
-        for (size_t b_idx = 0; b_idx < unit_case.budgets.size(); ++b_idx) {
-          if (infected_per_budget[b_idx] < target_infections[b_idx] &&
-              unit_case.budgets[b_idx].accepts(
-                  *person, &world_, seed.structured_config.target_groups)) {
-            infectPerson(person, seed.trajectory_key, seed.start_symptom);
-            if (person->infection != nullptr) {
-              infected_per_budget[b_idx]++;
-              unit_infected++;
-              infected_ids.push_back(person->id);
-            }
-            break;
-          }
+    // Offer only as far down the local order as the fill can possibly reach:
+    // once a budget has seen total_target members eligible for it, a household
+    // below cannot take a case against that budget without the fill having
+    // already completed above it. Exact for a household held by one rank,
+    // which the partition gives us, since a household sits inside one geo unit.
+    std::vector<int> eligible_seen(unit.targets.size(), 0);
+    auto fillCannotReachFurther = [&]() {
+      for (size_t budget_index = 0; budget_index < unit.targets.size();
+           ++budget_index) {
+        if (unit.targets[budget_index] > 0 &&
+            eligible_seen[budget_index] < total_target) {
+          return false;
         }
+      }
+      return true;
+    };
+
+    for (const LocalHousehold* household : densest_first) {
+      if (fillCannotReachFurther()) break;
+      for (const LocalMember& member : household->members) {
+        local_candidates[member.person->id] = member.person;
+        if (member.matched_budgets.empty()) {
+          local_offers.push_back(
+              {household->key, member.person->id, unit.first_slot});
+          continue;
+        }
+        for (uint32_t budget_index : member.matched_budgets) {
+          local_offers.push_back({household->key, member.person->id,
+                                  unit.first_slot + budget_index + 1});
+          ++eligible_seen[budget_index];
+        }
+      }
+    }
+  }
+
+  std::vector<SeedOffer> pooled_offers =
+      seed_offer_exchange_ ? seed_offer_exchange_->pool(local_offers)
+                           : local_offers;
+
+  std::vector<std::vector<SeedOffer>> offers_by_unit(units.size());
+  for (const auto& offer : pooled_offers) {
+    if (offer.budget_slot >= unit_of_slot.size()) continue;
+    const uint32_t unit_index = unit_of_slot[offer.budget_slot];
+    offers_by_unit[unit_index].push_back(
+        {offer.key, offer.person_id,
+         offer.budget_slot - units[unit_index].first_slot});
+  }
+
+  std::vector<PersonId> infected_ids;
+  for (size_t unit_index = 0; unit_index < units.size(); ++unit_index) {
+    const ClusterUnit& unit = units[unit_index];
+    ClusterPlan plan =
+        planClusteredSeed({offers_by_unit[unit_index]}, unit.targets);
+    // The offers are every rank's, so a budget the households could not fill
+    // is short everywhere, not merely here. Recorded, never fatal.
+    for (size_t budget_index = 0; budget_index < unit.targets.size();
+         ++budget_index) {
+      if (plan.filled_per_budget[budget_index] < unit.targets[budget_index]) {
+        seed_shortfalls_.push_back({seed.name, seed.structured_config.geo_level,
+                                    unit.unit_id, unit.targets[budget_index],
+                                    plan.filled_per_budget[budget_index]});
+      }
+    }
+    for (const auto& assignment : plan.assignments) {
+      auto held = local_candidates.find(assignment.person_id);
+      if (held == local_candidates.end()) continue;  // another rank holds them
+      infectPerson(held->second, seed.trajectory_key, seed.start_symptom);
+      if (held->second->infection != nullptr) {
+        infected_ids.push_back(assignment.person_id);
       }
     }
   }
