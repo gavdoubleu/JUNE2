@@ -27,6 +27,10 @@ BUILD_DIR="${BUILD_DIR:-${PROJECT_DIR}/build}"
 DAYS="${DAYS:-10}"
 CONFIG="${CONFIG:-configs/config_2021/simulation.yaml}"
 WORLD="${WORLD:-worlds/world_2021.h5}"
+# Optional infection-seeds file, overriding the one the config names. Set it to
+# exercise a seeding variant (e.g. structured seeds above the partition level)
+# without a second config directory.
+SEEDS="${SEEDS:-}"
 # Space-separated list of rank counts to compare. Must include 1 as the
 # reference.
 NPS="${NPS:-1 2 3}"
@@ -51,6 +55,7 @@ echo "=== MPI full-reproducibility test ==="
 echo "  binary: $BINARY"
 echo "  days:   $DAYS"
 echo "  nps:    $NPS"
+[[ -n "$SEEDS" ]] && echo "  seeds:  $SEEDS"
 echo "  tmp:    $TMP"
 echo ""
 
@@ -83,9 +88,12 @@ for NP in $NPS; do
   RUN_ID="np${NP}"
   RUN_DIR="$TMP/runs/${RUN_ID}"
   OUT="$TMP/sim_np${NP}.h5"
+  SEEDS_ARG=()
+  [[ -n "$SEEDS" ]] && SEEDS_ARG=(--infection_seeds "$SEEDS")
   mpirun -np "$NP" --oversubscribe "$BINARY" \
     --config "$TMP/simulation.yaml" \
     --world "$WORLD" \
+    "${SEEDS_ARG[@]}" \
     --runs-dir "$TMP/runs" \
     --run-id "$RUN_ID" \
     > "$TMP/log_np${NP}.txt" 2>&1 || {

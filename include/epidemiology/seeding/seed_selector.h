@@ -13,6 +13,8 @@ namespace june {
 struct SeedOffer {
   uint64_t key = 0;
   PersonId person_id = 0;
+  // Which budget of the seed event this offer stands against.
+  uint32_t budget_slot = 0;
 };
 
 // The winners of one budget, plus the number of cases the offers could not

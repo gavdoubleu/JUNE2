@@ -434,6 +434,13 @@ Simulator::Simulator(WorldState& world, Config& config,
   infection_seeder_ = std::make_unique<InfectionSeeder>(
       world_, disease_.get(), seed_config, &event_logger_,
       config_.simulation.random_seed);
+#ifdef USE_MPI
+  // A structured seed's count is global, so its candidates are pooled across
+  // ranks before the winners are chosen.
+  if (domain_mgr_) {
+    infection_seeder_->setOfferExchange(&seed_offer_exchange_);
+  }
+#endif
 
   if (getRank() == 0) {
     printStartupAudit(*disease_, config_.simulation.disease_file, seed_config);

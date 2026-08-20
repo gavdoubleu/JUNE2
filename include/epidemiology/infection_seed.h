@@ -136,8 +136,9 @@ struct InfectionSeedConfig {
 // Infection Seeding Implementation
 // =============================================================================
 
-// Forward declaration
+// Forward declarations
 class Disease;
+class SeedOfferExchange;
 
 class InfectionSeeder {
  public:
@@ -149,6 +150,13 @@ class InfectionSeeder {
   // Returns IDs of people infected
   std::vector<PersonId> seedInfections(const std::string& current_datetime,
                                        double simulation_time);
+
+  // Structured seeds are counted globally: the seeder offers its local
+  // candidates and the exchange pools every rank's offers. Without one (a
+  // serial run) the local offers are the whole world.
+  void setOfferExchange(const SeedOfferExchange* exchange) {
+    seed_offer_exchange_ = exchange;
+  }
 
   // Re-resolve all attribute_filter SelectionCriterion against the current
   // WorldState. Called after the world is fully loaded.
@@ -170,6 +178,7 @@ class InfectionSeeder {
   EventLogger* event_logger_;
   double current_simulation_time_;
   uint64_t base_seed_ = 0;
+  const SeedOfferExchange* seed_offer_exchange_ = nullptr;
 
   // Track which seeds have been applied
   std::set<std::string> applied_seeds_;

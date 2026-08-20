@@ -175,6 +175,7 @@ if(MPI_FOUND)
   list(APPEND JUNE_CORE_SOURCES
        src/parallel/domain.cpp
        src/parallel/domain_manager.cpp
+       src/parallel/seed_offer_exchange_mpi.cpp
        src/parallel/geography_partitioner.cpp
        src/parallel/domain_communicator.cpp
        src/parallel/domain_communicator_encounters.cpp)
@@ -369,6 +370,18 @@ if(BUILD_TESTING)
                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
       set_tests_properties(test_mpi_full_reproducibility PROPERTIES
                            ENVIRONMENT "BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR};DAYS=5"
+                           TIMEOUT 600)
+
+      # The same end-to-end diff, seeded structurally above the partition
+      # level (an exact seed in an LGU and in an XLGU, MGU being where
+      # parallel.yaml partitions). A structured seed states an absolute
+      # count, so this is what catches a unit being seeded once per rank
+      # covering it.
+      add_test(NAME test_mpi_structured_seed_reproducibility
+               COMMAND ${CMAKE_SOURCE_DIR}/tests/test_mpi_full_reproducibility.sh
+               WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+      set_tests_properties(test_mpi_structured_seed_reproducibility PROPERTIES
+                           ENVIRONMENT "BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR};DAYS=3;SEEDS=configs/config_2021/infection_seeds_structured.yaml"
                            TIMEOUT 600)
 
       # Checkpoint/restart determinism gate: a checkpoint leg + resume leg
