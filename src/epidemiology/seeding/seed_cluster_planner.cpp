@@ -68,8 +68,9 @@ ClusterPlan planClusteredSeed(
   for (const auto& household : households) {
     if (filled >= total_budget) break;
     for (const auto& [person_id, matched_budgets] : household.members) {
-      // A person takes the first budget still open to them, so a household
-      // whose members all match the same exhausted budget yields nothing.
+      // A person takes the first budget still open to them, in the order their
+      // offers arrived, so a household whose members all match the same
+      // exhausted budget yields nothing.
       for (uint32_t budget_index : matched_budgets) {
         if (plan.filled_per_budget[budget_index] >= budgets[budget_index]) {
           continue;

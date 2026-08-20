@@ -29,6 +29,21 @@ infection_seeds:
       units:
         "North East": 20
 
+  # Overlapping bands, deliberately: everyone in "0-17" is also in "0-64", so
+  # the two budgets compete for the same people, and a person winning both
+  # would leave one budget short. Both must still fill, at any rank count.
+  # The counts are large on purpose: a candidate wins two budgets about
+  # cases_a * cases_b / |wider band| times, so small budgets would almost
+  # never exercise the contest.
+  - name: "lgu_overlapping_exact_seeding"
+    type: "exact"
+    date: "2020-02-03 08:00"
+    geo_level: "LGU"
+    parameters:
+      age_groups: ["0-17", "0-64"]
+      units:
+        "Darlington": [500, 2000]
+
   # Clustered: the same absolute count, placed household by household.
   - name: "lgu_clustered_seeding"
     type: "clustered"

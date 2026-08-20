@@ -17,18 +17,30 @@ struct SeedOffer {
   uint32_t budget_slot = 0;
 };
 
-// The winners of one budget, plus the number of cases the offers could not
-// cover — nobody eligible anywhere, not merely nobody on this rank.
-struct SeedSelection {
-  std::vector<PersonId> chosen;
-  int shortfall = 0;
+// One person the plan seeds, and the budget the case counts against. A person
+// appears at most once: a candidate matching two budgets takes one case, not
+// two, whatever the target groups overlap.
+struct SeedAssignment {
+  PersonId person_id = 0;
+  uint32_t budget_index = 0;
 };
 
-// Choose the winners of one seed budget from the offers every rank made.
+// The winners of one unit's budgets, plus how many cases each budget could
+// actually place — a budget filled short of its request found nobody eligible
+// anywhere, not merely nobody on this rank.
+struct SeedSelection {
+  std::vector<SeedAssignment> chosen;
+  std::vector<int> filled_per_budget;
+};
+
+// Choose the winners of one unit's seed budgets from the offers every rank
+// made. `budget_slot` on an offer is the budget it stands against, indexed
+// within the unit.
 // Pure: the result depends only on the multiset of offers, never on how they
 // were split across the input lists, so every rank reaches the same answer
 // from the same pooled offers.
 SeedSelection selectSeedWinners(
-    const std::vector<std::vector<SeedOffer>>& offer_lists, int budget);
+    const std::vector<std::vector<SeedOffer>>& offer_lists,
+    const std::vector<int>& budgets);
 
 }  // namespace june

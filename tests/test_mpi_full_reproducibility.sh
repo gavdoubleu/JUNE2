@@ -252,9 +252,22 @@ echo "=== infection-count log diff ==="
 for NP in $NPS; do
   grep "Total currently infected" "$TMP/log_np${NP}.txt" \
     | awk '{print $4}' > "$TMP/infect_np${NP}.txt"
+  # A structured seed places an absolute count, so the per-step seeded totals
+  # are an invariant in their own right: they diverge before the day counts do
+  # when a seed resolves per rank rather than globally.
+  grep "\[INFECTION SEED\] Seeded" "$TMP/log_np${NP}.txt" \
+    | awk '{print $4}' > "$TMP/seeded_np${NP}.txt"
 done
 for NP in $NPS; do
   [[ "$NP" == "$REF_NP" ]] && continue
+  if ! diff -q "$TMP/seeded_np${REF_NP}.txt" "$TMP/seeded_np${NP}.txt" > /dev/null; then
+    echo "FAIL: seeded counts diverge between np=${REF_NP} and np=${NP}"
+    diff -u "$TMP/seeded_np${REF_NP}.txt" "$TMP/seeded_np${NP}.txt" | head -20
+    CLEAN_ON_EXIT=0
+    FAIL=1
+  else
+    echo "  PASS seeded counts: identical np=${REF_NP} vs np=${NP}"
+  fi
   if ! diff -q "$TMP/infect_np${REF_NP}.txt" "$TMP/infect_np${NP}.txt" > /dev/null; then
     echo "FAIL: infection counts diverge between np=${REF_NP} and np=${NP}"
     diff -u "$TMP/infect_np${REF_NP}.txt" "$TMP/infect_np${NP}.txt" | head -20

@@ -18,9 +18,9 @@ std::string formatSeedShortfallReport(
   for (size_t unit = 0; unit < reported; ++unit) {
     const auto& shortfall = shortfalls[unit];
     report << "    [SEED SHORTFALL] seed '" << shortfall.seed_name << "' unit '"
-           << shortfall.unit_id << "' (" << shortfall.geo_level
-           << "): requested " << shortfall.requested << ", available "
-           << shortfall.available << "\n";
+           << shortfall.unit_id << "' (" << shortfall.geo_level << ") budget "
+           << shortfall.budget_index << ": requested " << shortfall.requested
+           << ", available " << shortfall.available << "\n";
   }
   if (shortfalls.size() > reported) {
     report << "    [SEED SHORTFALL] " << (shortfalls.size() - reported)

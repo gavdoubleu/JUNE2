@@ -28,7 +28,11 @@ struct ClusterPlan {
 // budget index plus one, or zero for a candidate matching no budget at all —
 // which still counts towards its household's size, never its matched members.
 // Pure: the result depends only on the multiset of offers, never on how they
-// were split across the input lists.
+// were split across the input lists — with one caveat. A candidate matching
+// several budgets takes the first still open in the order its own offers
+// arrive, so reordering those can move the case to another budget. Callers
+// emit a candidate's budgets ascending and the pooling preserves each rank's
+// order, which pins it down in practice.
 ClusterPlan planClusteredSeed(
     const std::vector<std::vector<SeedOffer>>& offer_lists,
     const std::vector<int>& budgets);

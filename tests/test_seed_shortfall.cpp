@@ -1,16 +1,15 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-#include "doctest.h"
-
 #include <string>
 #include <vector>
 
 #include "../include/epidemiology/seeding/seed_shortfall.h"
+#include "doctest.h"
 
 using namespace june;
 
 TEST_CASE("Shortfall report: a short unit names seed, unit, level and counts") {
   std::vector<SeedShortfall> shortfalls = {
-      {"february_2020", "LGU", "E06000005", 20, 12}};
+      {"february_2020", "LGU", "E06000005", 0, 20, 12}};
 
   std::string report = formatSeedShortfallReport(shortfalls);
 
@@ -35,8 +34,8 @@ int countOccurrences(const std::string& text, const std::string& needle) {
 std::vector<SeedShortfall> manyShortfalls(int units) {
   std::vector<SeedShortfall> shortfalls;
   for (int unit = 0; unit < units; ++unit) {
-    shortfalls.push_back({"february_2020", "LGU",
-                          "E060000" + std::to_string(unit), 20, 12});
+    shortfalls.push_back(
+        {"february_2020", "LGU", "E060000" + std::to_string(unit), 0, 20, 12});
   }
   return shortfalls;
 }
@@ -54,16 +53,30 @@ TEST_CASE("Shortfall report: a unit eligible nowhere reports like any other") {
   // A mistyped unit code resolves to nobody at all. It is the shortfall most
   // worth seeing, so it gets a line of its own rather than being swallowed.
   std::vector<SeedShortfall> shortfalls = {
-      {"february_2020", "LGU", "E06000005", 20, 12},
-      {"february_2020", "LGU", "E06TYPO", 15, 0}};
+      {"february_2020", "LGU", "E06000005", 0, 20, 12},
+      {"february_2020", "LGU", "E06TYPO", 0, 15, 0}};
 
   std::string report = formatSeedShortfallReport(shortfalls);
 
   CHECK(countOccurrences(report, "requested") == 2);
-  CHECK(report.find("'E06TYPO' (LGU): requested 15, available 0") !=
+  CHECK(report.find("'E06TYPO' (LGU) budget 0: requested 15, available 0") !=
         std::string::npos);
 }
 
 TEST_CASE("Shortfall report: nothing short emits no block") {
   CHECK(formatSeedShortfallReport({}).empty());
+}
+
+TEST_CASE("Shortfall report: two short budgets of one unit are told apart") {
+  // Overlapping target groups can leave one unit short against two budgets at
+  // once; the lines must say which age band, not repeat the unit twice.
+  std::vector<SeedShortfall> shortfalls = {
+      {"february_2020", "LGU", "E06000005", 0, 5, 3},
+      {"february_2020", "LGU", "E06000005", 2, 10, 8}};
+
+  std::string report = formatSeedShortfallReport(shortfalls);
+
+  CHECK(report.find("budget 0") != std::string::npos);
+  CHECK(report.find("budget 2") != std::string::npos);
+  CHECK(countOccurrences(report, "requested") == 2);
 }
