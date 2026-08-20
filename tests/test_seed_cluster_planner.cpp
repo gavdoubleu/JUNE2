@@ -96,3 +96,42 @@ TEST_CASE("Planner: offers sharing a key are one household, however split") {
   CHECK(named(plan) ==
         std::vector<std::pair<PersonId, uint32_t>>{{1, 0}, {2, 0}, {3, 0}});
 }
+
+TEST_CASE("Planner: a later-declared budget loses its member to an earlier one") {
+  // One household, one matched member, and they match both budgets. The member
+  // takes budget 0 because it is declared first, so budget 1 ends short with
+  // nobody left to take — the declaration-order bias ADR 0011 rejects for the
+  // exact path, still in force here and now counted rather than hidden.
+  const std::vector<SeedOffer> offers = {{0x30ULL, 1, 1}, {0x30ULL, 1, 2}};
+
+  ClusterPlan plan = planClusteredSeed({offers}, {1, 1});
+
+  CHECK(plan.filled_per_budget == std::vector<int>{1, 0});
+  CHECK(plan.lost_per_budget == std::vector<int>{0, 1});
+}
+
+TEST_CASE("Planner: a budget nobody matches loses nothing") {
+  // The other cause. Budget 1 is short because no member ever matched it, not
+  // because a member was taken from it first.
+  const std::vector<SeedOffer> offers = {{0x30ULL, 1, 1}};
+
+  ClusterPlan plan = planClusteredSeed({offers}, {1, 1});
+
+  CHECK(plan.filled_per_budget == std::vector<int>{1, 0});
+  CHECK(plan.lost_per_budget == std::vector<int>{0, 0});
+}
+
+TEST_CASE("Planner: a budget passed over while full is not counted as a loss") {
+  // Budget 0 fills, then the next member skips past it to budget 1. Budget 0
+  // did not lose them to anything — it was closed — so no ordering rule would
+  // have changed the outcome and the count must stay clear of it.
+  const std::vector<SeedOffer> offers = {
+      {0x30ULL, 1, 1}, {0x30ULL, 1, 2},  // member 1 matches both
+      {0x30ULL, 2, 1}, {0x30ULL, 2, 2},  // member 2 matches both
+  };
+
+  ClusterPlan plan = planClusteredSeed({offers}, {1, 2});
+
+  CHECK(plan.filled_per_budget == std::vector<int>{1, 1});
+  CHECK(plan.lost_per_budget == std::vector<int>{0, 1});
+}

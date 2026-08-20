@@ -161,6 +161,62 @@ TEST_CASE(
   CHECK(selection.chosen[1].budget_index == 0);
 }
 
+TEST_CASE(
+    "Selector: a narrower budget losing its only candidate is short by "
+    "contest, not by population") {
+  // ADR 0011's nested bands. Budget 0 is "0-17" and accepts only the child;
+  // budget 1 is "0-64" and accepts both. The child keys best against budget 1,
+  // takes it, and budget 0 has nobody to fall through to — while the
+  // assignment child->0, adult->1 would have filled both. The greedy outcome
+  // stands; what must not stand is calling the miss an empty population.
+  const PersonId child = 701;
+  const PersonId adult = 702;
+  std::vector<SeedOffer> offers = {
+      {0x0001ULL, child, 1},
+      {0x0050ULL, child, 0},
+      {0x0060ULL, adult, 1},
+  };
+
+  SeedSelection selection = selectSeedWinners({offers}, {1, 1});
+
+  CHECK(chosenPeople(selection) == std::vector<PersonId>{child});
+  CHECK(selection.filled_per_budget == std::vector<int>{0, 1});
+  CHECK(selection.lost_per_budget == std::vector<int>{1, 0});
+}
+
+TEST_CASE("Selector: a budget short with nobody to lose says nobody") {
+  // The other cause, and the one the report used to give for both: budget 0
+  // asks for two and only one person anywhere matches it. Nothing was
+  // contested, so nothing is counted lost.
+  std::vector<SeedOffer> offers = {
+      {0x0001ULL, 801, 0},
+      {0x0002ULL, 802, 1},
+  };
+
+  SeedSelection selection = selectSeedWinners({offers}, {2, 1});
+
+  CHECK(selection.filled_per_budget == std::vector<int>{1, 1});
+  CHECK(selection.lost_per_budget == std::vector<int>{0, 0});
+}
+
+TEST_CASE("Selector: a short budget's offers are all placed or all lost") {
+  // Why the two counts partition the gap: a budget that falls short never
+  // fills, so it is open for the whole walk and no offer of its own can be
+  // turned away for any reason but the person being gone.
+  std::vector<SeedOffer> offers;
+  for (PersonId person_id = 901; person_id <= 906; ++person_id) {
+    offers.push_back({0x0100ULL + person_id, person_id, 0});
+    offers.push_back({0x0010ULL + person_id, person_id, 1});
+  }
+
+  SeedSelection selection = selectSeedWinners({offers}, {4, 4});
+
+  const int offers_against_zero = 6;
+  CHECK(selection.filled_per_budget[0] + selection.lost_per_budget[0] ==
+        offers_against_zero);
+  CHECK(selection.filled_per_budget[0] < 4);  // short, so the identity applies
+}
+
 TEST_CASE("Selector: budgets sharing too few candidates fall short honestly") {
   // Three people, both budgets asking two, and every person matches both: the
   // seed can only place three cases, and says so.

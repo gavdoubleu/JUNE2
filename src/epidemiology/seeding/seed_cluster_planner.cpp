@@ -64,6 +64,7 @@ ClusterPlan planClusteredSeed(
 
   ClusterPlan plan;
   plan.filled_per_budget.assign(budgets.size(), 0);
+  plan.lost_per_budget.assign(budgets.size(), 0);
   int filled = 0;
   for (const auto& household : households) {
     if (filled >= total_budget) break;
@@ -71,13 +72,24 @@ ClusterPlan planClusteredSeed(
       // A person takes the first budget still open to them, in the order their
       // offers arrived, so a household whose members all match the same
       // exhausted budget yields nothing.
-      for (uint32_t budget_index : matched_budgets) {
+      for (size_t offered = 0; offered < matched_budgets.size(); ++offered) {
+        const uint32_t budget_index = matched_budgets[offered];
         if (plan.filled_per_budget[budget_index] >= budgets[budget_index]) {
           continue;
         }
         plan.assignments.push_back({person_id, budget_index});
         ++plan.filled_per_budget[budget_index];
         ++filled;
+        // The budgets this member also matched but never reached. Every one of
+        // them was still open — the loop stopped before testing it — so each
+        // lost a member it could have taken to a budget declared before it.
+        // The budgets already passed over are not counted: those were closed,
+        // which is why the member moved on, and no ordering rule would have
+        // changed that.
+        for (size_t skipped = offered + 1; skipped < matched_budgets.size();
+             ++skipped) {
+          ++plan.lost_per_budget[matched_budgets[skipped]];
+        }
         break;
       }
     }

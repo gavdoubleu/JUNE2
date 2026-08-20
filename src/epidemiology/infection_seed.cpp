@@ -19,6 +19,27 @@
 
 namespace june {
 
+namespace {
+
+// How a report should name one budget: the labels of the target groups it draws
+// from, joined where a scalar budget spans several. Empty when the seed keeps no
+// labels — bulk CSV seeds build a criteria profile per row and have none to keep
+// — and the report falls back to the budget index alone.
+std::string budgetLabel(const SeedBudget& budget,
+                        const std::vector<SeedTargetGroup>& target_groups) {
+  std::string label;
+  for (size_t group_index : budget.eligible_target_groups) {
+    if (group_index >= target_groups.size()) continue;
+    const std::string& group_label = target_groups[group_index].label;
+    if (group_label.empty()) continue;
+    if (!label.empty()) label += ", ";
+    label += group_label;
+  }
+  return label;
+}
+
+}  // namespace
+
 // =============================================================================
 // Configuration Loader Implementation
 // =============================================================================
@@ -316,6 +337,7 @@ InfectionSeedConfig InfectionSeedConfigLoader::loadFromFile(
               for (const auto& age_str : params["age_groups"]) {
                 std::string s = age_str.as<std::string>();
                 SeedTargetGroup g;
+                g.label = s;
                 auto cs = parseCriterion("age", s);
                 g.criteria.insert(g.criteria.end(), cs.begin(), cs.end());
                 seed.structured_config.target_groups.push_back(g);
@@ -480,6 +502,7 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
   struct ExactUnit {
     std::string unit_id;
     std::vector<int> targets;  // cases per budget, after seed strength
+    std::vector<std::string> budget_labels;  // for reports only, may be empty
     uint32_t first_slot = 0;
   };
   struct LocalCandidate {
@@ -503,6 +526,8 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
     for (const auto& budget : unit_case.budgets) {
       unit.targets.push_back(
           static_cast<int>(budget.cases * seed.seed_strength));
+      unit.budget_labels.push_back(
+          budgetLabel(budget, seed.structured_config.target_groups));
       total_target += unit.targets.back();
     }
     unit_of_slot.resize(unit_of_slot.size() + unit.targets.size(),
@@ -608,16 +633,21 @@ std::vector<PersonId> InfectionSeeder::applyExactSeed(
     const ExactUnit& unit = units[unit_index];
     SeedSelection selection =
         selectSeedWinners({offers_by_unit[unit_index]}, unit.targets);
-    // The pooled offers are every rank's, so a shortfall means nobody eligible
-    // anywhere, not merely nobody here. Recorded, never fatal.
+    // The pooled offers are every rank's, so a gap here is a gap everywhere,
+    // not merely on this rank. Two things make one: people another budget of
+    // the unit took first, and people who do not exist. The record carries both
+    // so the report need not guess which. Never fatal.
     for (size_t budget_index = 0; budget_index < unit.targets.size();
          ++budget_index) {
       if (selection.filled_per_budget[budget_index] <
           unit.targets[budget_index]) {
-        seed_shortfalls_.push_back({seed.name, seed.structured_config.geo_level,
-                                    unit.unit_id, budget_index,
-                                    unit.targets[budget_index],
-                                    selection.filled_per_budget[budget_index]});
+        seed_shortfalls_.push_back(
+            {seed.name, seed.structured_config.geo_level, unit.unit_id,
+             budget_index, unit.budget_labels[budget_index],
+             unit.targets[budget_index],
+             selection.filled_per_budget[budget_index],
+             selection.lost_per_budget[budget_index],
+             /*lost_to_earlier_declared=*/false});
       }
     }
     for (const auto& assignment : selection.chosen) {
@@ -648,6 +678,7 @@ std::vector<PersonId> InfectionSeeder::applyClusteredSeed(
   struct ClusterUnit {
     std::string unit_id;
     std::vector<int> targets;  // cases per budget, after seed strength
+    std::vector<std::string> budget_labels;  // for reports only, may be empty
     uint32_t first_slot = 0;   // targets.size() + 1 slots, 0 = no budget
   };
   struct LocalMember {
@@ -676,6 +707,8 @@ std::vector<PersonId> InfectionSeeder::applyClusteredSeed(
     for (const auto& budget : unit_case.budgets) {
       unit.targets.push_back(
           static_cast<int>(budget.cases * seed.seed_strength));
+      unit.budget_labels.push_back(
+          budgetLabel(budget, seed.structured_config.target_groups));
       total_target += unit.targets.back();
     }
     unit_of_slot.resize(unit_of_slot.size() + unit.targets.size() + 1,
@@ -780,14 +813,19 @@ std::vector<PersonId> InfectionSeeder::applyClusteredSeed(
     ClusterPlan plan =
         planClusteredSeed({offers_by_unit[unit_index]}, unit.targets);
     // The offers are every rank's, so a budget the households could not fill
-    // is short everywhere, not merely here. Recorded, never fatal.
+    // is short everywhere, not merely here. As on the exact path the gap has
+    // two causes, but here a budget loses a member only to one declared before
+    // it, so the record says so rather than borrowing the neutral wording.
+    // Never fatal.
     for (size_t budget_index = 0; budget_index < unit.targets.size();
          ++budget_index) {
       if (plan.filled_per_budget[budget_index] < unit.targets[budget_index]) {
-        seed_shortfalls_.push_back({seed.name, seed.structured_config.geo_level,
-                                    unit.unit_id, budget_index,
-                                    unit.targets[budget_index],
-                                    plan.filled_per_budget[budget_index]});
+        seed_shortfalls_.push_back(
+            {seed.name, seed.structured_config.geo_level, unit.unit_id,
+             budget_index, unit.budget_labels[budget_index],
+             unit.targets[budget_index], plan.filled_per_budget[budget_index],
+             plan.lost_per_budget[budget_index],
+             /*lost_to_earlier_declared=*/true});
       }
     }
     for (const auto& assignment : plan.assignments) {

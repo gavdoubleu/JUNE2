@@ -36,6 +36,11 @@ struct InfectionSeedGlobalConfig {
 // Target group defining which people to infect based on any property
 struct SeedTargetGroup {
   std::vector<SelectionCriterion> criteria;
+  // How the config named this group, kept only so a report can say which group
+  // it means — "0-17" rather than "budget 0". Never read by matching. Empty
+  // where the config gives no name to keep, as bulk CSV seeds do, and a report
+  // then falls back to the budget index.
+  std::string label;
 
   bool matches(const Person& person, const WorldState* world) const {
     if (criteria.empty()) return true;

@@ -26,12 +26,24 @@ struct SeedAssignment {
   uint32_t budget_index = 0;
 };
 
-// The winners of one unit's budgets, plus how many cases each budget could
-// actually place — a budget filled short of its request found nobody eligible
-// anywhere, not merely nobody on this rank.
+// The winners of one unit's budgets, plus how many cases each budget placed
+// and how many of its offers named a person another budget of the unit had
+// already taken.
+//
+// A budget that falls short never fills, so it stays open for the whole walk
+// and every one of its offers was either taken or skipped for a person already
+// seeded: `filled + lost` is exactly the offers it saw. The rest of its request
+// drew no offer at all, and by the depth cap (ADR 0011) nothing that could have
+// won is ever truncated away, so that remainder is people who do not exist
+// rather than people not proposed.
+//
+// `lost_per_budget` is only meaningful for a budget that fell short. For a
+// budget that filled, offers are skipped for the ordinary reason that it
+// closed, and the count says nothing about contention.
 struct SeedSelection {
   std::vector<SeedAssignment> chosen;
   std::vector<int> filled_per_budget;
+  std::vector<int> lost_per_budget;
 };
 
 // Choose the winners of one unit's seed budgets from the offers every rank

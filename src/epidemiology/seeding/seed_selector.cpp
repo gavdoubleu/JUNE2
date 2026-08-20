@@ -24,14 +24,25 @@ SeedSelection selectSeedWinners(
 
   SeedSelection selection;
   selection.filled_per_budget.assign(budgets.size(), 0);
+  selection.lost_per_budget.assign(budgets.size(), 0);
   // A candidate matching two budgets is offered against both, so the first
-  // budget to reach them takes them and the other refills from its next-best
-  // offer. Which budget that is falls out of the keys, not out of the order
-  // the budgets were declared in.
+  // budget to reach them takes them, and which budget that is falls out of the
+  // keys, not out of the order the budgets were declared in. The budget that
+  // loses them carries on down its own order — which refills it only if a
+  // candidate it accepts is still to come. A budget narrower than the one that
+  // took the person may have no such candidate, and then it simply ends short:
+  // the loss is counted here so the shortfall can name that as the cause
+  // instead of blaming an eligible population that was never the problem.
+  //
+  // A person is held by one rank, so the pooled offers hold at most one
+  // (person, budget) pair and the count needs no set of its own.
   std::unordered_set<PersonId> already_seeded;
   for (const auto& offer : pooled) {
     if (offer.budget_slot >= budgets.size()) continue;
-    if (already_seeded.count(offer.person_id) != 0) continue;
+    if (already_seeded.count(offer.person_id) != 0) {
+      ++selection.lost_per_budget[offer.budget_slot];
+      continue;
+    }
     if (selection.filled_per_budget[offer.budget_slot] >=
         budgets[offer.budget_slot]) {
       continue;
