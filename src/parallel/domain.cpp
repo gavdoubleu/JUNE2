@@ -99,7 +99,9 @@ void Domain::checkResidencesAreLocal() const {
   if (offenders == 0) return;
 
   std::ostringstream message;
-  message << "Rank " << rank << ": " << offenders
+  // No rank prefix: main's handler already stamps one on what() before this
+  // reaches the terminal.
+  message << offenders
           << " resident(s) whose residence venue sits in another geo unit. A "
              "household must be held whole by one rank (ADR 0012): the "
              "partition assigns a person by their geo unit and a venue by "
