@@ -128,6 +128,7 @@ set(JUNE_CORE_SOURCES
     src/epidemiology/infection_seed.cpp
     src/epidemiology/seeding/seed_selector.cpp
     src/epidemiology/seeding/seed_shortfall.cpp
+    src/epidemiology/seeding/seed_cluster_planner.cpp
     src/epidemiology/disease.cpp
     src/loaders/disease_loader.cpp
     src/interaction/interaction_manager.cpp
@@ -329,6 +330,7 @@ if(BUILD_TESTING)
   add_june_test(test_infection_seed_loader "tests/test_infection_seed_loader.cpp")
   add_june_test(test_seed_selector "tests/test_seed_selector.cpp")
   add_june_test(test_seed_shortfall "tests/test_seed_shortfall.cpp")
+  add_june_test(test_seed_cluster_planner "tests/test_seed_cluster_planner.cpp")
   add_june_test(test_cross_domain_venues "tests/test_cross_domain_venues.cpp")
   add_june_test(test_membership_metadata_matching "tests/test_membership_metadata_matching.cpp")
   add_june_test(test_integration "tests/test_integration.cpp;src/loaders/disease_loader.cpp")
