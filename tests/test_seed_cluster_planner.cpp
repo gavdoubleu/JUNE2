@@ -82,10 +82,10 @@ TEST_CASE("Planner: the fill respects each budget and stops at their total") {
   CHECK(plan.filled_per_budget == std::vector<int>{1, 0});
 }
 
-TEST_CASE("Planner: a household offered by several ranks is planned as one") {
-  // 0x70 straddles three ranks. Merged it is the denser household and takes
-  // the whole budget; taken a rank at a time each piece would rank below the
-  // rival 0x69 and lose the fill to it.
+TEST_CASE("Planner: offers sharing a key are one household, however split") {
+  // The plan follows the pooled offers alone, never the lists they arrived in.
+  // Merged, 0x70 is the denser household and takes the whole budget; read a
+  // list at a time each piece would rank below the rival 0x69 and lose to it.
   const std::vector<std::vector<SeedOffer>> offer_lists = {
       {{0x70ULL, 1, 1}, {0x69ULL, 4, 1}},
       {{0x70ULL, 2, 1}, {0x69ULL, 5, 1}},

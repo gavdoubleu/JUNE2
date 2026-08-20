@@ -694,8 +694,8 @@ std::vector<PersonId> InfectionSeeder::applyClusteredSeed(
       if (residence.empty()) continue;
 
       LocalHousehold& household = households[residence[0].first];
-      // Household ids are global, so both halves of a straddling household
-      // derive the same key.
+      // One rank holds the whole household: a residence venue and its
+      // occupants share a geo unit, checked in Domain (ADR 0012).
       household.key = mix_seed(event_base, unit_hash,
                                static_cast<uint64_t>(residence[0].first));
       LocalMember member{person, {}};
@@ -727,8 +727,8 @@ std::vector<PersonId> InfectionSeeder::applyClusteredSeed(
     // Offer only as far down the local order as the fill can possibly reach:
     // once a budget has seen total_target members eligible for it, a household
     // below cannot take a case against that budget without the fill having
-    // already completed above it. Exact for a household held by one rank,
-    // which the partition gives us, since a household sits inside one geo unit.
+    // already completed above it. Exact because the rank sorting a household
+    // sees all of it, which Domain checks and ADR 0012 records.
     std::vector<int> eligible_seen(unit.targets.size(), 0);
     auto fillCannotReachFurther = [&]() {
       for (size_t budget_index = 0; budget_index < unit.targets.size();
