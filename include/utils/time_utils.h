@@ -128,7 +128,9 @@ inline std::tm addDays(const std::tm& date, int days) {
 // Format date as "YYYY-MM-DD"
 inline std::string formatDate(const std::tm& date) {
   if (isPreEpoch(date)) {
-    char buffer[11];
+    // Sized for the widest output three ints can produce, so an out-of-range
+    // tm prints as visibly wrong rather than being silently truncated
+    char buffer[36];
     std::snprintf(buffer, sizeof(buffer), "%04d-%02d-%02d", date.tm_year + 1900,
                   date.tm_mon + 1, date.tm_mday);
     return std::string(buffer);
