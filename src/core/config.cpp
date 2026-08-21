@@ -156,8 +156,8 @@ void SelectionCriterion::buildGeoAncestorMask(const WorldState& world) const {
                         ")";
     return;
   }
-  const uint8_t level_id =
-      static_cast<uint8_t>(std::distance(world.geo_level_names.begin(), level_it));
+  const uint8_t level_id = static_cast<uint8_t>(
+      std::distance(world.geo_level_names.begin(), level_it));
 
   std::vector<std::string> target_names;
   if (std::holds_alternative<std::string>(value)) {
@@ -246,11 +246,11 @@ void SelectionCriterion::buildGeoAncestorMask(const WorldState& world) const {
   // Rank-gated: geo_units is global on every rank, so only the inhabited-unit
   // count is rank-local, and one rank's report is enough to flag the geography.
   if (units_with_no_ancestor > 0 && logRank0()) {
-    std::cerr << "Warning: '" << property_path << "': "
-              << units_with_no_ancestor
+    std::cerr << "Warning: '" << property_path
+              << "': " << units_with_no_ancestor
               << " inhabited geographical units have no ancestor at level '"
-              << level_name << "'; people in them match neither == nor !="
-              << std::endl;
+              << level_name
+              << "'; people in them match neither == nor !=" << std::endl;
   }
 }
 
@@ -1009,8 +1009,8 @@ void SelectionCriterion::resolveOrThrow(const WorldState& world,
   if (cached_type == PropertyType::GEO_ANCESTOR && operator_type != "==" &&
       operator_type != "!=" && operator_type != "in") {
     throw std::runtime_error(context + ": '" + property_path +
-                             "' supports only == != in, not '" +
-                             operator_type + "'");
+                             "' supports only == != in, not '" + operator_type +
+                             "'");
   }
   if (cached_type == PropertyType::CUSTOM_PROPERTY && cached_prop_idx < 0) {
     throw std::runtime_error(context + ": person property '" +

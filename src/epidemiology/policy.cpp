@@ -326,16 +326,16 @@ void PolicyManager::precomputePolicyApplicability(std::vector<Person>& people) {
     person.applicable_symptom_policy_mask = 0;
     person.applicable_temporal_policy_mask = 0;
 
-    for (size_t i = 0; i < std::min(symptom_policies_.size(), kMaxPoliciesPerKind);
-         ++i) {
+    for (size_t i = 0;
+         i < std::min(symptom_policies_.size(), kMaxPoliciesPerKind); ++i) {
       const auto& policy = symptom_policies_[i];
       if (policy.appliesTo(person, &world_)) {
         person.applicable_symptom_policy_mask |= (1u << i);
       }
     }
 
-    for (size_t i = 0; i < std::min(temporal_policies_.size(), kMaxPoliciesPerKind);
-         ++i) {
+    for (size_t i = 0;
+         i < std::min(temporal_policies_.size(), kMaxPoliciesPerKind); ++i) {
       const auto& policy = temporal_policies_[i];
       if (policy.appliesTo(person, &world_)) {
         person.applicable_temporal_policy_mask |= (1u << i);
