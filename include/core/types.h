@@ -79,7 +79,7 @@ struct VisitorInfo {
 constexpr VenueId INFECTION_SEED_VENUE_ID = -999;
 
 // -----------------------------------------------------------------------------
-// The virtual-venue id range (docs/adr/0010)
+// The virtual-venue id range
 // -----------------------------------------------------------------------------
 // A Virtual Encounter is held at no Venue, but still needs an identity for
 // interaction grouping, MPI venue ownership and infection seeding. It borrows a

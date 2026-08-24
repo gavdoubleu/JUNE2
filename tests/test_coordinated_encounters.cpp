@@ -1423,7 +1423,7 @@ TEST_CASE(
 // In the simulator, after encounters are finalized, they are "injected" into
 // each participant's location for the relevant time slot. Eligibility asks
 // PolicyManager::suppressesParticipation() for each participant — the question
-// only, since pass 1 may still cancel the encounter (docs/adr/0009).
+// only, since pass 1 may still cancel the encounter.
 //
 // If a policy overrides the encounter's trigger activity (e.g., "leisure" →
 // "residence" due to symptom isolation), that participant is NOT injected
@@ -3335,7 +3335,7 @@ TEST_CASE(
 }
 
 // =============================================================================
-// SECTION 9: The virtual-venue id range (docs/adr/0010)
+// SECTION 9: The virtual-venue id range
 //
 // Whether a CoordinatedEncounter is virtual is a property of the instance —
 // its reserved negative venue_id — not of a config flag reached through a

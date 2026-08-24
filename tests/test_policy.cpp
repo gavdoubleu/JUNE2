@@ -259,7 +259,7 @@ TEST_CASE("Venue gate - exempt-from is the inverse of restrict-to") {
   SUBCASE("absent venue (venue_id < 0) does not fire either") {
     // Absent never passes the filter in either direction: "not at a listed
     // venue type" and "at no venue at all" are different questions, and only
-    // the first is what exempt-from asks (docs/adr/0008).
+    // the first is what exempt-from asks.
     CHECK_FALSE(runOverride(policy_manager, person, kLeisure, kInvalidVenueId)
                     .has_value());
   }
@@ -558,7 +558,7 @@ TEST_CASE("Venue gate - symptom path is gated too") {
 }
 
 // =============================================================================
-// Policy Suppression — the question stripped of its consequence (docs/adr/0009)
+// Policy Suppression — the question stripped of its consequence
 //
 // suppressesParticipation answers what getOverride answers, and writes none of
 // what getOverride writes: no freeze established or released, no schedule hop

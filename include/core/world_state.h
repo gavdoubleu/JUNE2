@@ -201,9 +201,8 @@ class WorldState {
   //
   // venue_type_by_id is indexed by VenueId and covers every Venue in the world,
   // not just this rank's, so that kUnknownVenueTypeId means "no such Venue" and
-  // never "not mine" (docs/adr/0008). Ids naming no Venue are holes holding
-  // kUnknownVenueTypeId. Empty only for a hand-built WorldState, where
-  // getVenue() is total.
+  // never "not mine". Ids naming no Venue are holes holding kUnknownVenueTypeId.
+  // Empty only for a hand-built WorldState, where getVenue() is total.
   std::vector<uint8_t> venue_type_by_id;
   std::unordered_map<VenueId, GeoUnitId> global_venue_geo_unit_map;
   // type_name → sorted list of all VenueIds of that type (globally)
