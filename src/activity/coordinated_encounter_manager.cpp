@@ -183,7 +183,7 @@ bool CoordinatedEncounterManager::tryEmitForOneSlot(
   if (enc_def.is_virtual) {
     // The reserved virtual range encodes the host, so collisions are
     // impossible by construction: a person hosts at most one encounter per
-    // slot per type (docs/adr/0010).
+    // slot per type.
     venue.id = makeVirtualVenueId(person.id);
   } else if (!venue.valid) {
     return false;

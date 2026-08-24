@@ -40,7 +40,7 @@ std::vector<EncounterEligibility> computeLocalEligibility(
     // Reading enc.venue_type_id for one would take a contact-matrix id for a
     // world venue-type id and gate on an unrelated real venue type. The
     // discriminator is the instance's own venue id, which cannot miss a
-    // lookup (docs/adr/0010).
+    // lookup.
     const SlotVenueType slot_venue_type =
         isVirtualVenue(enc.venue_id) ? SlotVenueType::absent()
                                      : SlotVenueType::known(enc.venue_type_id);

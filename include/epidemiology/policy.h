@@ -210,10 +210,10 @@ struct PolicyAction {
 
   // Check whether the type of the Venue the person physically occupies this
   // slot passes the gate. A Person occupying no Venue never passes, in either
-  // direction (docs/adr/0008): "not at a listed venue type" and "at no venue
-  // at all" are different questions, and only the first is what exempt-from
-  // asks. An unresolvable type never reaches here — SlotVenueType throws at
-  // the producer instead.
+  // direction: "not at a listed venue type" and "at no venue at all" are
+  // different questions, and only the first is what exempt-from asks. An
+  // unresolvable type never reaches here — SlotVenueType throws at the
+  // producer instead.
   bool passesVenueGate(const SlotVenueType& slot_venue_type) const {
     if (!venue_gate_error.empty()) throw std::runtime_error(venue_gate_error);
     if (venue_gate_direction == VenueGateDirection::None) return true;
@@ -546,7 +546,7 @@ class PolicyManager {
   // Would a policy remove this Person from `activity_index` this slot? A
   // question, not an instruction: no freeze is established or released, no
   // schedule hop swapped, no compliance decision latched. There is deliberately
-  // no Pin Venue argument, because nothing is pinned (docs/adr/0009).
+  // no Pin Venue argument, because nothing is pinned.
   //
   // Asked by the subsystems that only need the verdict — coordinated-encounter
   // eligibility and follow mirroring — so that reading the answer cannot commit
@@ -676,7 +676,7 @@ class PolicyManager {
   // The part of a policy decision that is a pure question: does this action
   // reach this Person's activity, at this slot's venue type, unexempted?
   // Shared by getOverride and suppressesParticipation so the gate ordering and
-  // the docs/adr/0008 unresolved-gate throw exist in exactly one place.
+  // the unresolved-gate throw exist in exactly one place.
   //
   // Takes a resolver rather than a resolved SlotVenueType so an ungated action
   // never pays for the venue-type lookup — and never throws on a venue this

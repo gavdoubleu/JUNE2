@@ -56,7 +56,7 @@ bool mirrorSuppressed(const FollowConfig& fc, int16_t host_activity,
 // query and nothing more: true means a policy would remove the follower from
 // their own activity, so the mirror is declined and they keep their schedule.
 // Deciding not to mirror commits nothing, so no venue is taken — nobody is
-// pinned or moved here (docs/adr/0009).
+// pinned or moved here.
 //
 // The gate keys on host_venue_type, the type the mirror is about to move the
 // follower to, not the type of their own scheduled venue; a gated policy asked

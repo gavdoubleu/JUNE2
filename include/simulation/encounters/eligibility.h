@@ -25,8 +25,7 @@ namespace encounters {
 // encounter, a contact-matrix registry id for a virtual one — and the two
 // registries are independently ordered, so the integers alias. Which one it
 // is, is answered by isVirtualVenue(enc.venue_id): a property of the instance,
-// not a config flag reached through a world-registry lookup that can miss
-// (docs/adr/0010).
+// not a config flag reached through a world-registry lookup that can miss.
 struct EncounterLookups {
   std::unordered_map<uint8_t, std::vector<int16_t>> trigger_activities;
   std::unordered_map<uint8_t, int> min_attendees;
@@ -54,8 +53,8 @@ EncounterLookups buildEncounterLookups(
 // trigger activity, at the encounter's venue type" — a Policy Suppression
 // query, carrying no consequence. Pass 1 is speculative: the encounter may
 // still be cancelled below min_required, so nothing here may commit a freeze,
-// a hop swap or a compliance latch on the strength of it (docs/adr/0009). No
-// venue is handed to the policy, only the type, because nothing is pinned.
+// a hop swap or a compliance latch on the strength of it. No venue is handed
+// to the policy, only the type, because nothing is pinned.
 //
 // A virtual encounter is at no Venue at all, so its Slot Venue Type is absent
 // rather than enc.venue_type_id.
