@@ -110,6 +110,41 @@ policies:
       compliance_rate: 1.0
 
     # -------------------------------------------------------------------------
+    # Example: Lockdown exempting grocery venues, with a no_venue companion
+    # -------------------------------------------------------------------------
+    # exempt_venue_types (the ExemptFrom direction) closes every venue type
+    # EXCEPT the ones listed. It only fires on people at a real Venue though:
+    # walk/bike/car commuters resolve to no_venue (no Venue to check the gate
+    # against), so a venue-gated primary_activity override never touches them.
+    # Add a second, ungated action on the "no_venue" activity to catch that
+    # traffic too — see PR #24 discussion for why the gate itself must stay
+    # Absent-blind rather than treating "no venue" as "type not listed".
+    # - name: "lockdown_exempt_grocery"
+    #
+    #   start_date: "2020-03-23"
+    #   end_date: "2020-05-15"
+    #
+    #   override_activities: ["primary_activity"]
+    #   exempt_venue_types: ["grocery"]
+    #
+    #   replacement: "residence"
+    #
+    #   compliance_rate: 0.85
+    #
+    # - name: "lockdown_exempt_grocery_no_venue"
+    #
+    #   start_date: "2020-03-23"
+    #   end_date: "2020-05-15"
+    #
+    #   # No venue gate: this action targets the no_venue activity directly,
+    #   # so walk/bike/car commuters get sent home too.
+    #   override_activities: ["no_venue"]
+    #
+    #   replacement: "residence"
+    #
+    #   compliance_rate: 0.85
+
+    # -------------------------------------------------------------------------
     # Example: School Closures
     # -------------------------------------------------------------------------
     # - name: "school_closure_spring_2020"
