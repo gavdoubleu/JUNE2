@@ -545,16 +545,17 @@ void DiseaseLoader::validateOutcomeRowSums(const OutcomeRates& outcome_rates) {
       // not a table the trajectory walk can sample from.
       throw std::runtime_error(
           "Outcome rates row " + std::to_string(row_i) + " sums to " +
-          std::to_string(row_sum) + ", expected 1.0. Outcome columns are a "
+          std::to_string(row_sum) +
+          ", expected 1.0. Outcome columns are a "
           "probability distribution over trajectories and must sum to 1.");
     }
     for (const auto& [key, prob] : outcome_rates.rows[row_i].probabilities) {
       // Second net, not the first one: a negative rate can hide inside a row
       // that still sums to 1.
       if (prob < 0.0) {
-        throw std::runtime_error(
-            "Outcome rates row " + std::to_string(row_i) + " has negative '" +
-            key + "' = " + std::to_string(prob) + ".");
+        throw std::runtime_error("Outcome rates row " + std::to_string(row_i) +
+                                 " has negative '" + key +
+                                 "' = " + std::to_string(prob) + ".");
       }
     }
   }
