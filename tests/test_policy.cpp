@@ -1029,7 +1029,7 @@ TEST_CASE("Symptom policy - a closing window is not symptom progression") {
 
 TEST_CASE("Query and override agree on the symptom policy window") {
   // The query answers the same sentence as the override — and, as ever, still
-  // writes nothing (docs/adr/0009), so it cannot thaw a person on its own.
+  // writes nothing, so it cannot thaw a person on its own.
   WorldState world = buildVenueGateWorld();
   Disease disease = buildTwoStageDisease(1000.0);
   PolicyManager policy_manager(world);
