@@ -155,6 +155,7 @@ set(JUNE_CORE_SOURCES
     src/loaders/calendar_event_loader.cpp
     src/loaders/catchment_rule_loader.cpp
     src/simulation/simulator.cpp
+    src/simulation/encounters/eligibility.cpp
     src/simulation/simulator_checkpoint.cpp
     src/simulation/simulator_encounters.cpp
     src/simulation/simulator_reporting.cpp
@@ -293,6 +294,7 @@ if(BUILD_TESTING)
   add_june_test(test_domain_communicator_detail "tests/test_domain_communicator_detail.cpp")
   add_june_test(test_run_dir "tests/test_run_dir.cpp")
   add_june_test(test_world_state "tests/test_world_state.cpp")
+  add_june_test(test_domain_loader_internals "tests/test_domain_loader_internals.cpp")
   add_june_test(test_infection "tests/test_infection.cpp;src/loaders/disease_loader.cpp")
   add_june_test(test_transmission_lookups "tests/test_transmission_lookups.cpp")
   add_june_test(test_coordinated_encounters "tests/test_coordinated_encounters.cpp")
@@ -308,6 +310,7 @@ if(BUILD_TESTING)
   add_june_test(test_config_loading "tests/test_config_loading.cpp")
   add_june_test(test_config_checks "tests/test_config_checks.cpp")
   add_june_test(test_activity_manager "tests/test_activity_manager.cpp")
+  add_june_test(test_policy "tests/test_policy.cpp")
   add_june_test(test_on_the_fly_venue_allocator "tests/test_on_the_fly_venue_allocator.cpp")
   add_june_test(test_schedule_csv "tests/test_schedule_csv.cpp")
   add_june_test(test_day_types "tests/test_day_types.cpp")

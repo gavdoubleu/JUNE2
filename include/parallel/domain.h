@@ -101,7 +101,7 @@ class Domain {
   void clearVirtualVenues() { virtual_venue_set.clear(); }
 
   bool ownsVenue(VenueId id) const {
-    if (id <= -1000) {
+    if (isVirtualVenue(id)) {
       // Check dynamic registry (set during encounter injection)
       return virtual_venue_set.count(id) > 0;
     }
