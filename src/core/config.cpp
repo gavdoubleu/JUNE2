@@ -1116,14 +1116,22 @@ void CoordinatedEncounterConfig::resolve(
 
   if (!enabled) return;
 
-  // Build deterministic name→id mapping from sorted keys
+  // Build the name→id mapping from both flat and mode-specific matrices.
+  // Mode-specific entries are valid matrix names for virtual encounters too.
   {
+    contact_matrices.matrix_name_to_id.clear();
     std::vector<std::string> sorted_names;
     for (auto& [name, _] : contact_matrices.matrices)
       sorted_names.push_back(name);
+    for (auto& [venue_name, mode_map] : contact_matrices.mode_matrices) {
+      (void)venue_name;
+      for (auto& [mode_name, _] : mode_map) sorted_names.push_back(mode_name);
+    }
     std::sort(sorted_names.begin(), sorted_names.end());
+    sorted_names.erase(std::unique(sorted_names.begin(), sorted_names.end()),
+                       sorted_names.end());
     for (int i = 0; i < (int)sorted_names.size(); ++i)
-      contact_matrices.matrix_name_to_id[sorted_names[i]] = i;
+      contact_matrices.matrix_name_to_id.emplace(sorted_names[i], i);
   }
 
   // Populate encounter_type_names in WorldState if not already there
