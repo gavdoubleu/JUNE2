@@ -207,13 +207,16 @@ void InteractionManager::binMemberClassification(
   PersonId pid = member.id;
   if (visitor) {
     if (visitor->is_infectious) {
-      accumulateVisitorInfectiousnessAndFomite(
-          visitor, pid, bin_index, num_modes, num_fomite_modes, fomite_modes,
-          n_sub_per_mode, delta_hours);
+      accumulateVisitorInfectiousness(visitor, pid, bin_index, num_modes);
     } else if (!visitor->is_infected && visitor->immunity_level < 1.0) {
       double susceptibility = 1.0 - visitor->immunity_level;
       bins_buffer_[bin_index].susceptible.push_back(
           {pid, susceptibility, visitor, member.encounter_type_id});
+    }
+    if (visitor->is_infected && num_fomite_modes > 0) {
+      accumulateVisitorFomiteDeposition(visitor, bin_index, num_fomite_modes,
+                                        fomite_modes, n_sub_per_mode,
+                                        delta_hours);
     }
     return;
   }
@@ -309,10 +312,8 @@ void InteractionManager::binOneMember(
                           current_time, delta_hours);
 }
 
-void InteractionManager::accumulateVisitorInfectiousnessAndFomite(
-    const VisitorInfo* visitor, PersonId pid, int bin_index, int num_modes,
-    int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
-    const std::vector<int>& n_sub_per_mode, double delta_hours) {
+void InteractionManager::accumulateVisitorInfectiousness(
+    const VisitorInfo* visitor, PersonId pid, int bin_index, int num_modes) {
   // Use pre-computed integrated infectiousness from the sending rank.
   // These values were computed using the identical code path as local
   // people (Infection::getIntegratedInfectiousness), guaranteeing
@@ -334,7 +335,16 @@ void InteractionManager::accumulateVisitorInfectiousnessAndFomite(
           im_scratch_buffer_[m];
     }
   }
-  // Fomite deposition for visitors (per temporal sub-bin)
+}
+
+void InteractionManager::accumulateVisitorFomiteDeposition(
+    const VisitorInfo* visitor, int bin_index, int num_fomite_modes,
+    const std::vector<FomiteModeRef>& fomite_modes,
+    const std::vector<int>& n_sub_per_mode, double delta_hours) {
+  // Mirrors accumulateLocalFomiteDeposition: gated on "infected", not
+  // "infectious" — deposition_by_symptom curves are keyed by symptom_id and
+  // may legitimately be nonzero outside the infectious window (e.g. during
+  // incubation).
   for (int local_fm = 0; local_fm < num_fomite_modes; ++local_fm) {
     int n_sub = n_sub_per_mode[local_fm];
     double dt_sub_stage = delta_hours / n_sub / 24.0;

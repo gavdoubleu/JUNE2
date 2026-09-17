@@ -746,12 +746,20 @@ class InteractionManager {
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data);
 
   // Append a cross-rank visitor's per-mode infectiousness (pre-computed on
-  // the sending rank) into bins_buffer_[bin_index] and accumulate its
-  // per-sub-bin fomite deposition. Caller has already confirmed
-  // visitor->is_infectious. Uses im_scratch_buffer_ as scratch.
-  void accumulateVisitorInfectiousnessAndFomite(
-      const VisitorInfo* visitor, PersonId pid, int bin_index, int num_modes,
-      int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
+  // the sending rank) into bins_buffer_[bin_index]. Caller has already
+  // confirmed visitor->is_infectious. Uses im_scratch_buffer_ as scratch.
+  void accumulateVisitorInfectiousness(const VisitorInfo* visitor,
+                                       PersonId pid, int bin_index,
+                                       int num_modes);
+
+  // Accumulate a cross-rank visitor's fomite deposition into
+  // bins_buffer_[bin_index].total_fomite_deposition_sub. Only called when
+  // visitor->is_infected and num_fomite_modes > 0 — mirrors
+  // accumulateLocalFomiteDeposition's gating so locals and visitors deposit
+  // fomites under the same condition.
+  void accumulateVisitorFomiteDeposition(
+      const VisitorInfo* visitor, int bin_index, int num_fomite_modes,
+      const std::vector<FomiteModeRef>& fomite_modes,
       const std::vector<int>& n_sub_per_mode, double delta_hours);
 
   // Append a local infectious person's per-mode integrated infectiousness
