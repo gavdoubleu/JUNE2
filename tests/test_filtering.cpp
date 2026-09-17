@@ -5,6 +5,7 @@
 #include "core/config.h"
 #include "core/world_state.h"
 #include "doctest.h"
+#include "epidemiology/disease.h"
 #include "utils/filtering.h"
 
 using namespace june;
@@ -134,4 +135,46 @@ TEST_CASE("a != expression parsed from text excludes the named value") {
     criterion.resolveOrThrow(world, "test");
   CHECK_FALSE(
       filtering::matchesCriteria(world.people.front(), &world, criteria));
+}
+
+namespace {
+
+// Two outcome rows keyed on infection context, then a catch-all on age.
+static OutcomeRates buildContextOutcomeRates() {
+  const std::vector<std::string> headers = {
+      "filter.age", "filter.infector_symptom", "filter.transmission_mode",
+      "death"};
+  const std::vector<std::pair<int, std::string>> filter_columns =
+      filtering::findFilterColumns(headers);
+
+  auto addRow = [&](const std::vector<std::string>& fields, double death) {
+    OutcomeRow row;
+    row.criteria = filtering::parseCriteriaFromRow(fields, filter_columns);
+    row.probabilities["death"] = death;
+    return row;
+  };
+
+  OutcomeRates rates;
+  rates.rows.push_back(addRow({"18-99", "pneumonic", "respiratory"}, 0.9));
+  rates.rows.push_back(addRow({"18-99", "bubonic", "animal_bite"}, 0.4));
+  rates.rows.push_back(addRow({"0-17", "", ""}, 0.1));
+  return rates;
+}
+
+}  // namespace
+
+TEST_CASE("outcome rates keyed on infection context resolve and pick rows") {
+  WorldState world = buildSinglePersonWorld();
+  OutcomeRates rates = buildContextOutcomeRates();
+  REQUIRE_NOTHROW(rates.resolve(world));
+
+  const Person& adult = world.people.front();
+  CHECK(rates.getRate(adult, &world, "death",
+                      InfectionContext{"pneumonic", "respiratory"}) ==
+        doctest::Approx(0.9));
+  CHECK(rates.getRate(adult, &world, "death",
+                      InfectionContext{"bubonic", "animal_bite"}) ==
+        doctest::Approx(0.4));
+  CHECK(rates.getRate(adult, &world, "death",
+                      InfectionContext{"bubonic", "respiratory"}) == 0.0);
 }

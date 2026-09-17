@@ -86,6 +86,10 @@ void SelectionCriterion::resolve(const WorldState& world) {
       cached_sub_property = property_path.substr(9);
     } else if (property_path == "is_alive") {
       cached_type = PropertyType::IS_ALIVE;
+    } else if (property_path == "infector_symptom") {
+      cached_type = PropertyType::INFECTOR_SYMPTOM;
+    } else if (property_path == "transmission_mode") {
+      cached_type = PropertyType::TRANSMISSION_MODE;
     } else if (property_path.compare(0, 19, "partner_in_network(") == 0) {
       size_t open_paren = property_path.find('(');
       size_t close_paren = property_path.find(')', open_paren);
@@ -274,12 +278,30 @@ size_t SelectionCriterion::geoMaskSlot(GeoUnitId id) const {
   return static_cast<size_t>(std::distance(geo_mask_unit_ids.begin(), it));
 }
 
-bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
-                                  const Person* partner) const {
+bool SelectionCriterion::evaluate(
+    const Person& person, const WorldState* world, const Person* partner,
+    const InfectionContext* infection_context) const {
   // 1. Resolve property type and path if not cached
   if (cached_type == PropertyType::UNKNOWN) {
     const_cast<SelectionCriterion*>(this)->resolve(*world);
     if (cached_type == PropertyType::UNKNOWN) return false;
+  }
+
+  // Infection context: a criterion here names a required symptom or mode, so
+  // an absent one (no context, or a seeded infection) matches nobody.
+  if (cached_type == PropertyType::INFECTOR_SYMPTOM ||
+      cached_type == PropertyType::TRANSMISSION_MODE) {
+    if (!infection_context) return false;
+    const std::string& actual = cached_type == PropertyType::INFECTOR_SYMPTOM
+                                    ? infection_context->infector_symptom
+                                    : infection_context->transmission_mode;
+    if (actual.empty()) return false;
+    const std::string* required = std::get_if<std::string>(&value);
+    if (!required) return false;
+    const bool equal = actual == *required;
+    if (operator_type == "==") return equal;
+    if (operator_type == "!=") return !equal;
+    return true;
   }
 
   // Boolean predicates: bypass the target-code / fallback machinery entirely.
@@ -1007,7 +1029,7 @@ void SelectionCriterion::resolveOrThrow(const WorldState& world,
         "properties.<name>, activities.<name>.length, "
         "activities.<name>.venue_type, "
         "networks.<name>.length, partner_in_network(<n>), "
-        "geo_unit.<LEVEL>");
+        "geo_unit.<LEVEL>, infector_symptom, transmission_mode");
   }
   if (!geo_resolve_error.empty()) {
     throw std::runtime_error(context + ": " + geo_resolve_error);

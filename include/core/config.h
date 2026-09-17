@@ -19,6 +19,23 @@ namespace june {
 struct Person;
 struct WorldState;
 
+/// Context passed to SelectionCriterion::evaluate (via matchesCriteria) for infection-specific filter columns.
+///
+/// Carries per-infection metadata that cannot be derived from the Person struct
+/// alone, specifically information about the transmission event that created
+/// the infection. Used when evaluating `filter.infector_symptom` and
+/// `filter.transmission_mode` CSV columns.
+struct InfectionContext {
+  std::string
+      infector_symptom;  ///< Symptom-tag name of the infector at the moment of
+                         ///< transmission (e.g. "primary_pneumonic"). Empty
+                         ///< when there is no explicit infector (e.g. seeded
+                         ///< infections).
+  std::string transmission_mode;  ///< Name of the transmission mode that caused
+                                  ///< the infection (e.g. "animal_bite",
+                                  ///< "respiratory"). Empty for seeds.
+};
+
 // =============================================================================
 // Schedule Selection Criteria
 // =============================================================================
@@ -30,9 +47,11 @@ struct SelectionCriterion {
       operator_type;    // ">", "<", "==", "!=", ">=", "<=", "in", "contains"
   PropertyValue value;  // Can be int, double, string, or vector
 
-  // Evaluate this criterion against a person
+  // Evaluate this criterion against a person. `infection_context` answers
+  // infector_symptom and transmission_mode; without one, those match nobody.
   bool evaluate(const Person& person, const WorldState* world = nullptr,
-                const Person* partner = nullptr) const;
+                const Person* partner = nullptr,
+                const InfectionContext* infection_context = nullptr) const;
 
   // Resolve string values to codes for early interning
   void resolve(const WorldState& world);
@@ -80,6 +99,10 @@ struct SelectionCriterion {
     // geo_unit.<LEVEL>: the person's ancestor geographical unit at a named
     // level, compared by unit name. Path: "geo_unit.XLGU".
     GEO_ANCESTOR,
+    // Infection context, not the person: compared by string against
+    // InfectionContext. Paths: "infector_symptom", "transmission_mode".
+    INFECTOR_SYMPTOM,
+    TRANSMISSION_MODE,
   };
 
   // Ancestor-geography membership, one entry per geographical unit, built

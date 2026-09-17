@@ -10,23 +10,6 @@ namespace june {
 
 struct WorldState;
 
-/// Context passed to matchesCriteria for infection-specific filter columns.
-///
-/// Carries per-infection metadata that cannot be derived from the Person struct
-/// alone, specifically information about the transmission event that created
-/// the infection. Used when evaluating `filter.infector_symptom` and
-/// `filter.transmission_mode` CSV columns.
-struct InfectionContext {
-  std::string
-      infector_symptom;  ///< Symptom-tag name of the infector at the moment of
-                         ///< transmission (e.g. "primary_pneumonic"). Empty
-                         ///< when there is no explicit infector (e.g. seeded
-                         ///< infections).
-  std::string transmission_mode;  ///< Name of the transmission mode that caused
-                                  ///< the infection (e.g. "animal_bite",
-                                  ///< "respiratory"). Empty for seeds.
-};
-
 /// @namespace june::filtering
 /// @brief CSV-driven row filtering used by outcome-rate tables and infection
 /// seeds.
