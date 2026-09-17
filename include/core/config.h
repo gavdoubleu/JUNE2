@@ -129,6 +129,24 @@ struct SelectionCriterion {
   // world, so evaluate can use it when handed none.
   void resolveSyntax() const;
   mutable bool syntax_resolved = false;
+
+  enum class Operator : uint8_t {
+    UNSUPPORTED,
+    EQUAL,
+    NOT_EQUAL,
+    GREATER,
+    LESS,
+    GREATER_EQUAL,
+    LESS_EQUAL,
+    IN,
+    CONTAINS,
+  };
+  static Operator parseOperator(const std::string& operator_type);
+  mutable Operator cached_operator = Operator::UNSUPPORTED;
+  // operator_type as it was when cached_operator was parsed, so evaluate can
+  // assert the public field has not been changed since. Kept in release builds
+  // too, so the struct layout does not depend on NDEBUG.
+  mutable std::string resolved_operator_type;
   mutable bool world_resolved = false;
   mutable PropertyType cached_type = PropertyType::UNKNOWN;
   mutable std::string cached_activity_name;  // (also reused for facet name)
