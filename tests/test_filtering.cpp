@@ -1,0 +1,137 @@
+#define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
+#include <string>
+#include <vector>
+
+#include "core/config.h"
+#include "core/world_state.h"
+#include "doctest.h"
+#include "utils/filtering.h"
+
+using namespace june;
+
+namespace {
+
+// One nation over one fine unit, one person in it: enough for every path that
+// resolves against a world without needing venues or activities.
+static WorldState buildSinglePersonWorld() {
+  WorldState world;
+  world.geo_level_names = {"XLGU", "SGU"};
+
+  GeographicalUnit nation;
+  nation.id = 0;
+  nation.name = "Wales";
+  nation.level_id = 0;
+  nation.parent_id = -1;
+  world.geo_units.push_back(nation);
+
+  GeographicalUnit output_area;
+  output_area.id = 10;
+  output_area.name = "W00000001";
+  output_area.level_id = 1;
+  output_area.parent_id = 0;
+  world.geo_units.push_back(output_area);
+
+  Person& person = world.people.emplace_back();
+  person.id = 0;
+  person.age = 59.5f;
+  person.sex = Sex::FEMALE;
+  person.geo_unit_id = 10;
+
+  world.buildIndices();
+  return world;
+}
+
+static SelectionCriterion makeCriterion(const std::string& property_path,
+                                        const std::string& operator_type,
+                                        PropertyValue value) {
+  SelectionCriterion criterion;
+  criterion.property_path = property_path;
+  criterion.operator_type = operator_type;
+  criterion.value = std::move(value);
+  return criterion;
+}
+
+static bool evaluateResolved(SelectionCriterion criterion,
+                             const WorldState& world) {
+  criterion.resolveOrThrow(world, "test");
+  return criterion.evaluate(world.people.front(), &world);
+}
+
+}  // namespace
+
+TEST_CASE("numeric operators compare an int threshold against fractional age") {
+  WorldState world = buildSinglePersonWorld();
+  CHECK(evaluateResolved(makeCriterion("age", ">", 59), world));
+  CHECK_FALSE(evaluateResolved(makeCriterion("age", "<", 59), world));
+  CHECK(evaluateResolved(makeCriterion("age", ">=", 59), world));
+  CHECK_FALSE(evaluateResolved(makeCriterion("age", "<=", 59), world));
+  CHECK(evaluateResolved(makeCriterion("age", "<=", 60), world));
+  CHECK_FALSE(evaluateResolved(makeCriterion("age", "==", 59), world));
+  CHECK(evaluateResolved(makeCriterion("age", "!=", 59), world));
+}
+
+TEST_CASE("equality on sex goes through the interned code") {
+  WorldState world = buildSinglePersonWorld();
+  CHECK(evaluateResolved(makeCriterion("sex", "==", std::string("female")),
+                         world));
+  CHECK_FALSE(evaluateResolved(makeCriterion("sex", "==", std::string("M")),
+                               world));
+  CHECK(evaluateResolved(makeCriterion("sex", "!=", std::string("male")),
+                         world));
+}
+
+TEST_CASE("in matches a geographical unit id list") {
+  WorldState world = buildSinglePersonWorld();
+  CHECK(evaluateResolved(
+      makeCriterion("geo_unit_id", "in", std::vector<int32_t>{3, 10}), world));
+  CHECK_FALSE(evaluateResolved(
+      makeCriterion("geo_unit_id", "in", std::vector<int32_t>{3, 11}), world));
+}
+
+TEST_CASE("contains matches a substring of a string value") {
+  WorldState world = buildSinglePersonWorld();
+  CHECK(evaluateResolved(makeCriterion("sex", "contains", std::string("fem")),
+                         world));
+  CHECK_FALSE(evaluateResolved(
+      makeCriterion("sex", "contains", std::string("xyz")), world));
+}
+
+TEST_CASE("boolean predicates support == and != only") {
+  WorldState world = buildSinglePersonWorld();
+  CHECK(evaluateResolved(makeCriterion("is_alive", "==", true), world));
+  CHECK(evaluateResolved(makeCriterion("is_alive", "!=", false), world));
+
+  SelectionCriterion greater = makeCriterion("is_alive", ">", true);
+  greater.resolve(world);
+  CHECK_FALSE(greater.evaluate(world.people.front(), &world));
+}
+
+TEST_CASE("an unsupported operator matches nobody and is refused at load") {
+  WorldState world = buildSinglePersonWorld();
+  SelectionCriterion unsupported = makeCriterion("age", "=~", 59);
+  unsupported.resolve(world);
+  CHECK_FALSE(unsupported.evaluate(world.people.front(), &world));
+  CHECK_THROWS_WITH(unsupported.resolveOrThrow(world, "test"),
+                    doctest::Contains("operator '=~' is not supported"));
+}
+
+TEST_CASE("ancestor geography honours == != and in") {
+  WorldState world = buildSinglePersonWorld();
+  CHECK(evaluateResolved(
+      makeCriterion("geo_unit.XLGU", "==", std::string("Wales")), world));
+  CHECK_FALSE(evaluateResolved(
+      makeCriterion("geo_unit.XLGU", "!=", std::string("Wales")), world));
+  CHECK(evaluateResolved(makeCriterion("geo_unit.XLGU", "in",
+                                       std::vector<std::string>{"Wales"}),
+                         world));
+}
+
+TEST_CASE("a != expression parsed from text excludes the named value") {
+  WorldState world = buildSinglePersonWorld();
+  std::vector<SelectionCriterion> criteria =
+      filtering::parseConjunctiveExpression("age>=18 AND sex!=female");
+  for (SelectionCriterion& criterion : criteria)
+    criterion.resolveOrThrow(world, "test");
+  CHECK_FALSE(
+      filtering::matchesCriteria(world.people.front(), &world, criteria));
+}
