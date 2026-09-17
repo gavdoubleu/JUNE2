@@ -75,10 +75,10 @@ TEST_CASE("equality on sex goes through the interned code") {
   WorldState world = buildSinglePersonWorld();
   CHECK(evaluateResolved(makeCriterion("sex", "==", std::string("female")),
                          world));
-  CHECK_FALSE(evaluateResolved(makeCriterion("sex", "==", std::string("M")),
-                               world));
-  CHECK(evaluateResolved(makeCriterion("sex", "!=", std::string("male")),
-                         world));
+  CHECK_FALSE(
+      evaluateResolved(makeCriterion("sex", "==", std::string("M")), world));
+  CHECK(
+      evaluateResolved(makeCriterion("sex", "!=", std::string("male")), world));
 }
 
 TEST_CASE("in matches a geographical unit id list") {
@@ -122,9 +122,9 @@ TEST_CASE("ancestor geography honours == != and in") {
       makeCriterion("geo_unit.XLGU", "==", std::string("Wales")), world));
   CHECK_FALSE(evaluateResolved(
       makeCriterion("geo_unit.XLGU", "!=", std::string("Wales")), world));
-  CHECK(evaluateResolved(makeCriterion("geo_unit.XLGU", "in",
-                                       std::vector<std::string>{"Wales"}),
-                         world));
+  CHECK(evaluateResolved(
+      makeCriterion("geo_unit.XLGU", "in", std::vector<std::string>{"Wales"}),
+      world));
 }
 
 TEST_CASE("a != expression parsed from text excludes the named value") {
@@ -177,4 +177,47 @@ TEST_CASE("outcome rates keyed on infection context resolve and pick rows") {
         doctest::Approx(0.4));
   CHECK(rates.getRate(adult, &world, "death",
                       InfectionContext{"bubonic", "respiratory"}) == 0.0);
+}
+
+TEST_CASE("an empty infection context fails both == and !=") {
+  WorldState world = buildSinglePersonWorld();
+  const Person& person = world.people.front();
+  const InfectionContext seeded{};
+  const InfectionContext bitten{"bubonic", "animal_bite"};
+
+  std::vector<SelectionCriterion> not_respiratory = {
+      makeCriterion("transmission_mode", "!=", std::string("respiratory"))};
+  std::vector<SelectionCriterion> is_bubonic = {
+      makeCriterion("infector_symptom", "==", std::string("bubonic"))};
+  for (SelectionCriterion& criterion : not_respiratory)
+    criterion.resolveOrThrow(world, "test");
+  for (SelectionCriterion& criterion : is_bubonic)
+    criterion.resolveOrThrow(world, "test");
+
+  CHECK_FALSE(
+      filtering::matchesCriteria(person, &world, not_respiratory, seeded));
+  CHECK_FALSE(filtering::matchesCriteria(person, &world, is_bubonic, seeded));
+  CHECK(filtering::matchesCriteria(person, &world, not_respiratory, bitten));
+  CHECK(filtering::matchesCriteria(person, &world, is_bubonic, bitten));
+}
+
+TEST_CASE("unresolved criteria evaluate without a world") {
+  WorldState world = buildSinglePersonWorld();
+  const Person& person = world.people.front();
+  const std::vector<SelectionCriterion> criteria = {
+      makeCriterion("age", ">=", 18),
+      makeCriterion("transmission_mode", "==", std::string("respiratory"))};
+
+  CHECK(filtering::matchesCriteria(person, nullptr, criteria,
+                                   InfectionContext{"", "respiratory"}));
+  CHECK_FALSE(filtering::matchesCriteria(person, nullptr, criteria,
+                                         InfectionContext{"", "animal_bite"}));
+}
+
+TEST_CASE("a world-dependent criterion without a world matches nobody") {
+  WorldState world = buildSinglePersonWorld();
+  const std::vector<SelectionCriterion> criteria = {
+      makeCriterion("properties.occupation", "==", std::string("farmer"))};
+  CHECK_FALSE(
+      filtering::matchesCriteria(world.people.front(), nullptr, criteria));
 }

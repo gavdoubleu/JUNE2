@@ -19,7 +19,8 @@ namespace june {
 struct Person;
 struct WorldState;
 
-/// Context passed to SelectionCriterion::evaluate (via matchesCriteria) for infection-specific filter columns.
+/// Context passed to SelectionCriterion::evaluate (via matchesCriteria) for
+/// infection-specific filter columns.
 ///
 /// Carries per-infection metadata that cannot be derived from the Person struct
 /// alone, specifically information about the transmission event that created
@@ -124,6 +125,11 @@ struct SelectionCriterion {
   // Position of `id` in geo_ancestor_mask, or geo_ancestor_mask.size() when the
   // mask has no entry for it.
   size_t geoMaskSlot(GeoUnitId id) const;
+  // Classify property_path into cached_type and its name parts. Needs no
+  // world, so evaluate can use it when handed none.
+  void resolveSyntax() const;
+  mutable bool syntax_resolved = false;
+  mutable bool world_resolved = false;
   mutable PropertyType cached_type = PropertyType::UNKNOWN;
   mutable std::string cached_activity_name;  // (also reused for facet name)
   mutable std::string cached_sub_property;   // (also reused for facet field)
@@ -288,8 +294,7 @@ struct ScheduleType {
 
   void resolve(const WorldState& world) {
     for (auto& criterion : selection_criteria) {
-      criterion.resolveOrThrow(world,
-                               "schedule type '" + name + "' selection");
+      criterion.resolveOrThrow(world, "schedule type '" + name + "' selection");
     }
     // force_hybrid_mask is resolved in ScheduleConfig::resolveSlots (defined
     // in config.cpp where WorldState is complete).

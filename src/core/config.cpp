@@ -43,62 +43,69 @@ bool SelectionCriterion::comparesAgainstUnitNames(
   return property_path.compare(0, 9, "geo_unit.") == 0;
 }
 
-void SelectionCriterion::resolve(const WorldState& world) {
-  // 1. First ensure type is cached
-  if (cached_type == PropertyType::UNKNOWN) {
-    if (property_path == "age")
-      cached_type = PropertyType::AGE;
-    else if (property_path == "sex")
-      cached_type = PropertyType::SEX;
-    else if (property_path == "geo_unit_id")
-      cached_type = PropertyType::GEO_ID;
-    else if (property_path == "id")
-      cached_type = PropertyType::PERSON_ID;
-    else if (property_path.compare(0, 11, "activities.") == 0) {
-      size_t dot1 = property_path.find('.');
-      size_t dot2 = property_path.find('.', dot1 + 1);
-      if (dot2 != std::string::npos) {
-        cached_activity_name = property_path.substr(dot1 + 1, dot2 - dot1 - 1);
-        cached_sub_property = property_path.substr(dot2 + 1);
-        if (cached_sub_property == "length")
-          cached_type = PropertyType::ACTIVITY_LENGTH;
-        else if (cached_sub_property == "venue_type")
-          cached_type = PropertyType::ACTIVITY_VENUE_TYPE;
-      }
-    } else if (property_path.compare(0, 11, "properties.") == 0) {
-      cached_type = PropertyType::CUSTOM_PROPERTY;
-      cached_sub_property = property_path.substr(11);
-      cached_prop_idx = world.getPersonPropertyIndex(cached_sub_property);
-    } else if (property_path.compare(0, 9, "networks.") == 0) {
-      size_t dot1 = property_path.find('.');
-      size_t dot2 = property_path.find('.', dot1 + 1);
-      if (dot2 != std::string::npos) {
-        cached_activity_name = property_path.substr(
-            dot1 + 1, dot2 - dot1 - 1);  // Use for network name
-        cached_sub_property = property_path.substr(dot2 + 1);
-        if (cached_sub_property == "length")
-          cached_type = PropertyType::NETWORK_SIZE;
-      }
-    } else if (comparesAgainstUnitNames(property_path)) {
-      // Distinct from the exact-match "geo_unit_id" above: that is the
-      // person's own flat unit id, this is their ancestor at a named level.
-      cached_type = PropertyType::GEO_ANCESTOR;
-      cached_sub_property = property_path.substr(9);
-    } else if (property_path == "is_alive") {
-      cached_type = PropertyType::IS_ALIVE;
-    } else if (property_path == "infector_symptom") {
-      cached_type = PropertyType::INFECTOR_SYMPTOM;
-    } else if (property_path == "transmission_mode") {
-      cached_type = PropertyType::TRANSMISSION_MODE;
-    } else if (property_path.compare(0, 19, "partner_in_network(") == 0) {
-      size_t open_paren = property_path.find('(');
-      size_t close_paren = property_path.find(')', open_paren);
-      if (open_paren != std::string::npos && close_paren != std::string::npos) {
-        cached_activity_name =
-            property_path.substr(open_paren + 1, close_paren - open_paren - 1);
-        cached_type = PropertyType::PARTNER_IN_NETWORK;
-      }
+void SelectionCriterion::resolveSyntax() const {
+  if (syntax_resolved) return;
+  syntax_resolved = true;
+  if (property_path == "age")
+    cached_type = PropertyType::AGE;
+  else if (property_path == "sex")
+    cached_type = PropertyType::SEX;
+  else if (property_path == "geo_unit_id")
+    cached_type = PropertyType::GEO_ID;
+  else if (property_path == "id")
+    cached_type = PropertyType::PERSON_ID;
+  else if (property_path.compare(0, 11, "activities.") == 0) {
+    size_t dot1 = property_path.find('.');
+    size_t dot2 = property_path.find('.', dot1 + 1);
+    if (dot2 != std::string::npos) {
+      cached_activity_name = property_path.substr(dot1 + 1, dot2 - dot1 - 1);
+      cached_sub_property = property_path.substr(dot2 + 1);
+      if (cached_sub_property == "length")
+        cached_type = PropertyType::ACTIVITY_LENGTH;
+      else if (cached_sub_property == "venue_type")
+        cached_type = PropertyType::ACTIVITY_VENUE_TYPE;
     }
+  } else if (property_path.compare(0, 11, "properties.") == 0) {
+    cached_type = PropertyType::CUSTOM_PROPERTY;
+    cached_sub_property = property_path.substr(11);
+  } else if (property_path.compare(0, 9, "networks.") == 0) {
+    size_t dot1 = property_path.find('.');
+    size_t dot2 = property_path.find('.', dot1 + 1);
+    if (dot2 != std::string::npos) {
+      cached_activity_name = property_path.substr(
+          dot1 + 1, dot2 - dot1 - 1);  // Use for network name
+      cached_sub_property = property_path.substr(dot2 + 1);
+      if (cached_sub_property == "length")
+        cached_type = PropertyType::NETWORK_SIZE;
+    }
+  } else if (comparesAgainstUnitNames(property_path)) {
+    // Distinct from the exact-match "geo_unit_id" above: that is the
+    // person's own flat unit id, this is their ancestor at a named level.
+    cached_type = PropertyType::GEO_ANCESTOR;
+    cached_sub_property = property_path.substr(9);
+  } else if (property_path == "is_alive") {
+    cached_type = PropertyType::IS_ALIVE;
+  } else if (property_path == "infector_symptom") {
+    cached_type = PropertyType::INFECTOR_SYMPTOM;
+  } else if (property_path == "transmission_mode") {
+    cached_type = PropertyType::TRANSMISSION_MODE;
+  } else if (property_path.compare(0, 19, "partner_in_network(") == 0) {
+    size_t open_paren = property_path.find('(');
+    size_t close_paren = property_path.find(')', open_paren);
+    if (open_paren != std::string::npos && close_paren != std::string::npos) {
+      cached_activity_name =
+          property_path.substr(open_paren + 1, close_paren - open_paren - 1);
+      cached_type = PropertyType::PARTNER_IN_NETWORK;
+    }
+  }
+}
+
+void SelectionCriterion::resolve(const WorldState& world) {
+  // 1. Property type from the path alone, then what needs the world.
+  resolveSyntax();
+  world_resolved = true;
+  if (cached_type == PropertyType::CUSTOM_PROPERTY) {
+    cached_prop_idx = world.getPersonPropertyIndex(cached_sub_property);
   }
 
   // 2. Resolve target_code for equality comparisons
@@ -281,11 +288,15 @@ size_t SelectionCriterion::geoMaskSlot(GeoUnitId id) const {
 bool SelectionCriterion::evaluate(
     const Person& person, const WorldState* world, const Person* partner,
     const InfectionContext* infection_context) const {
-  // 1. Resolve property type and path if not cached
-  if (cached_type == PropertyType::UNKNOWN) {
-    const_cast<SelectionCriterion*>(this)->resolve(*world);
-    if (cached_type == PropertyType::UNKNOWN) return false;
+  // 1. Resolve lazily if the caller did not. Without a world only the path is
+  // classified; world-dependent types then match nobody below.
+  if (!world_resolved) {
+    if (world)
+      const_cast<SelectionCriterion*>(this)->resolve(*world);
+    else
+      resolveSyntax();
   }
+  if (cached_type == PropertyType::UNKNOWN) return false;
 
   // Infection context: a criterion here names a required symptom or mode, so
   // an absent one (no context, or a seeded infection) matches nobody.
