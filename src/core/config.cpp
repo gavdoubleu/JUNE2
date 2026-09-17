@@ -1051,6 +1051,18 @@ void SelectionCriterion::resolveOrThrow(const WorldState& world,
                              "' supports only == != in, not '" + operator_type +
                              "'");
   }
+  if (cached_type == PropertyType::INFECTOR_SYMPTOM ||
+      cached_type == PropertyType::TRANSMISSION_MODE) {
+    if (operator_type != "==" && operator_type != "!=") {
+      throw std::runtime_error(context + ": '" + property_path +
+                               "' supports only == !=, not '" + operator_type +
+                               "'");
+    }
+    if (!std::holds_alternative<std::string>(value)) {
+      throw std::runtime_error(context + ": '" + property_path +
+                               "' compares against a name, not a number");
+    }
+  }
   if (cached_type == PropertyType::CUSTOM_PROPERTY && cached_prop_idx < 0) {
     throw std::runtime_error(context + ": person property '" +
                              cached_sub_property +

@@ -221,3 +221,19 @@ TEST_CASE("a world-dependent criterion without a world matches nobody") {
   CHECK_FALSE(
       filtering::matchesCriteria(world.people.front(), nullptr, criteria));
 }
+
+TEST_CASE("infection context criteria refuse other operators and non-strings") {
+  WorldState world = buildSinglePersonWorld();
+  SelectionCriterion ordered =
+      makeCriterion("infector_symptom", ">", std::string("bubonic"));
+  CHECK_THROWS_WITH(ordered.resolveOrThrow(world, "test"),
+                    doctest::Contains("supports only == !="));
+
+  SelectionCriterion numeric = makeCriterion("transmission_mode", "==", 3);
+  CHECK_THROWS_WITH(numeric.resolveOrThrow(world, "test"),
+                    doctest::Contains("compares against a name"));
+
+  SelectionCriterion valid =
+      makeCriterion("transmission_mode", "!=", std::string("respiratory"));
+  CHECK_NOTHROW(valid.resolveOrThrow(world, "test"));
+}
