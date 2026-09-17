@@ -1,7 +1,7 @@
 #include "core/config.h"
 
 #include <algorithm>
-#include <array>
+#include <cassert>
 #include <cmath>
 #include <iostream>
 #include <random>
@@ -43,62 +43,89 @@ bool SelectionCriterion::comparesAgainstUnitNames(
   return property_path.compare(0, 9, "geo_unit.") == 0;
 }
 
-void SelectionCriterion::resolve(const WorldState& world) {
-  // 1. First ensure type is cached
-  if (cached_type == PropertyType::UNKNOWN) {
-    if (property_path == "age")
-      cached_type = PropertyType::AGE;
-    else if (property_path == "sex")
-      cached_type = PropertyType::SEX;
-    else if (property_path == "geo_unit_id")
-      cached_type = PropertyType::GEO_ID;
-    else if (property_path == "id")
-      cached_type = PropertyType::PERSON_ID;
-    else if (property_path.compare(0, 11, "activities.") == 0) {
-      size_t dot1 = property_path.find('.');
-      size_t dot2 = property_path.find('.', dot1 + 1);
-      if (dot2 != std::string::npos) {
-        cached_activity_name = property_path.substr(dot1 + 1, dot2 - dot1 - 1);
-        cached_sub_property = property_path.substr(dot2 + 1);
-        if (cached_sub_property == "length")
-          cached_type = PropertyType::ACTIVITY_LENGTH;
-        else if (cached_sub_property == "venue_type")
-          cached_type = PropertyType::ACTIVITY_VENUE_TYPE;
-      }
-    } else if (property_path.compare(0, 11, "properties.") == 0) {
-      cached_type = PropertyType::CUSTOM_PROPERTY;
-      cached_sub_property = property_path.substr(11);
-      cached_prop_idx = world.getPersonPropertyIndex(cached_sub_property);
-    } else if (property_path.compare(0, 9, "networks.") == 0) {
-      size_t dot1 = property_path.find('.');
-      size_t dot2 = property_path.find('.', dot1 + 1);
-      if (dot2 != std::string::npos) {
-        cached_activity_name = property_path.substr(
-            dot1 + 1, dot2 - dot1 - 1);  // Use for network name
-        cached_sub_property = property_path.substr(dot2 + 1);
-        if (cached_sub_property == "length")
-          cached_type = PropertyType::NETWORK_SIZE;
-      }
-    } else if (comparesAgainstUnitNames(property_path)) {
-      // Distinct from the exact-match "geo_unit_id" above: that is the
-      // person's own flat unit id, this is their ancestor at a named level.
-      cached_type = PropertyType::GEO_ANCESTOR;
-      cached_sub_property = property_path.substr(9);
-    } else if (property_path == "is_alive") {
-      cached_type = PropertyType::IS_ALIVE;
-    } else if (property_path.compare(0, 19, "partner_in_network(") == 0) {
-      size_t open_paren = property_path.find('(');
-      size_t close_paren = property_path.find(')', open_paren);
-      if (open_paren != std::string::npos && close_paren != std::string::npos) {
-        cached_activity_name =
-            property_path.substr(open_paren + 1, close_paren - open_paren - 1);
-        cached_type = PropertyType::PARTNER_IN_NETWORK;
-      }
+SelectionCriterion::Operator SelectionCriterion::parseOperator(
+    const std::string& operator_type) {
+  if (operator_type == "==") return Operator::EQUAL;
+  if (operator_type == "!=") return Operator::NOT_EQUAL;
+  if (operator_type == ">") return Operator::GREATER;
+  if (operator_type == "<") return Operator::LESS;
+  if (operator_type == ">=") return Operator::GREATER_EQUAL;
+  if (operator_type == "<=") return Operator::LESS_EQUAL;
+  if (operator_type == "in") return Operator::IN;
+  if (operator_type == "contains") return Operator::CONTAINS;
+  return Operator::UNSUPPORTED;
+}
+
+void SelectionCriterion::resolveSyntax() const {
+  if (syntax_resolved) return;
+  syntax_resolved = true;
+  cached_operator = parseOperator(operator_type);
+  resolved_operator_type = operator_type;
+  if (property_path == "age")
+    cached_type = PropertyType::AGE;
+  else if (property_path == "sex")
+    cached_type = PropertyType::SEX;
+  else if (property_path == "geo_unit_id")
+    cached_type = PropertyType::GEO_ID;
+  else if (property_path == "id")
+    cached_type = PropertyType::PERSON_ID;
+  else if (property_path.compare(0, 11, "activities.") == 0) {
+    size_t dot1 = property_path.find('.');
+    size_t dot2 = property_path.find('.', dot1 + 1);
+    if (dot2 != std::string::npos) {
+      cached_activity_name = property_path.substr(dot1 + 1, dot2 - dot1 - 1);
+      cached_sub_property = property_path.substr(dot2 + 1);
+      if (cached_sub_property == "length")
+        cached_type = PropertyType::ACTIVITY_LENGTH;
+      else if (cached_sub_property == "venue_type")
+        cached_type = PropertyType::ACTIVITY_VENUE_TYPE;
     }
+  } else if (property_path.compare(0, 11, "properties.") == 0) {
+    cached_type = PropertyType::CUSTOM_PROPERTY;
+    cached_sub_property = property_path.substr(11);
+  } else if (property_path.compare(0, 9, "networks.") == 0) {
+    size_t dot1 = property_path.find('.');
+    size_t dot2 = property_path.find('.', dot1 + 1);
+    if (dot2 != std::string::npos) {
+      cached_activity_name = property_path.substr(
+          dot1 + 1, dot2 - dot1 - 1);  // Use for network name
+      cached_sub_property = property_path.substr(dot2 + 1);
+      if (cached_sub_property == "length")
+        cached_type = PropertyType::NETWORK_SIZE;
+    }
+  } else if (comparesAgainstUnitNames(property_path)) {
+    // Distinct from the exact-match "geo_unit_id" above: that is the
+    // person's own flat unit id, this is their ancestor at a named level.
+    cached_type = PropertyType::GEO_ANCESTOR;
+    cached_sub_property = property_path.substr(9);
+  } else if (property_path == "is_alive") {
+    cached_type = PropertyType::IS_ALIVE;
+  } else if (property_path == "infector_symptom") {
+    cached_type = PropertyType::INFECTOR_SYMPTOM;
+  } else if (property_path == "transmission_mode") {
+    cached_type = PropertyType::TRANSMISSION_MODE;
+  } else if (property_path.compare(0, 19, "partner_in_network(") == 0) {
+    size_t open_paren = property_path.find('(');
+    size_t close_paren = property_path.find(')', open_paren);
+    if (open_paren != std::string::npos && close_paren != std::string::npos) {
+      cached_activity_name =
+          property_path.substr(open_paren + 1, close_paren - open_paren - 1);
+      cached_type = PropertyType::PARTNER_IN_NETWORK;
+    }
+  }
+}
+
+void SelectionCriterion::resolve(const WorldState& world) {
+  // 1. Property type from the path alone, then what needs the world.
+  resolveSyntax();
+  world_resolved = true;
+  if (cached_type == PropertyType::CUSTOM_PROPERTY) {
+    cached_prop_idx = world.getPersonPropertyIndex(cached_sub_property);
   }
 
   // 2. Resolve target_code for equality comparisons
-  if (operator_type == "==" || operator_type == "!=") {
+  if (cached_operator == Operator::EQUAL ||
+      cached_operator == Operator::NOT_EQUAL) {
     if (std::holds_alternative<std::string>(value)) {
       const std::string& target_val = std::get<std::string>(value);
 
@@ -274,12 +301,36 @@ size_t SelectionCriterion::geoMaskSlot(GeoUnitId id) const {
   return static_cast<size_t>(std::distance(geo_mask_unit_ids.begin(), it));
 }
 
-bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
-                                  const Person* partner) const {
-  // 1. Resolve property type and path if not cached
-  if (cached_type == PropertyType::UNKNOWN) {
-    const_cast<SelectionCriterion*>(this)->resolve(*world);
-    if (cached_type == PropertyType::UNKNOWN) return false;
+bool SelectionCriterion::evaluate(
+    const Person& person, const WorldState* world, const Person* partner,
+    const InfectionContext* infection_context) const {
+  // 1. Resolve lazily if the caller did not. Without a world only the path is
+  // classified; world-dependent types then match nobody below.
+  if (!world_resolved) {
+    if (world)
+      const_cast<SelectionCriterion*>(this)->resolve(*world);
+    else
+      resolveSyntax();
+  }
+  // The resolved operator is cached: operator_type must not change after use.
+  assert(operator_type == resolved_operator_type);
+  if (cached_type == PropertyType::UNKNOWN) return false;
+
+  // Infection context: a criterion here names a required symptom or mode, so
+  // an absent one (no context, or a seeded infection) matches nobody.
+  if (cached_type == PropertyType::INFECTOR_SYMPTOM ||
+      cached_type == PropertyType::TRANSMISSION_MODE) {
+    if (!infection_context) return false;
+    const std::string& actual = cached_type == PropertyType::INFECTOR_SYMPTOM
+                                    ? infection_context->infector_symptom
+                                    : infection_context->transmission_mode;
+    if (actual.empty()) return false;
+    const std::string* required = std::get_if<std::string>(&value);
+    if (!required) return false;
+    const bool equal = actual == *required;
+    if (cached_operator == Operator::EQUAL) return equal;
+    if (cached_operator == Operator::NOT_EQUAL) return !equal;
+    return true;
   }
 
   // Boolean predicates: bypass the target-code / fallback machinery entirely.
@@ -287,8 +338,8 @@ bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
   auto eval_bool = [this](bool actual) -> bool {
     if (!std::holds_alternative<bool>(value)) return false;
     bool target = std::get<bool>(value);
-    if (operator_type == "==") return actual == target;
-    if (operator_type == "!=") return actual != target;
+    if (cached_operator == Operator::EQUAL) return actual == target;
+    if (cached_operator == Operator::NOT_EQUAL) return actual != target;
     return false;
   };
   if (cached_type == PropertyType::IS_ALIVE) {
@@ -303,8 +354,9 @@ bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
     // Absent is an answer, not a missing one: no ancestor at this level fails
     // in both directions, as a Slot Venue Type does (see docs/CONTEXT.md).
     if (state == 2) return false;
-    if (operator_type == "==" || operator_type == "in") return state == 1;
-    if (operator_type == "!=") return state == 0;
+    if (cached_operator == Operator::EQUAL || cached_operator == Operator::IN)
+      return state == 1;
+    if (cached_operator == Operator::NOT_EQUAL) return state == 0;
     return false;
   }
 
@@ -328,20 +380,21 @@ bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
         if (av.first >= 0 && av.first < (int)world->venues.size()) {
           const auto& v = world->venues[av.first];
           int32_t v_type_code = static_cast<int32_t>(v.type_id);
-          if (operator_type == "==") {
+          if (cached_operator == Operator::EQUAL) {
             if (v_type_code == target_code) return true;
-          } else if (operator_type == "!=") {
+          } else if (cached_operator == Operator::NOT_EQUAL) {
             if (v_type_code != target_code) return true;
           }
         }
       }
-      return (operator_type ==
-              "!=");  // True if none matched and looking for !=
+      // True if none matched and looking for !=
+      return cached_operator == Operator::NOT_EQUAL;
     }
 
     if (p_val_code != -1) {
-      if (operator_type == "==") return p_val_code == target_code;
-      if (operator_type == "!=") return p_val_code != target_code;
+      if (cached_operator == Operator::EQUAL) return p_val_code == target_code;
+      if (cached_operator == Operator::NOT_EQUAL)
+        return p_val_code != target_code;
     }
   }
 
@@ -422,8 +475,8 @@ bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
 
   // 4. Perform comparison for each fetched value (multi-venue support)
   auto compare = [this](const PropertyValue& p_val) -> bool {
-    if (operator_type == "==") return p_val == value;
-    if (operator_type == "!=") return p_val != value;
+    if (cached_operator == Operator::EQUAL) return p_val == value;
+    if (cached_operator == Operator::NOT_EQUAL) return p_val != value;
 
     // Numeric helper: extract a double from PropertyValue if it holds an
     // int or double. Returns false in `out_set` if the value is non-numeric
@@ -443,21 +496,23 @@ bool SelectionCriterion::evaluate(const Person& person, const WorldState* world,
     };
 
     double lhs = 0.0, rhs = 0.0;
-    if (operator_type == ">" || operator_type == "<" || operator_type == ">=" ||
-        operator_type == "<=") {
+    if (cached_operator == Operator::GREATER ||
+        cached_operator == Operator::LESS ||
+        cached_operator == Operator::GREATER_EQUAL ||
+        cached_operator == Operator::LESS_EQUAL) {
       if (!as_number(p_val, lhs) || !as_number(value, rhs)) return false;
-      if (operator_type == ">") return lhs > rhs;
-      if (operator_type == "<") return lhs < rhs;
-      if (operator_type == ">=") return lhs >= rhs;
-      if (operator_type == "<=") return lhs <= rhs;
-    } else if (operator_type == "in") {
+      if (cached_operator == Operator::GREATER) return lhs > rhs;
+      if (cached_operator == Operator::LESS) return lhs < rhs;
+      if (cached_operator == Operator::GREATER_EQUAL) return lhs >= rhs;
+      if (cached_operator == Operator::LESS_EQUAL) return lhs <= rhs;
+    } else if (cached_operator == Operator::IN) {
       if (std::holds_alternative<std::vector<int32_t>>(value) &&
           std::holds_alternative<int>(p_val)) {
         const auto& list = std::get<std::vector<int32_t>>(value);
         int val = std::get<int>(p_val);
         return std::find(list.begin(), list.end(), val) != list.end();
       }
-    } else if (operator_type == "contains") {
+    } else if (cached_operator == Operator::CONTAINS) {
       if (std::holds_alternative<std::string>(p_val) &&
           std::holds_alternative<std::string>(value)) {
         return std::get<std::string>(p_val).find(
@@ -1007,16 +1062,31 @@ void SelectionCriterion::resolveOrThrow(const WorldState& world,
         "properties.<name>, activities.<name>.length, "
         "activities.<name>.venue_type, "
         "networks.<name>.length, partner_in_network(<n>), "
-        "geo_unit.<LEVEL>");
+        "geo_unit.<LEVEL>, infector_symptom, transmission_mode");
   }
   if (!geo_resolve_error.empty()) {
     throw std::runtime_error(context + ": " + geo_resolve_error);
   }
-  if (cached_type == PropertyType::GEO_ANCESTOR && operator_type != "==" &&
-      operator_type != "!=" && operator_type != "in") {
+  if (cached_type == PropertyType::GEO_ANCESTOR &&
+      cached_operator != Operator::EQUAL &&
+      cached_operator != Operator::NOT_EQUAL &&
+      cached_operator != Operator::IN) {
     throw std::runtime_error(context + ": '" + property_path +
                              "' supports only == != in, not '" + operator_type +
                              "'");
+  }
+  if (cached_type == PropertyType::INFECTOR_SYMPTOM ||
+      cached_type == PropertyType::TRANSMISSION_MODE) {
+    if (cached_operator != Operator::EQUAL &&
+        cached_operator != Operator::NOT_EQUAL) {
+      throw std::runtime_error(context + ": '" + property_path +
+                               "' supports only == !=, not '" + operator_type +
+                               "'");
+    }
+    if (!std::holds_alternative<std::string>(value)) {
+      throw std::runtime_error(context + ": '" + property_path +
+                               "' compares against a name, not a number");
+    }
   }
   if (cached_type == PropertyType::CUSTOM_PROPERTY && cached_prop_idx < 0) {
     throw std::runtime_error(context + ": person property '" +
@@ -1024,11 +1094,7 @@ void SelectionCriterion::resolveOrThrow(const WorldState& world,
                              "' is not carried by this world");
   }
 
-  static const std::array<const char*, 8> kOperators = {
-      ">", "<", ">=", "<=", "==", "!=", "in", "contains"};
-  if (std::find_if(kOperators.begin(), kOperators.end(), [&](const char* op) {
-        return operator_type == op;
-      }) == kOperators.end()) {
+  if (cached_operator == Operator::UNSUPPORTED) {
     throw std::runtime_error(context + ": operator '" + operator_type +
                              "' is not supported (use one of > < >= <= == != "
                              "in contains)");
