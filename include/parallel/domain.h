@@ -55,9 +55,8 @@ class Domain {
     float immunity_level;
     uint8_t encounter_type_id;  // Coordinated encounter type (ID in registry)
 
-    // Stage-driven infectiousness fields
-    uint16_t symptom_id = 0;     // Current symptom ID at packing time
-    double time_in_stage = 0.0;  // Time in current stage at packing time
+    // Current symptom ID at packing time (infector attribution)
+    uint16_t symptom_id = 0;
 
     // Pre-computed integrated infectiousness per mode (computed on sending
     // rank using the same code path as locals, ensuring bit-identical FP).
@@ -65,6 +64,11 @@ class Domain {
     // (DomainCommunicator::buildOutgoing). Wire format reads/writes the
     // active count's worth of doubles. See packVisitor/unpackVisitor.
     std::vector<double> integrated_infectiousness;
+
+    // Fomite deposit per (fomite mode, sub-bin), flat in
+    // FomiteSubBinSchedule order, computed on the sending rank by the same
+    // integration as locals. Always FomiteSubBinSchedule::totalSubBins() long.
+    std::vector<double> fomite_deposition_sub;
 
     // Return data: infection status changes
     bool newly_infected;

@@ -450,7 +450,7 @@ bool InteractionManager::venueGroupHasTransmissionSource(
     }
     if (visitor_data) {
       auto vit = visitor_data->find(m.id);
-      if (vit != visitor_data->end() && vit->second.is_infectious) {
+      if (vit != visitor_data->end() && vit->second.is_infected) {
         return true;
       }
     }

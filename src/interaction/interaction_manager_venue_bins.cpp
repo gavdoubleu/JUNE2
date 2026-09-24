@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <numeric>
+#include <stdexcept>
+#include <string>
 
 #include "epidemiology/interaction_manager.h"
 #include "simulation/compartmental_model_manager.h"
@@ -212,9 +214,8 @@ void InteractionManager::binMemberClassification(
           {pid, susceptibility, visitor, member.encounter_type_id});
     }
     if (visitor->is_infected && num_fomite_modes > 0) {
-      accumulateVisitorFomiteDeposition(
-          visitor, bin_index, num_fomite_modes, fomite_schedule.modes(),
-          fomite_schedule.subBinsPerMode(), delta_hours);
+      addFomiteDeposits(bin_index, fomite_schedule,
+                        visitor->fomite_deposition_sub);
     }
     return;
   }
@@ -232,8 +233,9 @@ void InteractionManager::binMemberClassification(
     }
   }
   if (person->infection && num_fomite_modes > 0) {
-    accumulateLocalFomiteDeposition(person, bin_index, fomite_schedule,
-                                    current_time);
+    fomite_schedule.integrateDeposits(person->infection.get(), current_time,
+                                      fomite_deposit_scratch_);
+    addFomiteDeposits(bin_index, fomite_schedule, fomite_deposit_scratch_);
   }
 }
 
@@ -332,30 +334,6 @@ void InteractionManager::accumulateVisitorInfectiousness(
   }
 }
 
-void InteractionManager::accumulateVisitorFomiteDeposition(
-    const VisitorInfo* visitor, int bin_index, int num_fomite_modes,
-    const std::vector<FomiteModeRef>& fomite_modes,
-    const std::vector<int>& n_sub_per_mode, double delta_hours) {
-  // Mirrors accumulateLocalFomiteDeposition: gated on "infected", not
-  // "infectious" — deposition_by_symptom curves are keyed by symptom_id and
-  // may legitimately be nonzero outside the infectious window (e.g. during
-  // incubation).
-  for (int local_fm = 0; local_fm < num_fomite_modes; ++local_fm) {
-    int n_sub = n_sub_per_mode[local_fm];
-    double dt_sub_stage = delta_hours / n_sub / 24.0;
-    for (int k = 0; k < n_sub; ++k) {
-      double t_stage_k_s = visitor->time_in_stage + k * dt_sub_stage;
-      double t_stage_k_e = visitor->time_in_stage + (k + 1) * dt_sub_stage;
-      double dep_k = disease_->integrateFomiteDeposition(
-          fomite_modes[local_fm].mode_index, visitor->symptom_id, t_stage_k_s,
-          t_stage_k_e);
-      if (dep_k > 0.0)
-        bins_buffer_[bin_index].total_fomite_deposition_sub[local_fm][k] +=
-            dep_k;
-    }
-  }
-}
-
 void InteractionManager::accumulateLocalInfectiousness(
     const Person* person, PersonId pid, int bin_index, int num_modes,
     double current_time, double delta_hours) {
@@ -379,16 +357,20 @@ void InteractionManager::accumulateLocalInfectiousness(
   }
 }
 
-void InteractionManager::accumulateLocalFomiteDeposition(
-    const Person* person, int bin_index,
-    const FomiteSubBinSchedule& fomite_schedule, double current_time) {
-  fomite_schedule.integrateDeposits(person->infection.get(), current_time,
-                                    fomite_deposit_scratch_);
+void InteractionManager::addFomiteDeposits(
+    int bin_index, const FomiteSubBinSchedule& fomite_schedule,
+    const std::vector<double>& deposits) {
+  if (static_cast<int>(deposits.size()) != fomite_schedule.totalSubBins()) {
+    throw std::runtime_error(
+        "addFomiteDeposits: " + std::to_string(deposits.size()) +
+        " deposits != " + std::to_string(fomite_schedule.totalSubBins()) +
+        " fomite sub-bins");
+  }
   const auto& n_sub_per_mode = fomite_schedule.subBinsPerMode();
   int offset = 0;
   for (int local_fm = 0; local_fm < fomite_schedule.numModes(); ++local_fm) {
     for (int k = 0; k < n_sub_per_mode[local_fm]; ++k) {
-      double dep_k = fomite_deposit_scratch_[offset + k];
+      double dep_k = deposits[offset + k];
       if (dep_k > 0.0)
         bins_buffer_[bin_index].total_fomite_deposition_sub[local_fm][k] +=
             dep_k;

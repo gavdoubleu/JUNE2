@@ -454,9 +454,10 @@ class InteractionManager {
 
   // Fast pre-check: true iff processVenueTransmissions could possibly produce
   // transmission for this venue group, considering fomite history,
-  // compartmental uptake, and the presence of any infectious member in
-  // group_members_buffer_. Used to skip venues with zero infectious source
-  // before paying the FOI cost.
+  // compartmental uptake, and the presence of any infected member in
+  // group_members_buffer_ (infected, not infectious: an incubating member may
+  // still deposit fomites). Used to skip venues with no source before paying
+  // the FOI cost.
   bool venueGroupHasTransmissionSource(
       const Venue* venue, VenueId venue_id,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data,
@@ -739,16 +740,6 @@ class InteractionManager {
                                        PersonId pid, int bin_index,
                                        int num_modes);
 
-  // Accumulate a cross-rank visitor's fomite deposition into
-  // bins_buffer_[bin_index].total_fomite_deposition_sub. Only called when
-  // visitor->is_infected and num_fomite_modes > 0 — mirrors
-  // accumulateLocalFomiteDeposition's gating so locals and visitors deposit
-  // fomites under the same condition.
-  void accumulateVisitorFomiteDeposition(
-      const VisitorInfo* visitor, int bin_index, int num_fomite_modes,
-      const std::vector<FomiteModeRef>& fomite_modes,
-      const std::vector<int>& n_sub_per_mode, double delta_hours);
-
   // Append a local infectious person's per-mode integrated infectiousness
   // into bins_buffer_[bin_index]. Caller has already confirmed
   // person->infection && person->infection->isInfectious(current_time). Uses
@@ -757,13 +748,14 @@ class InteractionManager {
                                      int bin_index, int num_modes,
                                      double current_time, double delta_hours);
 
-  // Accumulate a local infected person's fomite deposition into
-  // bins_buffer_[bin_index].total_fomite_deposition_sub. Only called when
-  // person->infection != nullptr and the schedule has fomite modes. Uses
-  // fomite_deposit_scratch_ as scratch.
-  void accumulateLocalFomiteDeposition(
-      const Person* person, int bin_index,
-      const FomiteSubBinSchedule& fomite_schedule, double current_time);
+  // Add one infected member's deposits, flat in fomite_schedule order (see
+  // FomiteSubBinSchedule::integrateDeposits), into
+  // bins_buffer_[bin_index].total_fomite_deposition_sub. Locals integrate
+  // theirs into fomite_deposit_scratch_; visitors arrive with theirs
+  // (VisitorInfo::fomite_deposition_sub).
+  void addFomiteDeposits(int bin_index,
+                         const FomiteSubBinSchedule& fomite_schedule,
+                         const std::vector<double>& deposits);
 
   // Resize bins_buffer_ to at least num_bins_needed entries, then ensure
   // every active bin has correctly-sized per-mode vectors and pre-sized

@@ -293,11 +293,6 @@ class Disease {
   double evaluateFomiteDeposition(int fomite_mode_index, uint16_t symptom_id,
                                   double time_in_stage) const;
 
-  /// Returns 24 * ∫_{t_start}^{t_end} dep_rate(τ) dτ (integral in hours).
-  double integrateFomiteDeposition(int fomite_mode_index, uint16_t symptom_id,
-                                   double t_in_stage_start,
-                                   double t_in_stage_end) const;
-
  private:
   std::string name_;
   std::vector<SymptomTag> symptom_tags_;

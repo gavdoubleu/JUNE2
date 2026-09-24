@@ -117,6 +117,25 @@ static PersonLocation makeRemoteLocation(int rank) {
 }
 
 // ---------------------------------------------------------------------------
+// Helper: the receiving rank's VisitorInfo for an incoming visitor, as
+// Simulator builds it, plus a home_array_index mapping back to the person
+// ---------------------------------------------------------------------------
+static VisitorInfo toVisitorInfo(const Domain::VisitorData& vis) {
+  VisitorInfo vi;
+  vi.person_id = vis.person_id;
+  vi.is_infected = vis.is_infected;
+  vi.is_infectious = vis.is_infectious;
+  vi.immunity_level = vis.immunity_level;
+  vi.home_array_index = vis.person_id;
+  vi.symptom_id = vis.symptom_id;
+  std::copy(std::begin(vis.integrated_infectiousness),
+            std::end(vis.integrated_infectiousness),
+            std::begin(vi.integrated_infectiousness));
+  vi.fomite_deposition_sub = vis.fomite_deposition_sub;
+  return vi;
+}
+
+// ---------------------------------------------------------------------------
 // H1: Stage-driven visitor infects local susceptible
 // ---------------------------------------------------------------------------
 TEST_CASE("H1: Stage-driven visitor infects local susceptible") {
@@ -163,18 +182,7 @@ TEST_CASE("H1: Stage-driven visitor infects local susceptible") {
 
     // Build visitor data map
     std::unordered_map<PersonId, VisitorInfo> visitor_data;
-    VisitorInfo vi;
-    vi.person_id = vis.person_id;
-    vi.is_infected = vis.is_infected;
-    vi.is_infectious = vis.is_infectious;
-    vi.immunity_level = vis.immunity_level;
-    vi.home_array_index = vis.person_id;  // maps back
-    vi.symptom_id = vis.symptom_id;
-    vi.time_in_stage = vis.time_in_stage;
-    std::copy(std::begin(vis.integrated_infectiousness),
-              std::end(vis.integrated_infectiousness),
-              std::begin(vi.integrated_infectiousness));
-    visitor_data[vis.person_id] = vi;
+    visitor_data[vis.person_id] = toVisitorInfo(vis);
 
     std::unordered_set<PersonId> visitor_ids = {vis.person_id};
 
@@ -241,18 +249,7 @@ TEST_CASE("H2: Trajectory-driven visitor infects local susceptible") {
     const auto& vis = domain.incoming_visitors[0];
 
     std::unordered_map<PersonId, VisitorInfo> visitor_data;
-    VisitorInfo vi;
-    vi.person_id = vis.person_id;
-    vi.is_infected = vis.is_infected;
-    vi.is_infectious = vis.is_infectious;
-    vi.immunity_level = vis.immunity_level;
-    vi.home_array_index = vis.person_id;
-    vi.symptom_id = vis.symptom_id;
-    vi.time_in_stage = vis.time_in_stage;
-    std::copy(std::begin(vis.integrated_infectiousness),
-              std::end(vis.integrated_infectiousness),
-              std::begin(vi.integrated_infectiousness));
-    visitor_data[vis.person_id] = vi;
+    visitor_data[vis.person_id] = toVisitorInfo(vis);
 
     std::unordered_set<PersonId> visitor_ids = {vis.person_id};
 
@@ -326,18 +323,7 @@ TEST_CASE("H3: Local infector infects visitor, pending routed back") {
     const auto& vis = domain.incoming_visitors[0];
 
     std::unordered_map<PersonId, VisitorInfo> visitor_data;
-    VisitorInfo vi;
-    vi.person_id = vis.person_id;
-    vi.is_infected = vis.is_infected;
-    vi.is_infectious = vis.is_infectious;
-    vi.immunity_level = vis.immunity_level;
-    vi.home_array_index = vis.person_id;
-    vi.symptom_id = vis.symptom_id;
-    vi.time_in_stage = vis.time_in_stage;
-    std::copy(std::begin(vis.integrated_infectiousness),
-              std::end(vis.integrated_infectiousness),
-              std::begin(vi.integrated_infectiousness));
-    visitor_data[vis.person_id] = vi;
+    visitor_data[vis.person_id] = toVisitorInfo(vis);
 
     std::unordered_set<PersonId> visitor_ids = {vis.person_id};
 
@@ -418,15 +404,11 @@ TEST_CASE("H4: Multi-mode stage-driven infectiousness across ranks") {
   if (f.rank == 1) {
     const auto& vis = f.dm->getDomain().incoming_visitors[0];
 
-    // Verify that the receiving rank can reconstruct per-mode infectiousness
-    // from symptom_id and time_in_stage
-    double resp_inf = disease.evaluateStageDrivenInfectiousness(
-        0, vis.symptom_id, vis.time_in_stage);
-    double bite_inf = disease.evaluateStageDrivenInfectiousness(
-        1, vis.symptom_id, vis.time_in_stage);
-
-    CHECK(resp_inf == doctest::Approx(2.0));
-    CHECK(bite_inf == doctest::Approx(0.8));
+    // Each mode's infectiousness arrives integrated over the 1 h slot:
+    // 24 * rate * (1 / 24) d = rate.
+    REQUIRE(vis.integrated_infectiousness.size() == 2);
+    CHECK(vis.integrated_infectiousness[0] == doctest::Approx(2.0));
+    CHECK(vis.integrated_infectiousness[1] == doctest::Approx(0.8));
   }
 }
 
@@ -550,18 +532,7 @@ TEST_CASE("H6: Immune visitor resists cross-rank infection") {
     CHECK(vis.immunity_level == doctest::Approx(1.0).epsilon(0.01));
 
     std::unordered_map<PersonId, VisitorInfo> visitor_data;
-    VisitorInfo vi;
-    vi.person_id = vis.person_id;
-    vi.is_infected = vis.is_infected;
-    vi.is_infectious = vis.is_infectious;
-    vi.immunity_level = vis.immunity_level;
-    vi.home_array_index = vis.person_id;
-    vi.symptom_id = vis.symptom_id;
-    vi.time_in_stage = vis.time_in_stage;
-    std::copy(std::begin(vis.integrated_infectiousness),
-              std::end(vis.integrated_infectiousness),
-              std::begin(vi.integrated_infectiousness));
-    visitor_data[vis.person_id] = vi;
+    visitor_data[vis.person_id] = toVisitorInfo(vis);
 
     std::unordered_set<PersonId> visitor_ids = {vis.person_id};
 

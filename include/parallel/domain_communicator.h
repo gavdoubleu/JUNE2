@@ -58,27 +58,36 @@ class DomainCommunicator {
       std::vector<CoordinatedEncounter>& finalized_for_this_rank);
 
  private:
+  // Lengths of a visitor record's two count-known-elsewhere tails. Derived
+  // from the Disease and timestep, so identical on every rank and fixed for
+  // one exchange.
+  struct VisitorTailCounts {
+    int num_modes;        // integrated_infectiousness
+    int fomite_sub_bins;  // fomite_deposition_sub
+  };
+
   void exchangeAllToAll(
       const std::vector<std::vector<Domain::VisitorData>>& outgoing,
-      const std::vector<int>& send_counts);
+      const std::vector<int>& send_counts, const VisitorTailCounts& tails);
   void exchangePointToPoint(
       const std::vector<std::vector<Domain::VisitorData>>& outgoing,
-      const std::vector<int>& send_counts);
+      const std::vector<int>& send_counts, const VisitorTailCounts& tails);
   void exchangePointToPointVerySparse(
       const std::vector<std::vector<Domain::VisitorData>>& outgoing,
-      const std::vector<int>& send_counts);
+      const std::vector<int>& send_counts, const VisitorTailCounts& tails);
 
   // Shared P2P logic for visitor exchange
   void performP2PVisitorExchange(
       const std::vector<std::vector<Domain::VisitorData>>& outgoing,
-      const std::vector<int>& send_counts, const std::vector<int>& recv_counts);
+      const std::vector<int>& send_counts, const std::vector<int>& recv_counts,
+      const VisitorTailCounts& tails);
 
   // Sparsity-driven dispatch: chooses among all-to-all, P2P, or very-sparse
   // P2P based on the cross-rank send-pair density (MPI_Allreduce), then
   // records the outgoing visitors locally.
   void dispatchVisitorExchange(
       const std::vector<std::vector<Domain::VisitorData>>& outgoing,
-      const std::vector<int>& send_counts);
+      const std::vector<int>& send_counts, const VisitorTailCounts& tails);
 
   // Join the local PendingInfections against incoming_visitors to find the
   // home rank that needs to be notified for each. Returns the per-rank

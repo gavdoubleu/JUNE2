@@ -152,7 +152,7 @@ TEST_CASE(
 
   if (f.rank == 0) {
     Person* p = f.world.getPerson(TwoRankFixture::PERSON_R0);
-    // Infected at time -5.0, so at time 0.0, time_in_stage = 5.0
+    // Infected at time -5.0, so at time 0.0 five days into "mild"
     p->infection = std::make_unique<Infection>(
         &disease, -5.0, p, 42u, &f.world, "household", 0, 1.0f, 0, "general");
   }
@@ -193,7 +193,6 @@ TEST_CASE(
     CHECK(v.person_id == 0);
     CHECK(v.is_infectious == true);
     CHECK(v.symptom_id == 1);
-    CHECK(v.time_in_stage == doctest::Approx(5.0));
     CHECK(v.integrated_infectiousness[0] == doctest::Approx(expected_ii));
   }
 }

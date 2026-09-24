@@ -68,11 +68,14 @@ struct VisitorInfo {
   float immunity_level;
   int32_t home_array_index = -1;  // For lookup on home rank
   uint16_t symptom_id = 0;
-  double time_in_stage = 0.0;
 
   // Pre-computed integrated infectiousness per mode (from sending rank)
   static constexpr int MAX_MODES = 8;
   double integrated_infectiousness[MAX_MODES] = {};
+
+  // Fomite deposit per (fomite mode, sub-bin), flat in FomiteSubBinSchedule
+  // order (from sending rank)
+  std::vector<double> fomite_deposition_sub;
 };
 
 // Special venue ID for infection seed events
