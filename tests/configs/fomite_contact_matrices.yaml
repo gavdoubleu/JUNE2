@@ -1,0 +1,335 @@
+# Test-only: generated from configs/config_2021/contact_matrices.yaml with a
+# zero-beta 'fomite' mode added to every venue type (bins copied from
+# respiratory). Fomite lambda reads venue fomite_history, not these matrices;
+# the entries exist only to satisfy the per-mode bins checks.
+default_contacts_matrix:
+  modes:
+    respiratory:
+      beta: 0.0375
+      bins: [all]
+      contacts:
+      - [20]
+    physical_contact:
+      beta: 0.0083333333
+      bins: [all]
+      contacts:
+      - [20]
+    fomite:
+      beta: 0.0
+      bins: [all]
+      contacts:
+      - [0.0]
+contact_matrices:
+  care_home:
+    modes:
+      respiratory:
+        beta: 0.0116666667
+        bins: &id001 [resident, worker]
+        contacts:
+        - [4.0, 0.0]
+        - [0.0, 14.25]
+      physical_contact:
+        beta: 0.0233333333
+        bins: *id001
+        contacts:
+        - [0.0, 15.0]
+        - [1.5, 0.75]
+      fomite:
+        beta: 0.0
+        bins: [resident, worker]
+        contacts:
+        - [0.0, 0.0]
+        - [0.0, 0.0]
+  office:
+    modes:
+      respiratory:
+        beta: 0.04312875
+        bins: &id002 [workers]
+        contacts: &id003
+        - [4.8]
+      physical_contact:
+        beta: 0.0064925
+        bins: *id002
+        contacts: *id003
+      fomite:
+        beta: 0.0
+        bins: [workers]
+        contacts:
+        - [0.0]
+  uni_groups_by_year:
+    modes:
+      respiratory:
+        beta: 0.09375
+        bins: &id004 [student]
+        contacts: &id005
+        - [2]
+      physical_contact:
+        beta: 0.0625
+        bins: *id004
+        contacts: *id005
+      fomite:
+        beta: 0.0
+        bins: [student]
+        contacts:
+        - [0.0]
+  student_dorms:
+    modes:
+      respiratory:
+        beta: 0.012
+        bins: &id006 [resident]
+        contacts: &id007
+        - [7.5]
+      physical_contact:
+        beta: 0.0093333333
+        bins: *id006
+        contacts: *id007
+      fomite:
+        beta: 0.0
+        bins: [resident]
+        contacts:
+        - [0.0]
+  boarding_school:
+    modes:
+      respiratory:
+        beta: 0.0094285714
+        bins: &id008 [resident]
+        contacts: &id009
+        - [10]
+      physical_contact:
+        beta: 0.0125714286
+        bins: *id008
+        contacts: *id009
+      fomite:
+        beta: 0.0
+        bins: [resident]
+        contacts:
+        - [0.0]
+  classroom:
+    modes:
+      respiratory:
+        beta: 0.0375
+        bins: &id010 [student, worker]
+        contacts:
+        - [8.5, 2.3]
+        - [23.0, 5.7]
+      physical_contact:
+        beta: 0.075
+        bins: *id010
+        contacts:
+        - [1.5, 0.2]
+        - [2.0, 0.3]
+      fomite:
+        beta: 0.0
+        bins: [student, worker]
+        contacts:
+        - [0.0, 0.0]
+        - [0.0, 0.0]
+  household:
+    modes:
+      respiratory:
+        beta: 0.0673333333
+        bins: &id011 [Kids, Young Adults, Adults, Old Adults]
+        contacts:
+        - [1.63482, 0.7872, 0.7872, 0.7872]
+        - [0.5568, 0.45296, 0.45296, 0.45296]
+        - [0.3891, 0.4455, 0.4455, 0.4455]
+        - [0.35264, 0.45296, 0.45296, 0.71775]
+      physical_contact:
+        beta: 0.1346666667
+        bins: *id011
+        contacts:
+        - [0.84218, 0.5248, 0.5248, 0.5248]
+        - [0.3712, 0.73904, 0.73904, 0.73904]
+        - [0.9079, 1.0395, 1.0395, 1.0395]
+        - [0.57536, 0.73904, 0.73904, 0.58725]
+      fomite:
+        beta: 0.0
+        bins: [Kids, Young Adults, Adults, Old Adults]
+        contacts:
+        - [0.0, 0.0, 0.0, 0.0]
+        - [0.0, 0.0, 0.0, 0.0]
+        - [0.0, 0.0, 0.0, 0.0]
+        - [0.0, 0.0, 0.0, 0.0]
+  pub:
+    modes:
+      respiratory:
+        beta: 0.1259602667
+        bins: &id012 [patron]
+        contacts: &id013
+        - [3]
+      physical_contact:
+        beta: 0.0343528
+        bins: *id012
+        contacts: *id013
+      fomite:
+        beta: 0.0
+        bins: [patron]
+        contacts:
+        - [0.0]
+  gym:
+    modes:
+      respiratory:
+        beta: 0.1259602667
+        bins: &id014 [patron]
+        contacts: &id015
+        - [3]
+      physical_contact:
+        beta: 0.0343528
+        bins: *id014
+        contacts: *id015
+      fomite:
+        beta: 0.0
+        bins: [patron]
+        contacts:
+        - [0.0]
+  grocery:
+    modes:
+      respiratory:
+        beta: 0.0121352
+        bins: &id016 [patron]
+        contacts: &id017
+        - [1.5]
+      physical_contact:
+        beta: 0.0033096
+        bins: *id016
+        contacts: *id017
+      fomite:
+        beta: 0.0
+        bins: [patron]
+        contacts:
+        - [0.0]
+  cinema:
+    modes:
+      respiratory:
+        beta: 0.04618856
+        bins: &id018 [patron]
+        contacts: &id019
+        - [3]
+      physical_contact:
+        beta: 0.01259688
+        bins: *id018
+        contacts: *id019
+      fomite:
+        beta: 0.0
+        bins: [patron]
+        contacts:
+        - [0.0]
+  hospital:
+    modes:
+      respiratory:
+        beta: 0.0146
+        bins: &id020 [workers, patients, icu_patients]
+        contacts:
+        - [4.75, 0.0, 0.0]
+        - [0.0, 0.0, 0.0]
+        - [0.0, 0.0, 0.0]
+      physical_contact:
+        beta: 0.0292
+        bins: *id020
+        contacts:
+        - [0.25, 10.0, 10.0]
+        - [1.0, 0.0, 0.0]
+        - [1.0, 0.0, 0.0]
+      fomite:
+        beta: 0.0
+        bins: [workers, patients, icu_patients]
+        contacts:
+        - [0.0, 0.0, 0.0]
+        - [0.0, 0.0, 0.0]
+        - [0.0, 0.0, 0.0]
+  company:
+    modes:
+      respiratory:
+        beta: 0.0139125
+        bins: &id021 [all]
+        contacts: &id022
+        - [20]
+      physical_contact:
+        beta: 0.0030916667
+        bins: *id021
+        contacts: *id022
+      fomite:
+        beta: 0.0
+        bins: [all]
+        contacts:
+        - [0.0]
+  school:
+    modes:
+      respiratory:
+        beta: 0.002625
+        bins: &id023 [all]
+        contacts: &id024
+        - [20]
+      physical_contact:
+        beta: 0.0005833333
+        bins: *id023
+        contacts: *id024
+      fomite:
+        beta: 0.0
+        bins: [all]
+        contacts:
+        - [0.0]
+  university:
+    modes:
+      respiratory:
+        beta: 0.011475
+        bins: &id025 [all]
+        contacts: &id026
+        - [20]
+      physical_contact:
+        beta: 0.00255
+        bins: *id025
+        contacts: *id026
+      fomite:
+        beta: 0.0
+        bins: [all]
+        contacts:
+        - [0.0]
+  train_line:
+    modes:
+      respiratory:
+        beta: 0.04
+        bins: &id027 [rider]
+        contacts: &id028
+        - [8]
+      physical_contact:
+        beta: 0.0
+        bins: *id027
+        contacts: *id028
+      fomite:
+        beta: 0.0
+        bins: [rider]
+        contacts:
+        - [0.0]
+  tube_line:
+    modes:
+      respiratory:
+        beta: 0.06
+        bins: &id029 [rider]
+        contacts: &id030
+        - [12]
+      physical_contact:
+        beta: 0.0
+        bins: *id029
+        contacts: *id030
+      fomite:
+        beta: 0.0
+        bins: [rider]
+        contacts:
+        - [0.0]
+  bus_line:
+    modes:
+      respiratory:
+        beta: 0.05
+        bins: &id031 [rider]
+        contacts: &id032
+        - [10]
+      physical_contact:
+        beta: 0.0
+        bins: *id031
+        contacts: *id032
+      fomite:
+        beta: 0.0
+        bins: [rider]
+        contacts:
+        - [0.0]
