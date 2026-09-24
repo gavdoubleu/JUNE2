@@ -11,6 +11,7 @@
 #include "core/config.h"
 #include "core/world_state.h"
 #include "disease.h"
+#include "epidemiology/fomite/fomite_sub_bins.h"
 #include "policy.h"
 #include "utils/age_utils.h"
 #include "utils/event_logging/event_logger.h"
@@ -156,17 +157,6 @@ struct RuntimeGroupMember {
   // commute presence stays ≤ one slot-hour. 1.0 for journeys that fit a slot.
   float f_presence;
   int matrix_bin;
-};
-
-// =============================================================================
-// FomiteModeRef: per-FomiteConfig handle pre-resolved before the binning
-// loop in processVenueTransmissions. mode_index points into
-// disease_->getTransmissionParams().modes; cfg points into the same
-// underlying TransmissionMode::config variant.
-// =============================================================================
-struct FomiteModeRef {
-  int mode_index;
-  const FomiteConfig* cfg;
 };
 
 // =============================================================================
@@ -658,8 +648,7 @@ class InteractionManager {
   std::vector<double> binMembersAndPrepareBuffers(
       const std::vector<InteractionMember>& members, Venue* venue,
       const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
-      int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
-      const std::vector<int>& n_sub_per_mode, double current_time,
+      const FomiteSubBinSchedule& fomite_schedule, double current_time,
       double delta_hours, uint8_t encounter_type_id,
       const std::string& venue_type, uint8_t venue_type_id,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data);
@@ -716,9 +705,8 @@ class InteractionManager {
   // when infectious.
   void binMemberClassification(const InteractionMember& member, Person* person,
                                const VisitorInfo* visitor, int bin_index,
-                               int num_modes, int num_fomite_modes,
-                               const std::vector<FomiteModeRef>& fomite_modes,
-                               const std::vector<int>& n_sub_per_mode,
+                               int num_modes,
+                               const FomiteSubBinSchedule& fomite_schedule,
                                double current_time, double delta_hours);
 
   // Resolve the matrix bin for a member: route through
@@ -739,8 +727,7 @@ class InteractionManager {
   void binOneMember(
       const InteractionMember& member, Venue* venue,
       const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
-      int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
-      const std::vector<int>& n_sub_per_mode, double current_time,
+      const FomiteSubBinSchedule& fomite_schedule, double current_time,
       double delta_hours, uint8_t encounter_type_id,
       const std::string& venue_type, uint8_t venue_type_id,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data);
@@ -772,12 +759,11 @@ class InteractionManager {
 
   // Accumulate a local infected person's fomite deposition into
   // bins_buffer_[bin_index].total_fomite_deposition_sub. Only called when
-  // person->infection != nullptr and num_fomite_modes > 0.
+  // person->infection != nullptr and the schedule has fomite modes. Uses
+  // fomite_deposit_scratch_ as scratch.
   void accumulateLocalFomiteDeposition(
-      const Person* person, int bin_index, int num_fomite_modes,
-      const std::vector<FomiteModeRef>& fomite_modes,
-      const std::vector<int>& n_sub_per_mode, double current_time,
-      double delta_hours);
+      const Person* person, int bin_index,
+      const FomiteSubBinSchedule& fomite_schedule, double current_time);
 
   // Resize bins_buffer_ to at least num_bins_needed entries, then ensure
   // every active bin has correctly-sized per-mode vectors and pre-sized
@@ -788,14 +774,9 @@ class InteractionManager {
                          int num_fomite_modes,
                          const std::vector<int>& n_sub_per_mode);
 
-  // Walk the disease's transmission modes and split them into a flat list of
-  // FomiteModeRefs and a separate list of CompartmentalUptake mode indices.
-  // Also compute n_sub_per_mode from each fomite mode's sub_bin_time and
-  // delta_hours.
-  void collectFomiteAndCompUptakeModes(
-      double delta_hours, std::vector<FomiteModeRef>& fomite_modes_out,
-      std::vector<int>& comp_uptake_modes_out,
-      std::vector<int>& n_sub_per_mode_out) const;
+  // List the disease's CompartmentalUptake mode indices, in mode-index order.
+  // Fomite modes are listed by FomiteSubBinSchedule.
+  void collectCompUptakeModes(std::vector<int>& comp_uptake_modes_out) const;
 
   // Resolve the venue type id, human-readable type label, and contact matrix
   // for a venue group. For VIRTUAL encounters (actual_venue_id < 0) the
@@ -931,6 +912,9 @@ class InteractionManager {
 
   // Per-mode infectiousness scratch buffer
   std::vector<double> im_scratch_buffer_;
+
+  // Per-(fomite mode, sub-bin) deposit scratch buffer
+  std::vector<double> fomite_deposit_scratch_;
 
   // Cached uniform distribution for transmission rolls
   std::uniform_real_distribution<double> uniform_dist_{0.0, 1.0};

@@ -61,20 +61,20 @@ int InteractionManager::processVenueTransmissions(
   int num_modes = std::max(1, disease_->numModes());
   const auto& trans_params = disease_->getTransmissionParams();
 
-  std::vector<FomiteModeRef> fomite_modes;
+  const FomiteSubBinSchedule fomite_schedule(trans_params, delta_hours);
+  const auto& fomite_modes = fomite_schedule.modes();
+  const auto& n_sub_per_mode = fomite_schedule.subBinsPerMode();
+  const int num_fomite_modes = fomite_schedule.numModes();
   std::vector<int> comp_uptake_modes;
-  std::vector<int> n_sub_per_mode;
-  collectFomiteAndCompUptakeModes(delta_hours, fomite_modes, comp_uptake_modes,
-                                  n_sub_per_mode);
-  int num_fomite_modes = static_cast<int>(fomite_modes.size());
+  collectCompUptakeModes(comp_uptake_modes);
 
   prepareBinsBuffer(num_bins_needed, num_modes, num_fomite_modes,
                     n_sub_per_mode);
 
   std::vector<double> lambda_fomite_by_mode = binMembersAndPrepareBuffers(
       members, venue, *bin_structure, num_bins_needed, num_modes,
-      num_fomite_modes, fomite_modes, n_sub_per_mode, current_time, delta_hours,
-      encounter_type_id, venue_type, venue_type_id, visitor_data);
+      fomite_schedule, current_time, delta_hours, encounter_type_id,
+      venue_type, venue_type_id, visitor_data);
 
   if (venueHasNoTransmissionPossible(num_bins_needed, comp_uptake_modes,
                                      lambda_fomite_by_mode, actual_venue_id,

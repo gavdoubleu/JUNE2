@@ -1,5 +1,6 @@
 #include "epidemiology/epidemiology.h"
 
+#include "epidemiology/fomite/fomite_sub_bins.h"
 #include "epidemiology/policy.h"
 
 namespace june {
@@ -184,21 +185,10 @@ EpiSlotStats Epidemiology::updateInfectionStates(
 void Epidemiology::updateVenueFomites(double current_simulation_time,
                                       double delta_hours) {
   if (!disease_) return;
-  const auto& trans_params = disease_->getTransmissionParams();
-
-  // Build ordered list of fomite modes (same order as interaction_manager)
-  struct FomiteModeRef {
-    int mode_index;
-    const FomiteConfig* cfg;
-  };
-  std::vector<FomiteModeRef> fomite_modes;
-  for (int midx = 0; midx < (int)trans_params.modes.size(); ++midx) {
-    const auto& tmode = trans_params.modes[midx];
-    if (tmode.type == TransmissionModeType::Fomite) {
-      fomite_modes.push_back(
-          FomiteModeRef{midx, &std::get<FomiteConfig>(tmode.config)});
-    }
-  }
+  // Same fomite-mode order as the deposition side, so history slots line up.
+  const FomiteSubBinSchedule fomite_schedule(disease_->getTransmissionParams(),
+                                             delta_hours);
+  const auto& fomite_modes = fomite_schedule.modes();
   if (fomite_modes.empty()) return;
 
   for (auto& venue : world_.venues) {

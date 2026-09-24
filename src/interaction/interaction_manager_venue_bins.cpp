@@ -23,17 +23,15 @@ void InteractionManager::clearUsedBins(int num_modes) {
 std::vector<double> InteractionManager::binMembersAndPrepareBuffers(
     const std::vector<InteractionMember>& members, Venue* venue,
     const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
-    int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
-    const std::vector<int>& n_sub_per_mode, double current_time,
+    const FomiteSubBinSchedule& fomite_schedule, double current_time,
     double delta_hours, uint8_t encounter_type_id,
     const std::string& venue_type, uint8_t venue_type_id,
     const std::unordered_map<PersonId, VisitorInfo>* visitor_data) {
   // Pass 1: bin each member by contact-matrix row.
   for (const auto& member : members) {
     binOneMember(member, venue, bin_structure, num_bins_needed, num_modes,
-                 num_fomite_modes, fomite_modes, n_sub_per_mode, current_time,
-                 delta_hours, encounter_type_id, venue_type, venue_type_id,
-                 visitor_data);
+                 fomite_schedule, current_time, delta_hours, encounter_type_id,
+                 venue_type, venue_type_id, visitor_data);
   }
 
   // Sort infectious lists by person_id (MPI determinism: identical iteration
@@ -50,8 +48,9 @@ std::vector<double> InteractionManager::binMembersAndPrepareBuffers(
 
   // Fomite deposition + per-mode lambda accumulation.
   return recordFomiteDepositionAndLambda(
-      venue, num_bins_needed, num_fomite_modes, fomite_modes, n_sub_per_mode,
-      current_time, delta_hours);
+      venue, num_bins_needed, fomite_schedule.numModes(),
+      fomite_schedule.modes(), fomite_schedule.subBinsPerMode(), current_time,
+      delta_hours);
 }
 
 bool InteractionManager::venueHasNoTransmissionPossible(
@@ -200,10 +199,9 @@ void InteractionManager::buildCumulativeWeightsPerBin(int num_bins_needed,
 
 void InteractionManager::binMemberClassification(
     const InteractionMember& member, Person* person, const VisitorInfo* visitor,
-    int bin_index, int num_modes, int num_fomite_modes,
-    const std::vector<FomiteModeRef>& fomite_modes,
-    const std::vector<int>& n_sub_per_mode, double current_time,
-    double delta_hours) {
+    int bin_index, int num_modes, const FomiteSubBinSchedule& fomite_schedule,
+    double current_time, double delta_hours) {
+  const int num_fomite_modes = fomite_schedule.numModes();
   PersonId pid = member.id;
   if (visitor) {
     if (visitor->is_infectious) {
@@ -214,9 +212,9 @@ void InteractionManager::binMemberClassification(
           {pid, susceptibility, visitor, member.encounter_type_id});
     }
     if (visitor->is_infected && num_fomite_modes > 0) {
-      accumulateVisitorFomiteDeposition(visitor, bin_index, num_fomite_modes,
-                                        fomite_modes, n_sub_per_mode,
-                                        delta_hours);
+      accumulateVisitorFomiteDeposition(
+          visitor, bin_index, num_fomite_modes, fomite_schedule.modes(),
+          fomite_schedule.subBinsPerMode(), delta_hours);
     }
     return;
   }
@@ -234,9 +232,8 @@ void InteractionManager::binMemberClassification(
     }
   }
   if (person->infection && num_fomite_modes > 0) {
-    accumulateLocalFomiteDeposition(person, bin_index, num_fomite_modes,
-                                    fomite_modes, n_sub_per_mode, current_time,
-                                    delta_hours);
+    accumulateLocalFomiteDeposition(person, bin_index, fomite_schedule,
+                                    current_time);
   }
 }
 
@@ -275,8 +272,7 @@ int InteractionManager::resolveMemberBinIndex(
 void InteractionManager::binOneMember(
     const InteractionMember& member, Venue* venue,
     const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
-    int num_fomite_modes, const std::vector<FomiteModeRef>& fomite_modes,
-    const std::vector<int>& n_sub_per_mode, double current_time,
+    const FomiteSubBinSchedule& fomite_schedule, double current_time,
     double delta_hours, uint8_t encounter_type_id,
     const std::string& venue_type, uint8_t venue_type_id,
     const std::unordered_map<PersonId, VisitorInfo>* visitor_data) {
@@ -308,8 +304,7 @@ void InteractionManager::binOneMember(
     if (it != visitor_data->end()) visitor = &it->second;
   }
   binMemberClassification(member, person, visitor, bin_index, num_modes,
-                          num_fomite_modes, fomite_modes, n_sub_per_mode,
-                          current_time, delta_hours);
+                          fomite_schedule, current_time, delta_hours);
 }
 
 void InteractionManager::accumulateVisitorInfectiousness(
@@ -385,23 +380,20 @@ void InteractionManager::accumulateLocalInfectiousness(
 }
 
 void InteractionManager::accumulateLocalFomiteDeposition(
-    const Person* person, int bin_index, int num_fomite_modes,
-    const std::vector<FomiteModeRef>& fomite_modes,
-    const std::vector<int>& n_sub_per_mode, double current_time,
-    double delta_hours) {
-  const double t1 = current_time + delta_hours / 24.0;
-  for (int local_fm = 0; local_fm < num_fomite_modes; ++local_fm) {
-    int n_sub = n_sub_per_mode[local_fm];
-    double dt_sub = (t1 - current_time) / n_sub;
-    for (int k = 0; k < n_sub; ++k) {
-      double t_sub_s = current_time + k * dt_sub;
-      double t_sub_e = current_time + (k + 1) * dt_sub;
-      double dep_k = person->infection->getIntegratedFomiteDeposition(
-          fomite_modes[local_fm].mode_index, t_sub_s, t_sub_e);
+    const Person* person, int bin_index,
+    const FomiteSubBinSchedule& fomite_schedule, double current_time) {
+  fomite_schedule.integrateDeposits(person->infection.get(), current_time,
+                                    fomite_deposit_scratch_);
+  const auto& n_sub_per_mode = fomite_schedule.subBinsPerMode();
+  int offset = 0;
+  for (int local_fm = 0; local_fm < fomite_schedule.numModes(); ++local_fm) {
+    for (int k = 0; k < n_sub_per_mode[local_fm]; ++k) {
+      double dep_k = fomite_deposit_scratch_[offset + k];
       if (dep_k > 0.0)
         bins_buffer_[bin_index].total_fomite_deposition_sub[local_fm][k] +=
             dep_k;
     }
+    offset += n_sub_per_mode[local_fm];
   }
 }
 
@@ -420,28 +412,15 @@ void InteractionManager::prepareBinsBuffer(
   }
 }
 
-void InteractionManager::collectFomiteAndCompUptakeModes(
-    double delta_hours, std::vector<FomiteModeRef>& fomite_modes_out,
-    std::vector<int>& comp_uptake_modes_out,
-    std::vector<int>& n_sub_per_mode_out) const {
-  fomite_modes_out.clear();
+void InteractionManager::collectCompUptakeModes(
+    std::vector<int>& comp_uptake_modes_out) const {
   comp_uptake_modes_out.clear();
   const auto& trans_params = disease_->getTransmissionParams();
   for (int midx = 0; midx < (int)trans_params.modes.size(); ++midx) {
-    const auto& tmode = trans_params.modes[midx];
-    if (tmode.type == TransmissionModeType::Fomite) {
-      fomite_modes_out.push_back(
-          FomiteModeRef{midx, &std::get<FomiteConfig>(tmode.config)});
-    } else if (tmode.type == TransmissionModeType::CompartmentalUptake) {
+    if (trans_params.modes[midx].type ==
+        TransmissionModeType::CompartmentalUptake) {
       comp_uptake_modes_out.push_back(midx);
     }
-  }
-  const int num_fomite_modes = static_cast<int>(fomite_modes_out.size());
-  n_sub_per_mode_out.assign(num_fomite_modes, 1);
-  for (int local_fm = 0; local_fm < num_fomite_modes; ++local_fm) {
-    double sbt = fomite_modes_out[local_fm].cfg->sub_bin_time;
-    n_sub_per_mode_out[local_fm] =
-        (sbt > 0.0) ? std::max(1, (int)(delta_hours / sbt)) : 1;
   }
 }
 
