@@ -1,0 +1,376 @@
+disease:
+  name: covid19
+  settings:
+    fatality_stage: 
+      - name: dead_home
+      - name: dead_hospital
+      - name: dead_icu
+    recovered_stage:
+      - name: recovered
+    hospitalised_stage:
+      - name: hospitalised
+      - name: intensive_care
+    intensive_care_stage:
+      - name: intensive_care
+  symptom_tags:
+    # 'value' determines relative ordering for behavior (stay-at-home) and statistics.
+    - name: recovered
+      value: -2
+    - name: healthy
+      value: -1
+    - name: exposed
+      value: 0
+    - name: asymptomatic
+      value: 1
+    - name: mild
+      value: 2
+    - name: severe
+      value: 3
+    - name: hospitalised
+      value: 4
+    - name: intensive_care
+      value: 5
+    - name: dead_home
+      value: 6
+    - name: dead_hospital
+      value: 7
+    - name: dead_icu
+      value: 8
+  # CSV Configuration - Explains how to parse infection_outcome_rates CSV
+  outcome_rates_csv:
+    file: ../../data/infection_outcome_rates_covid19.csv
+
+    # Age column configuration
+    age_column_index: 0  # First column contains age ranges
+
+    # Population types (residence/demographic groups)
+    # These are prefixes in the CSV column names
+    populations:
+      gp:
+        name: general_population
+        default: true
+        description: General population not in care facilities
+      ch:
+        name: care_home
+        selection:
+          - property: "activities.residence.venue_type"
+            operator: "=="
+            value: "care_home"
+        description: Residents of care homes / long-term care facilities
+
+    # Sex categories
+    sexes:
+      - male
+      - female
+
+    # Outcome rates map to symptom tags and trajectories
+    # Each outcome corresponds to columns in the CSV and determines trajectory selection
+    outcomes:
+      asymptomatic:
+        symptom_tag: asymptomatic
+        description: Probability of asymptomatic infection (no symptoms)
+      mild:
+        symptom_tag: mild
+        description: Probability of mild symptoms only
+      hospital:
+        symptom_tag: hospitalised
+        description: Probability of requiring hospitalization
+      icu:
+        symptom_tag: intensive_care
+        description: Probability of requiring intensive care
+      home_ifr:
+        symptom_tag: dead_home
+        description: Infection fatality rate for deaths at home
+      hospital_ifr:
+        symptom_tag: dead_hospital
+        description: Infection fatality rate for deaths in hospital
+      icu_ifr:
+        symptom_tag: dead_icu
+        description: Infection fatality rate for deaths in ICU
+
+      # Tags that don't have direct CSV columns
+    # Their rates are calculated from other outcomes
+    calculated_outcomes:
+      severe:
+        symptom_tag: severe
+        description: Severe symptoms at home (calculated)
+        calculation: "1.0 - asymptomatic - mild - hospital - home_ifr"
+
+  trajectories:
+    # 'severity' (0.0-1.0) defines how the vaccine shifts probability away from this outcome.
+    - description: "exposed => asymptomatic => recovered | asymptomatic infection"
+      selection_key: asymptomatic
+      severity: 0.0
+      infectiousness_factor: 0.5
+      stages:
+        - symptom_tag: exposed
+          completion_time:
+            type: beta
+            a: 2.29
+            b: 19.05
+            loc: 0.39
+            scale: 39.8 
+        - symptom_tag: asymptomatic
+          completion_time:
+            type: constant
+            value: 14
+        - symptom_tag: recovered
+          completion_time:
+            type: constant
+            value: 0.0
+    - description: "exposed => mild => recovered | recovered from mild at home"
+      selection_key: mild
+      severity: 0.2
+      stages:
+        - symptom_tag: exposed
+          completion_time:
+            type: beta
+            a: 2.29
+            b: 19.05
+            loc: 0.39
+            scale: 39.8
+        - symptom_tag: mild
+          completion_time:
+            type: constant
+            value: 20.
+        - symptom_tag: recovered
+          completion_time:
+            type: constant
+            value: 0.0
+    - description: "exposed => mild => severe => recovered  | recovered from severe at home"
+      selection_key: severe
+      severity: 0.5
+      stages:
+        - symptom_tag: exposed
+          completion_time:
+            type: beta
+            a: 2.29
+            b: 19.05
+            loc: 0.39
+            scale: 39.8
+        - symptom_tag: mild
+          completion_time:
+            type: lognormal
+            s: 0.8325
+            loc: 0.0
+            scale: 5.727
+        - symptom_tag: severe
+          completion_time:
+            type: constant
+            value: 20.
+        - symptom_tag: recovered
+          completion_time:
+            type: constant
+            value: 0.0
+    - description: "exposed => mild => hospitalised => recovered | recovered after hospitalisation"
+      selection_key: hospital
+      severity: 0.7
+      stages:
+        - symptom_tag: exposed
+          completion_time:
+            type: beta
+            a: 2.29
+            b: 19.05
+            loc: 0.39
+            scale: 39.8
+        - symptom_tag: mild
+          completion_time:
+            type: lognormal
+            s: 0.55
+            loc: 0.0
+            scale: 5.
+        - symptom_tag: hospitalised
+          completion_time:
+            type: beta
+            a: 1.35
+            b: 3.68
+            loc: 0.05
+            scale: 27.1
+        - symptom_tag: mild
+          completion_time:
+            type: constant 
+            value: 8 
+        - symptom_tag: recovered
+          completion_time:
+            type: constant
+            value: 0.0
+    - description: "exposed => mild => intensive_care => recovered  | recovered after icu"
+      selection_key: icu
+      severity: 0.9
+      stages:
+        - symptom_tag: exposed
+          completion_time:
+            type: beta
+            a: 2.29
+            b: 19.05
+            loc: 0.39
+            scale: 39.8
+        - symptom_tag: mild
+          completion_time:
+            type: lognormal
+            s: 0.55
+            loc: 0.0
+            scale: 5.
+        - symptom_tag: hospitalised
+          completion_time:
+            type: exponweib 
+            a: 0.085 
+            c: 4.14
+            loc: 0.0
+            scale: 6.8
+        - symptom_tag: intensive_care
+          completion_time:
+            type: exponweib
+            a: 1.06 
+            c: 0.89
+            loc: 0.0
+            scale: 12 
+        - symptom_tag: hospitalised
+          completion_time:
+            type: exponweib 
+            a: 15.95
+            c: 0.4
+            loc: 0.0
+            scale: 0.41
+        - symptom_tag: mild
+          completion_time:
+            type: constant 
+            value: 3 
+        - symptom_tag: recovered
+          completion_time:
+            type: constant
+            value: 0.0
+    - description: "exposed => mild => severe => dead  | died at home"
+      selection_key: home_ifr
+      severity: 1.0
+      stages:
+        - symptom_tag: exposed
+          completion_time:
+            type: beta
+            a: 2.29
+            b: 19.05
+            loc: 0.39
+            scale: 39.8
+        - symptom_tag: mild
+          completion_time:
+            type: lognormal
+            s: 0.8325
+            loc: 0.0
+            scale: 5.727
+        - symptom_tag: severe
+          completion_time:
+            type: constant
+            value: 3.0
+        - symptom_tag: dead_home
+          completion_time:
+            type: constant
+            value: 0.0
+    - description: "exposed => mild => hospitalised => dead | died at hospital"
+      selection_key: hospital_ifr
+      severity: 1.0
+      stages:
+        - symptom_tag: exposed
+          completion_time:
+            type: beta
+            a: 2.29
+            b: 19.05
+            loc: 0.39
+            scale: 39.8
+        - symptom_tag: mild
+          completion_time:
+            type: lognormal
+            s: 0.55
+            loc: 0.0
+            scale: 5.
+        - symptom_tag: hospitalised
+          completion_time:
+            type: beta
+            a: 1.21
+            b: 1.97
+            loc: 0.08
+            scale: 12.9      
+        - symptom_tag: dead_hospital
+          completion_time:
+            type: constant
+            value: 0.
+    - description: "exposed => mild => hospitalised => intensive_care => dead | died at icu"
+      selection_key: icu_ifr
+      severity: 1.0
+      stages:
+        - symptom_tag: exposed
+          completion_time:
+            type: beta
+            a: 2.29
+            b: 19.05
+            loc: 0.39
+            scale: 39.8
+        - symptom_tag: mild
+          completion_time:
+            type: lognormal
+            s: 0.55 
+            loc: 0.0
+            scale: 5.
+        - symptom_tag: hospitalised
+          completion_time:
+            type: lognormal
+            s: 1.412
+            loc: 0.0
+            scale: 0.907
+        - symptom_tag: intensive_care
+          completion_time:
+            type: exponweib
+            a: 1.23 
+            c: 1.10
+            loc: 0.0
+            scale: 9.69
+        - symptom_tag: dead_icu
+          completion_time:
+            type: constant
+            value: 0.
+  transmission:
+    # Test-only: config_2021's disease switched to Stage-Driven so a fomite
+    # mode can be declared. Deposition is nonzero from 'exposed' so an
+    # infected-but-not-yet-infectious person deposits (the a94fe7f case).
+    # Used to check fomite output is rank-invariant
+    # (plans/visitor-emission-on-home-rank.md).
+    mode: Stage-Driven
+    modes:
+    - name: respiratory
+      mode_transmissibility_multiplier: 1.0
+    - name: physical_contact
+      mode_transmissibility_multiplier: 1.0
+    - name: fomite
+      type: fomite
+      mode_transmissibility_multiplier: 1.0
+      # Sub-bin variant: 1 h sub-bins, so n_sub = slot length in hours (1-11
+      # on config_2021 schedules). Every other config leaves n_sub = 1.
+      sub_bin_time: 1.0
+      max_age: 7.0
+      fomite_curve:
+        type: exponential_decay
+        initial_value: 0.005
+        decay_rate: 0.5
+      deposition_stages:
+        exposed: {type: linear_ramp, start_value: 0.0, end_value: 0.05, ramp_duration: 3.0}
+        asymptomatic: {type: constant, value: 0.05}
+        mild: {type: linear_ramp, start_value: 0.05, end_value: 0.1, ramp_duration: 3.0}
+        severe: {type: exponential_decay, initial_value: 0.1, decay_rate: 0.2}
+    stage_curves:
+      respiratory:
+        exposed: {type: constant, value: 0.0}
+        asymptomatic: {type: gamma, max_infectiousness: 0.5, shape: 1.56, rate: 0.53}
+        mild: {type: linear_ramp, start_value: 0.5, end_value: 1.0, ramp_duration: 3.0}
+        severe: {type: exponential_decay, initial_value: 1.0, decay_rate: 0.2}
+        hospitalised: {type: constant, value: 1.0}
+        intensive_care: {type: constant, value: 0.5}
+      physical_contact:
+        exposed: {type: constant, value: 0.0}
+        asymptomatic: {type: gamma, max_infectiousness: 0.5, shape: 1.56, rate: 0.53}
+        mild: {type: linear_ramp, start_value: 0.5, end_value: 1.0, ramp_duration: 3.0}
+        severe: {type: exponential_decay, initial_value: 1.0, decay_rate: 0.2}
+        hospitalised: {type: constant, value: 1.0}
+        intensive_care: {type: constant, value: 0.5}
+
+  immunity:
+    level: 0.95
+    waning_rate: 0.001

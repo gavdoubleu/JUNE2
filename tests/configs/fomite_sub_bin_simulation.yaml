@@ -1,0 +1,69 @@
+# Test-only: fomite_simulation.yaml with 1 h fomite sub-bins. See fomite_sub_bin_disease.yaml.
+time:
+    # The COVID-19 UK timeline this config reproduces. End date is exclusive,
+    # so the run covers 1 Feb 2020 through 31 Jul 2020. 12 Mar 2020 (the
+    # "contain" -> "delay" switch) is day 40; 16 Mar 2020 (household
+    # isolation) is day 44.
+    start_date : "2020-02-01"
+    end_date : "2020-08-01"
+
+config_paths:
+# Configuration paths
+  disease_file: "tests/configs/fomite_sub_bin_disease.yaml"
+  contact_matrices_file: "tests/configs/fomite_contact_matrices.yaml"
+  schedules_file: "configs/config_2021/schedules.yaml"
+  vaccines_file: "configs/config_2021/vaccines.yaml"
+  activity_preferences_file: "configs/config_2021/activity_preferences.yaml"
+  coordinated_encounters_file: "configs/config_2021/coordinated_encounters.yaml"
+  performance_file: "configs/config_2021/performance.yaml"
+  parallel_file: "configs/config_2021/parallel.yaml"
+  policies_file: "configs/config_2021/policies.yaml"
+  infection_seeds_file: "configs/config_2021/infection_seeds.yaml"
+  # Optional: calendar event CSVs produced by the MAY world-builder.
+  # Leave absent or empty to run without calendar events.
+  # calendar_events_file: "data/calendar_events.csv"
+  # calendar_event_catchment_rules_file: "data/calendar_event_catchment_rules.csv"
+
+#Random seeds for reproducibility
+random_seed: 12345
+
+output:
+    stats_interval_days: 1
+    flush_interval_days: 7
+    max_event_buffer_size: 100000
+    # Largest H5 dataset; default off repo-wide. Kept on here so
+    # test_mpi_full_reproducibility.sh's coordinated_encounters check
+    # (E2) has a dataset to diff across rank counts.
+    save_coordinated_encounters: true
+
+#Regional Risk Factors
+regional_risk:
+    enabled: false
+    regional_risk_file: "data/regional_risk.csv"
+
+# Partial-presence venues — venue types whose venues have ephemeral per-slot
+# rider sub-grouping (runtime bins). For each slot routing riders into one of
+# these types the RuntimeBinAllocator buckets riders into bins, and the FOI
+# loop drives sub-interval transmission from per-rider (t_board_min,
+# t_alight_min).
+#
+# target_group_size is the target rider count per bin (≈ vehicle occupancy:
+# tube/train carriages ~100, bus ~50). num_bins at slot time emerges as
+# max(1, ceil(N_global_riders / target_group_size)), so the model self-scales
+# with demand: a tube line with 1000 riders gets 10 bins, with 50 gets 1.
+# No hard capacity / no overflow handling — everyone is bucketed. Starting
+# values are guesses, calibrate alongside contact_matrices.yaml betas.
+# Empty map / missing block = feature off, zero overhead.
+partial_presence:
+    enabled_venue_types:
+        train_line: { target_group_size: 100 }
+        tube_line:  { target_group_size: 100 }
+        bus_line:   { target_group_size: 50 }
+
+#Checkpoint / restart (resume with: --restart-from runs/<id>/checkpoints/latest)
+checkpoint:
+    enabled: true
+    output_dir: checkpoints/
+    every_n_days: null          # checkpoint weekly; ignored if on_dates is set
+    on_dates: ["2020-03-12"]           # or a list, e.g. ["2020-03-12", "2020-03-16"]
+    keep_last: 3             # 0 = keep all
