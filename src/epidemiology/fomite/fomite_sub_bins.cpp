@@ -17,7 +17,7 @@ FomiteSubBinSchedule::FomiteSubBinSchedule(
   }
   sub_bins_per_mode_.assign(modes_.size(), 1);
   for (int local_fm = 0; local_fm < numModes(); ++local_fm) {
-    double sub_bin_time = modes_[local_fm].cfg->sub_bin_time;
+    double sub_bin_time = modes_[local_fm].config->sub_bin_time;
     sub_bins_per_mode_[local_fm] =
         (sub_bin_time > 0.0) ? std::max(1, (int)(delta_hours / sub_bin_time))
                              : 1;

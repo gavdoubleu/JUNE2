@@ -109,7 +109,7 @@ std::vector<double> InteractionManager::recordFomiteDepositionAndLambda(
   if (num_fomite_modes == 0 || !venue) return lambda_fomite_by_mode;
 
   for (int local_fm = 0; local_fm < num_fomite_modes; ++local_fm) {
-    const FomiteConfig& fcfg = *fomite_modes[local_fm].cfg;
+    const FomiteConfig& fomite_config = *fomite_modes[local_fm].config;
     auto& history = venue->fomite_history;
     if (local_fm >= (int)history.size()) continue;
 
@@ -127,13 +127,15 @@ std::vector<double> InteractionManager::recordFomiteDepositionAndLambda(
     }
 
     // lambda = sum_k amount_k * ∫_{age_k}^{age_k+Δ} Q(a) da
-    if (fcfg.infectiousness_curve) {
+    if (fomite_config.infectiousness_curve) {
       const double delta_days = delta_hours / 24.0;
       for (const auto& event : history[local_fm]) {
         double age = current_time - event.time;
         lambda_fomite_by_mode[local_fm] +=
             event.amount *
-            fcfg.infectiousness_curve->integrate(age, age + delta_days) / 24.0;
+            fomite_config.infectiousness_curve->integrate(age,
+                                                          age + delta_days) /
+            24.0;
       }
     }
   }

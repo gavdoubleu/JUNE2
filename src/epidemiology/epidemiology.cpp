@@ -199,7 +199,7 @@ void Epidemiology::updateVenueFomites(double current_simulation_time,
     }
     // Prune old entries from each mode's deposition history
     for (int local_fm = 0; local_fm < (int)fomite_modes.size(); ++local_fm) {
-      double max_age = fomite_modes[local_fm].cfg->max_age;
+      double max_age = fomite_modes[local_fm].config->max_age;
       auto& deque = history[local_fm];
       while (!deque.empty() &&
              (current_simulation_time - deque.front().time) > max_age) {

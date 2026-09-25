@@ -7,10 +7,10 @@
 namespace june {
 
 // Handle to one fomite transmission mode. mode_index points into
-// TransmissionParams::modes; cfg points into the same mode's config variant.
+// TransmissionParams::modes; config points into the same mode's config variant.
 struct FomiteModeRef {
   int mode_index;
-  const FomiteConfig* cfg;
+  const FomiteConfig* config;
 };
 
 // How one slot of `delta_hours` splits into fomite sub-bins, and the deposit

@@ -65,9 +65,9 @@ TEST_CASE("Schedule: fomite modes only, in mode-index order") {
   REQUIRE(schedule.numModes() == 2);
   CHECK(schedule.modes()[0].mode_index == 1);
   CHECK(schedule.modes()[1].mode_index == 3);
-  CHECK(schedule.modes()[0].cfg ==
+  CHECK(schedule.modes()[0].config ==
         &std::get<FomiteConfig>(transmission.modes[1].config));
-  CHECK(schedule.modes()[1].cfg ==
+  CHECK(schedule.modes()[1].config ==
         &std::get<FomiteConfig>(transmission.modes[3].config));
 }
 
