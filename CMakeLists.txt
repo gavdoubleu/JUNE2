@@ -167,6 +167,7 @@ set(JUNE_CORE_SOURCES
     src/epidemiology/seeding/seed_shortfall.cpp
     src/epidemiology/seeding/seed_cluster_planner.cpp
     src/epidemiology/fomite/fomite_sub_bins.cpp
+    src/epidemiology/trajectory/stage_curve_integral.cpp
     src/epidemiology/disease.cpp
     src/loaders/disease_loader.cpp
     src/interaction/interaction_manager.cpp
@@ -355,6 +356,7 @@ if(BUILD_TESTING)
   add_june_test(test_follow "tests/test_follow.cpp")
   add_june_test(test_fomite_transmission "tests/test_fomite_transmission.cpp;src/loaders/disease_loader.cpp")
   add_june_test(test_fomite_sub_bins "tests/test_fomite_sub_bins.cpp")
+  add_june_test(test_stage_curve_integral "tests/test_stage_curve_integral.cpp")
   add_june_test(test_compartmental_disease_mode "tests/test_compartmental_disease_mode.cpp;src/loaders/disease_loader.cpp")
   add_june_test(test_compartmental_coupling_matrix "tests/test_compartmental_coupling_matrix.cpp")
   add_june_test(test_compartmental_transmission "tests/test_compartmental_transmission.cpp")

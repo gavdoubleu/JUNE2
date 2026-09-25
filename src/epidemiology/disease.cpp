@@ -5,6 +5,7 @@
 #include <iostream>
 #include <unordered_set>
 
+#include "epidemiology/trajectory/stage_curve_integral.h"
 #include "utils/filtering.h"
 #ifdef USE_MPI
 #include <mpi.h>
@@ -735,36 +736,7 @@ double Infection::getIntegratedFomiteDeposition(int fomite_mode_index,
   if (modes[fomite_mode_index].type != TransmissionModeType::Fomite) return 0.0;
   const auto& cfg = std::get<FomiteConfig>(modes[fomite_mode_index].config);
 
-  // Deposit of one stage's curve over [piece_start, piece_end].
-  auto integrate_stage = [&](uint16_t symptom_id, double stage_start_time,
-                             double piece_start, double piece_end) {
-    if (symptom_id >= cfg.deposition_by_symptom.size()) return 0.0;
-    const auto& curve = cfg.deposition_by_symptom[symptom_id];
-    if (!curve) return 0.0;
-    return curve->integrate(piece_start - stage_start_time,
-                            piece_end - stage_start_time) *
-           24.0;
-  };
-
-  // Split [t0, t1] at each transition inside it, so each piece is deposited
-  // on the curve of the symptom held over it.
-  uint16_t symptom_id = 0;
-  double stage_start_time = infection_time_;
-  double piece_start = t0;
-  double deposit = 0.0;
-  for (const auto& [transition_time, next_symptom_id] :
-       trajectory_.transitions) {
-    if (transition_time >= t1) break;
-    if (transition_time > t0) {
-      deposit += integrate_stage(symptom_id, stage_start_time, piece_start,
-                                 transition_time);
-      piece_start = transition_time;
-    }
-    symptom_id = next_symptom_id;
-    stage_start_time = transition_time;
-  }
-  return deposit +
-         integrate_stage(symptom_id, stage_start_time, piece_start, t1);
+  return integrateStageCurves(cfg.deposition_by_symptom, trajectory_, t0, t1);
 }
 
 }  // namespace june
