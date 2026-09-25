@@ -688,24 +688,13 @@ double Infection::getIntegratedInfectiousness(int mode_index, double t0,
     return getInfectiousness(mode_index, 0.5 * (t0 + t1)) * (t1 - t0) * 24.0;
   }
 
-  // STAGE-DRIVEN: use mode-specific curve and integrate.
+  // STAGE-DRIVEN: integrate the mode's curves, split at stage transitions.
   const auto& modes = trans_params.modes;
   int safe_mode =
       (mode_index >= 0 && mode_index < (int)modes.size()) ? mode_index : 0;
   const auto& curves = modes.empty() ? trans_params.symptom_id_curves
                                      : modes[safe_mode].symptom_curves;
-
-  uint16_t current_symptom_id = 0;
-  double stage_start_time = infection_time_;
-  cacheCurrentSymptom(t0, current_symptom_id, stage_start_time);
-
-  if (current_symptom_id >= curves.size() || !curves[current_symptom_id]) {
-    return 0.0;
-  }
-  const double t_in_stage_0 = t0 - stage_start_time;
-  const double t_in_stage_1 = t1 - stage_start_time;
-  return curves[current_symptom_id]->integrate(t_in_stage_0, t_in_stage_1) *
-         24.0;
+  return integrateStageCurves(curves, trajectory_, t0, t1);
 }
 
 double Infection::getFomiteDepositRate(int fomite_mode_index,
