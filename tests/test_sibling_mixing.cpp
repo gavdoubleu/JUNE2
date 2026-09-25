@@ -6,6 +6,7 @@
 #include "core/world_state.h"
 #include "doctest.h"
 #include "epidemiology/disease.h"
+#include "epidemiology/emission/emission.h"
 #include "epidemiology/interaction_manager.h"
 #include "test_utils.h"
 
@@ -92,8 +93,18 @@ struct SiblingMixingWorld {
 
   void infect(int person_index, double infection_time) {
     world.people[person_index].infection = std::make_unique<Infection>(
-        disease.get(), infection_time, &world.people[person_index], 42,
-        nullptr, "classroom", 0);
+        disease.get(), infection_time, &world.people[person_index], 42, nullptr,
+        "classroom", 0);
+  }
+
+  // Person 0 in classroom A, persons 1-5 in classroom B.
+  std::vector<PersonLocation> locations() const {
+    std::vector<PersonLocation> locations;
+    locations.push_back({0, kClassroomAId, -1, 0, 255, 0});
+    for (int i = 1; i < kNumPeople; ++i)
+      locations.push_back(
+          {i, kClassroomBId, -1, 0, 255, static_cast<size_t>(i)});
+    return locations;
   }
 
   // Returns the number of new infections among persons 1-5 (classroom B).
@@ -107,13 +118,7 @@ struct SiblingMixingWorld {
     InteractionManager interaction_manager(world, contact_matrices,
                                            simulation_config, parallel_config,
                                            disease.get(), nullptr);
-    std::vector<PersonLocation> locations;
-    locations.push_back({0, kClassroomAId, -1, 0, 255, 0});
-    for (int i = 1; i < kNumPeople; ++i)
-      locations.push_back(
-          {i, kClassroomBId, -1, 0, 255, static_cast<size_t>(i)});
-
-    interaction_manager.processTransmissions(locations, kCurrentTime,
+    interaction_manager.processTransmissions(locations(), kCurrentTime,
                                              kDeltaHours, nullptr);
 
     int new_infections = 0;
@@ -136,7 +141,7 @@ TEST_CASE(
     "Sibling mixing: child whose only case is not yet infectious is infected "
     "by an infectious sibling") {
   SiblingMixingWorld setup;
-  setup.infect(0, 0.0);  // infectious by t=5
+  setup.infect(0, 0.0);                 // infectious by t=5
   setup.infect(5, kCurrentTime - 0.1);  // still exposed at t=5
 
   CHECK(setup.runTickAndCountClassroomBInfections() > 0);
@@ -147,4 +152,33 @@ TEST_CASE("Sibling mixing: no infectious sibling means no infections") {
   setup.infect(0, kCurrentTime - 0.1);  // still exposed at t=5
 
   CHECK(setup.runTickAndCountClassroomBInfections() == 0);
+}
+
+// Classroom bins take a local's Emission from EmissionCalculator::emit, so
+// the school's aggregate must carry that same Emission for the infector.
+TEST_CASE("Sibling mixing: parent aggregate carries the infector's Emission") {
+  SiblingMixingWorld setup;
+  setup.infect(0, 0.0);  // infectious by t=5
+
+  SimulationConfig simulation_config;
+  ParallelConfig parallel_config;
+  InteractionManager interaction_manager(setup.world, setup.contact_matrices,
+                                         simulation_config, parallel_config,
+                                         setup.disease.get(), nullptr);
+  interaction_manager.processTransmissions(setup.locations(), kCurrentTime,
+                                           kDeltaHours, nullptr);
+
+  const ParentAggregate* school =
+      interaction_manager.getParentAggregate(kSchoolId);
+  REQUIRE(school != nullptr);
+  REQUIRE(school->infectors_by_bin.size() == 1);
+  REQUIRE(school->infectors_by_bin[0].size() == 1);
+  const ParentInfectorEntry& infector = school->infectors_by_bin[0][0];
+  CHECK(infector.person_id == 0);
+
+  Emission emission;
+  EmissionCalculator(*setup.disease, kDeltaHours)
+      .emit(setup.world.people[0], kCurrentTime, emission);
+  REQUIRE_FALSE(emission.infectiousness_by_mode.empty());
+  CHECK(infector.inf_by_mode == emission.infectiousness_by_mode);
 }

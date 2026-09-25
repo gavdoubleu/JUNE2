@@ -145,6 +145,7 @@ void InteractionManager::buildParentAggregates(
 
   int num_modes = disease_->numModes();
   if (num_modes == 0) num_modes = 1;
+  const EmissionCalculator emission_calculator(*disease_, delta_hours);
 
   // Walk venue groups in the SAME order the main loop uses, so debug
   // output and any FP accumulations line up.
@@ -160,8 +161,9 @@ void InteractionManager::buildParentAggregates(
       i++;
     }
 
-    aggregateOneVenueGroupForParent(group_start, i, current_time, delta_hours,
-                                    num_modes, visitor_data);
+    aggregateOneVenueGroupForParent(group_start, i, current_time,
+                                    emission_calculator, num_modes,
+                                    visitor_data);
   }
 
   dumpParentAggregatesDebug(current_time, delta_hours);
@@ -202,7 +204,8 @@ std::vector<PersonLocation> InteractionManager::buildPersonIdSortedMembers(
 
 bool InteractionManager::gatherMemberInfectiousnessByMode(
     const Person* person, const VisitorInfo* visitor, double current_time,
-    double delta_hours, int num_modes, std::vector<double>& inf_by_mode) const {
+    const EmissionCalculator& emission_calculator, int num_modes,
+    Emission& emission_scratch, std::vector<double>& inf_by_mode) const {
   inf_by_mode.assign(num_modes, 0.0);
   double total = 0.0;
   if (visitor) {
@@ -213,12 +216,15 @@ bool InteractionManager::gatherMemberInfectiousnessByMode(
                            : 0.0;
       total += inf_by_mode[m];
     }
-  } else if (person && person->infection &&
-             person->infection->isInfectious(current_time)) {
-    const double t1 = current_time + delta_hours / 24.0;
-    for (int m = 0; m < num_modes; ++m) {
-      inf_by_mode[m] =
-          person->infection->getIntegratedInfectiousness(m, current_time, t1);
+  } else if (person) {
+    emission_calculator.emit(*person, current_time, emission_scratch);
+    const std::vector<double>& emitted =
+        emission_scratch.infectiousness_by_mode;
+    if (emitted.empty()) return false;
+    const int num_emitted =
+        std::min(num_modes, static_cast<int>(emitted.size()));
+    for (int m = 0; m < num_emitted; ++m) {
+      inf_by_mode[m] = emitted[m];
       total += inf_by_mode[m];
     }
   } else {
@@ -250,7 +256,7 @@ ParentAggregate& InteractionManager::ensureParentAggregateInitialised(
 
 void InteractionManager::aggregateOneVenueGroupForParent(
     size_t group_start, size_t group_end, double current_time,
-    double delta_hours, int num_modes,
+    const EmissionCalculator& emission_calculator, int num_modes,
     const std::unordered_map<PersonId, VisitorInfo>* visitor_data) {
   const auto& first = active_locations_buffer_[group_start];
 
@@ -283,11 +289,12 @@ void InteractionManager::aggregateOneVenueGroupForParent(
       buildPersonIdSortedMembers(group_start, group_end);
 
   std::vector<double> inf_by_mode;
+  Emission emission;
   for (const auto& loc : mem_sorted) {
-    accumulateOneMemberIntoParent(loc, venue, &parent_bin_structure,
-                                  parent_num_bins, agg, csize, cinf,
-                                  first.venue_id, current_time, delta_hours,
-                                  num_modes, visitor_data, inf_by_mode);
+    accumulateOneMemberIntoParent(
+        loc, venue, &parent_bin_structure, parent_num_bins, agg, csize, cinf,
+        first.venue_id, current_time, emission_calculator, num_modes,
+        visitor_data, emission, inf_by_mode);
   }
 }
 
@@ -295,8 +302,10 @@ void InteractionManager::accumulateOneMemberIntoParent(
     const PersonLocation& loc, Venue* venue, const ContactMatrix* parent_matrix,
     int parent_num_bins, ParentAggregate& agg, std::vector<int>& csize,
     std::vector<std::vector<double>>& cinf, VenueId child_venue_id,
-    double current_time, double delta_hours, int num_modes,
+    double current_time, const EmissionCalculator& emission_calculator,
+    int num_modes,
     const std::unordered_map<PersonId, VisitorInfo>* visitor_data,
+    Emission& emission_scratch,
     std::vector<double>& inf_by_mode_scratch) const {
   PersonId pid = loc.person_id;
   Person* person = nullptr;
@@ -315,8 +324,8 @@ void InteractionManager::accumulateOneMemberIntoParent(
   csize[parent_bin]++;
 
   if (gatherMemberInfectiousnessByMode(person, visitor, current_time,
-                                       delta_hours, num_modes,
-                                       inf_by_mode_scratch)) {
+                                       emission_calculator, num_modes,
+                                       emission_scratch, inf_by_mode_scratch)) {
     for (int m = 0; m < num_modes; ++m) {
       agg.total_inf_by_bin_mode[parent_bin][m] += inf_by_mode_scratch[m];
       cinf[parent_bin][m] += inf_by_mode_scratch[m];

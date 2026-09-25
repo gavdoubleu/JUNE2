@@ -9,6 +9,7 @@
 #include "core/world_state.h"
 #include "doctest.h"
 #include "epidemiology/disease.h"
+#include "epidemiology/emission/emission.h"
 #include "epidemiology/interaction_manager.h"
 #include "test_utils.h"
 
@@ -557,4 +558,84 @@ TEST_CASE(
           doctest::Approx(expected_lambda_b).epsilon(1e-6));
     CHECK(acc.susc_lambda.count(/*A=*/0) == 0);
   }
+}
+
+// -----------------------------------------------------------------------------
+// Test 5: Partial presence leaves no fomite deposits.
+//
+// A lone infectious rider whose disease has a fomite mode depositing at a
+// constant rate. The partial-presence pass reads only the infectiousness part
+// of the rider's Emission, so the line's fomite history stays empty.
+// -----------------------------------------------------------------------------
+TEST_CASE(
+    "partial-presence FOI: an infectious rider leaves no fomite deposits") {
+  WorldState world;
+  registerScaffolding(world);
+  Config config;
+  SimulationConfig& sim_cfg = config.simulation;
+  sim_cfg.random_seed = 12345;
+  const uint8_t line_type_id = addPartialPresenceVenueType(
+      world, sim_cfg, "route_line", /*target_group_size=*/100);
+  const VenueId line = addPartialPresenceVenue(world, line_type_id);
+  addAdult(world, /*pid=*/0);
+  addPartialPresenceLegs(world, /*activity_index=*/0,
+                         {PartialPresenceLegSpec{0, line, 0.0f, 20.0f}});
+  world.buildIndices();
+
+  ContactMatrixConfig cm;
+  registerSimpleContactMatrix(cm, "route_line", world, /*contacts=*/6.0);
+
+  TransmissionParams transmission;
+  transmission.mode = InfectiousnessMode::STAGE_DRIVEN;
+  TransmissionMode respiratory;
+  respiratory.name = "respiratory";
+  respiratory.symptom_curves = {nullptr, std::make_shared<ConstantCurve>(1.0)};
+  transmission.modes.push_back(std::move(respiratory));
+  TransmissionMode fomite;
+  fomite.name = "fomite";
+  fomite.type = TransmissionModeType::Fomite;
+  fomite.symptom_curves = {nullptr, nullptr};
+  FomiteConfig fomite_config;
+  fomite_config.sub_bin_time = 0.25;
+  fomite_config.infectiousness_curve = std::make_shared<ConstantCurve>(1.0);
+  fomite_config.deposition_by_symptom = {std::make_shared<ConstantCurve>(1.0),
+                                         std::make_shared<ConstantCurve>(1.0)};
+  fomite.config = std::move(fomite_config);
+  transmission.modes.push_back(std::move(fomite));
+  TrajectoryDefinition trajectory;
+  trajectory.selection_key = "general_population";
+  trajectory.stages.push_back({"infectious", {"constant", {{"value", 100.0}}}});
+  SymptomTag healthy{.name = "healthy", .value = -1, .id = 0};
+  SymptomTag infectious{.name = "infectious", .value = 1, .id = 1};
+  Disease disease("Flu", {healthy, infectious}, DiseaseStageSettings{},
+                  {trajectory}, OutcomeRates{}, transmission);
+
+  world.people[0].infection = std::make_unique<Infection>(
+      &disease, 0.0, &world.people[0], /*seed=*/7, &world, "route_line", line);
+  const double delta_hours = 1.0;
+  const double current_time = 5.0;
+  Emission emission;
+  EmissionCalculator(disease, delta_hours)
+      .emit(world.people[0], current_time, emission);
+  REQUIRE_FALSE(emission.infectiousness_by_mode.empty());
+  REQUIRE_FALSE(emission.fomite_deposits.empty());
+
+  RuntimeGroupAllocator allocator(world, config);
+  ParallelConfig parallel_config;
+  InteractionManager im(world, cm, sim_cfg, parallel_config, &disease, nullptr);
+  im.setRuntimeGroupAllocator(&allocator);
+  std::vector<PersonLocation> locs =
+      makePartialPresenceLocations(world, /*activity_index=*/0);
+  TimeSlot slot;
+  allocator.allocateForSlot(/*time_slot_index=*/0, /*day_type_idx=*/0, slot,
+                            /*current_simulation_time=*/0.0, delta_hours, locs);
+  REQUIRE(allocator.getNumGroups(line) == 1);
+
+  im.processPartialPresenceLines({line}, current_time, delta_hours,
+                                 /*active_infections=*/nullptr,
+                                 /*visitor_data=*/nullptr);
+
+  const Venue* venue = world.getVenue(line);
+  REQUIRE(venue != nullptr);
+  for (const auto& history : venue->fomite_history) CHECK(history.empty());
 }

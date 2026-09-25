@@ -219,6 +219,13 @@ class InteractionManager {
 
   PerformanceStats& getStats() { return stats_; }
 
+  // The sibling-mixing aggregate for `parent_id` from the last
+  // processTransmissions call, or nullptr if no child of it was occupied.
+  const ParentAggregate* getParentAggregate(VenueId parent_id) const {
+    auto it = parent_aggregates_.find(parent_id);
+    return it == parent_aggregates_.end() ? nullptr : &it->second;
+  }
+
   // Set the current day type index (used by EventLogger for per-type stats)
   void setCurrentDayTypeIdx(int idx) { current_day_type_idx_ = idx; }
 
@@ -315,7 +322,7 @@ class InteractionManager {
   // the main loop's STEP 1 ordering across rank counts.
   void aggregateOneVenueGroupForParent(
       size_t group_start, size_t group_end, double current_time,
-      double delta_hours, int num_modes,
+      const EmissionCalculator& emission_calculator, int num_modes,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data);
 
   // Look up parent_aggregates_[parent_id], lazily initialising its per-bin
@@ -328,15 +335,15 @@ class InteractionManager {
                                                     int num_modes);
 
   // Fill inf_by_mode with the per-mode integrated infectiousness (24*∫I dt)
-  // contributed by this member over [current_time, current_time+delta_hours].
+  // contributed by this member over the slot starting at current_time.
   // Visitor branch reads pre-computed values from the sending rank; local
-  // branch calls Infection::getIntegratedInfectiousness. Returns true iff
-  // the member contributes any positive infectiousness.
-  bool gatherMemberInfectiousnessByMode(const Person* person,
-                                        const VisitorInfo* visitor,
-                                        double current_time, double delta_hours,
-                                        int num_modes,
-                                        std::vector<double>& inf_by_mode) const;
+  // branch takes its Emission from `emission_calculator` into
+  // `emission_scratch`. Returns true iff the member contributes any positive
+  // infectiousness.
+  bool gatherMemberInfectiousnessByMode(
+      const Person* person, const VisitorInfo* visitor, double current_time,
+      const EmissionCalculator& emission_calculator, int num_modes,
+      Emission& emission_scratch, std::vector<double>& inf_by_mode) const;
 
   // Copy active_locations_buffer_[group_start..group_end) into a fresh vector
   // and sort it by person_id. Used by the parent-aggregate pre-pass to walk
@@ -385,11 +392,13 @@ class InteractionManager {
   // sub_bins[bin].infectious_ids + push per-mode integrated infectiousness
   // scaled by `scale`; (b) susceptible, append &member to
   // susc_by_bin[bin]; (c) dead/no role, only update headcount. sub_bins is
-  // pre-reset by the caller for this sub-interval.
+  // pre-reset by the caller for this sub-interval. A local's infectiousness
+  // comes from `emission_calculator` into `emission_scratch`.
   void classifyMembersInSubInterval(
       const std::vector<RuntimeGroupMember>& group, float t0, float t1,
-      double scale, double current_time, double delta_hours, int num_modes,
-      std::vector<PartialPresenceSubBin>& sub_bins,
+      double scale, double current_time,
+      const EmissionCalculator& emission_calculator, int num_modes,
+      std::vector<PartialPresenceSubBin>& sub_bins, Emission& emission_scratch,
       std::vector<std::vector<const RuntimeGroupMember*>>& susc_by_bin) const;
 
   // Return the contacts entry for (susc_bin, inf_bin), preferring
@@ -420,11 +429,13 @@ class InteractionManager {
   // the caller-owned scratch buffer reused per sub-interval.
   void accumulateOneGroup(const std::vector<RuntimeGroupMember>& group,
                           float slot_duration_min, double current_time,
-                          double delta_hours, int num_modes,
-                          int num_bins_needed, uint8_t venue_type_id,
+                          const EmissionCalculator& emission_calculator,
+                          int num_modes, int num_bins_needed,
+                          uint8_t venue_type_id,
                           const ContactMatrix& bin_structure,
                           const TransmissionParams& trans_params,
                           std::vector<PartialPresenceSubBin>& sub_bins,
+                          Emission& emission_scratch,
                           PartialPresenceLambdaResult& result) const;
 
   // Per-member body of the parent-aggregate pre-pass: resolve person/visitor,
@@ -436,8 +447,10 @@ class InteractionManager {
       const ContactMatrix* parent_matrix, int parent_num_bins,
       ParentAggregate& agg, std::vector<int>& csize,
       std::vector<std::vector<double>>& cinf, VenueId child_venue_id,
-      double current_time, double delta_hours, int num_modes,
+      double current_time, const EmissionCalculator& emission_calculator,
+      int num_modes,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data,
+      Emission& emission_scratch,
       std::vector<double>& inf_by_mode_scratch) const;
 
   // Populate active_locations_buffer_ with non-unallocated entries from
@@ -745,9 +758,8 @@ class InteractionManager {
   // Append a cross-rank visitor's per-mode infectiousness (pre-computed on
   // the sending rank) into bins_buffer_[bin_index]. Caller has already
   // confirmed visitor->is_infectious. Uses im_scratch_buffer_ as scratch.
-  void accumulateVisitorInfectiousness(const VisitorInfo* visitor,
-                                       PersonId pid, int bin_index,
-                                       int num_modes);
+  void accumulateVisitorInfectiousness(const VisitorInfo* visitor, PersonId pid,
+                                       int bin_index, int num_modes);
 
   // Append a local infectious person's per-mode integrated infectiousness
   // (Emission::infectiousness_by_mode, non-empty) into
