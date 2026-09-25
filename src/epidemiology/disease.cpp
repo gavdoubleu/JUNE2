@@ -572,6 +572,14 @@ void Infection::cacheCurrentSymptom(double lookup_time, uint16_t& symptom_id,
     stage_start_time = cached_symptom_start_time_;
     return;
   }
+  walkToSymptom(lookup_time, symptom_id, stage_start_time);
+  last_checked_time_ = lookup_time;
+  cached_symptom_id_ = symptom_id;
+  cached_symptom_start_time_ = stage_start_time;
+}
+
+void Infection::walkToSymptom(double lookup_time, uint16_t& symptom_id,
+                              double& stage_start_time) const {
   symptom_id = 0;
   stage_start_time = infection_time_;
   for (const auto& trans : trajectory_.transitions) {
@@ -582,9 +590,13 @@ void Infection::cacheCurrentSymptom(double lookup_time, uint16_t& symptom_id,
       break;
     }
   }
-  last_checked_time_ = lookup_time;
-  cached_symptom_id_ = symptom_id;
-  cached_symptom_start_time_ = stage_start_time;
+}
+
+uint16_t Infection::symptomIdAt(double time) const {
+  uint16_t symptom_id;
+  double stage_start_time;
+  walkToSymptom(time, symptom_id, stage_start_time);
+  return symptom_id;
 }
 
 double Infection::getInfectiousness(double current_time) const {

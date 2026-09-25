@@ -62,7 +62,7 @@ class Domain {
     // Pre-computed integrated infectiousness per mode (computed on sending
     // rank using the same code path as locals, ensuring bit-identical FP).
     // Sized at runtime to disease->numModes() at the visitor-build site
-    // (DomainCommunicator::buildOutgoing) when is_infectious, else empty.
+    // (buildVisitorPayload) when is_infectious, else empty.
     // See parallel/visitor_wire.h.
     std::vector<double> integrated_infectiousness;
 

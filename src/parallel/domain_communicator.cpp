@@ -8,71 +8,12 @@
 #include <utility>
 #include <vector>
 
-#include "epidemiology/fomite/fomite_sub_bins.h"
+#include "epidemiology/emission/emission.h"
 #include "parallel/domain_manager.h"
 #include "parallel/mpi_utils.h"
+#include "parallel/visitor_payload.h"
 #include "parallel/visitor_wire.h"
 #include "utils/profiler.h"
-
-namespace {
-
-// Builds a fully-populated VisitorData for a person attending a remote
-// venue. Pre-computes integrated_infectiousness per mode and the fomite
-// deposit per sub-bin using the SAME code paths as local people
-// (getIntegratedInfectiousness, FomiteSubBinSchedule::integrateDeposits) so
-// FP results are bit-identical regardless of where a person is processed.
-// Each tail is filled only when its header gate sends it (ii when infectious,
-// deposits when infected) and left empty otherwise; see visitor_wire.h.
-june::Domain::VisitorData buildVisitorPayload(
-    const june::PersonLocation& loc, const june::Person& person, int home_rank,
-    double current_time, double delta_hours, const june::Disease& disease,
-    const june::FomiteSubBinSchedule& fomite_schedule) {
-  june::Domain::VisitorData visitor;
-  visitor.person_id = loc.person_id;
-  visitor.home_rank = home_rank;
-  visitor.venue_id = loc.venue_id;
-  visitor.subset_idx = loc.subset_index;
-  visitor.is_infected = (person.infection != nullptr);
-  visitor.is_infectious =
-      visitor.is_infected && person.infection->isInfectious(current_time);
-
-  const double susceptibility =
-      person.getSusceptibility(current_time, disease.getName());
-  visitor.immunity_level = static_cast<float>(1.0 - susceptibility);
-
-  visitor.encounter_type_id = loc.encounter_type_id;
-  visitor.newly_infected = false;
-  visitor.new_infection_time = -1.0;
-
-  visitor.symptom_id = 0;
-  if (visitor.is_infected) {
-    const june::InfectionTrajectory& traj = person.infection->getTrajectory();
-    uint16_t cur_symptom_id = 0;
-    for (const auto& trans : traj.transitions) {
-      if (current_time >= trans.first) {
-        cur_symptom_id = trans.second;
-      } else {
-        break;
-      }
-    }
-    visitor.symptom_id = cur_symptom_id;
-
-    fomite_schedule.integrateDeposits(person.infection.get(), current_time,
-                                      visitor.fomite_deposition_sub);
-    if (visitor.is_infectious) {
-      const int num_modes = disease.numModes();
-      visitor.integrated_infectiousness.assign(num_modes, 0.0);
-      const double t1 = current_time + delta_hours / 24.0;
-      for (int m = 0; m < num_modes; ++m) {
-        visitor.integrated_infectiousness[m] =
-            person.infection->getIntegratedInfectiousness(m, current_time, t1);
-      }
-    }
-  }
-  return visitor;
-}
-
-}  // anonymous namespace
 
 namespace june {
 
@@ -95,15 +36,13 @@ void DomainCommunicator::exchangeVisitors(
   // Tail lengths are fixed for the exchange (Disease YAML and timestep).
   // Derive them once here so the same values size every visitor's payload
   // below and every wire buffer in the exchange helpers.
-  const FomiteSubBinSchedule fomite_schedule(disease.getTransmissionParams(),
-                                             delta_hours);
+  const EmissionCalculator calculator(disease, delta_hours);
   const VisitorTailCounts tails{disease.numModes(),
-                                fomite_schedule.totalSubBins()};
+                                calculator.fomiteSchedule().totalSubBins()};
 
   auto send = [&](const PersonLocation& loc, Person& person, int target_rank) {
-    outgoing[target_rank].push_back(
-        buildVisitorPayload(loc, person, rank_, current_time, delta_hours,
-                            disease, fomite_schedule));
+    outgoing[target_rank].push_back(buildVisitorPayload(
+        loc, person, rank_, current_time, disease, calculator));
     send_counts[target_rank] +=
         visitor_wire::recordSize(outgoing[target_rank].back(), tails);
   };

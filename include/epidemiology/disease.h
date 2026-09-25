@@ -343,6 +343,11 @@ class Infection {
   const Disease* getDisease() const { return disease_; }
   std::string getCurrentSymptom(double current_time) const;
   double getInfectionTime() const { return infection_time_; }
+
+  // Symptom id at `time` by a forward walk over the transitions (symptom 0
+  // before the first). A pure read: the symptom cache is checkpointed state,
+  // so this leaves it alone.
+  uint16_t symptomIdAt(double time) const;
   const InfectionTrajectory& getTrajectory() const { return trajectory_; }
 
   // --- Checkpoint serialization accessors (read-only) ---
@@ -410,6 +415,10 @@ class Infection {
   // scanning `trajectory_.transitions` and refreshing the cache.
   void cacheCurrentSymptom(double lookup_time, uint16_t& symptom_id,
                            double& stage_start_time) const;
+
+  // The forward walk behind cacheCurrentSymptom, without the cache.
+  void walkToSymptom(double lookup_time, uint16_t& symptom_id,
+                     double& stage_start_time) const;
 
   // Append transitions to `traj` by walking `traj_def.stages` from the first
   // stage whose symptom_tag matches `start_target` (or index 0 if empty / not
