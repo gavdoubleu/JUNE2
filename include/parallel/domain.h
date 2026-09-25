@@ -7,6 +7,7 @@
 #include <random>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "core/types.h"
@@ -126,6 +127,10 @@ class Domain {
 
   void addIncomingVisitor(const VisitorData& visitor) {
     incoming_visitors.push_back(visitor);
+  }
+
+  void addIncomingVisitor(VisitorData&& visitor) {
+    incoming_visitors.push_back(std::move(visitor));
   }
 
   // Print domain statistics

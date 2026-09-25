@@ -5,6 +5,7 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "epidemiology/fomite/fomite_sub_bins.h"
@@ -193,7 +194,7 @@ void DomainCommunicator::dispatchVisitorExchange(
 void DomainCommunicator::unpackIncomingVisitors(
     const char* begin, const char* end, const VisitorTailCounts& tails) {
   visitor_wire::unpackSlice(begin, end, tails, [&](Domain::VisitorData&& v) {
-    if (domain_.ownsVenue(v.venue_id)) domain_.addIncomingVisitor(v);
+    if (domain_.ownsVenue(v.venue_id)) domain_.addIncomingVisitor(std::move(v));
   });
 }
 
