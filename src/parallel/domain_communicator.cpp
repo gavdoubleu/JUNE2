@@ -271,10 +271,6 @@ void DomainCommunicator::dispatchVisitorExchange(
     exchangePointToPoint(outgoing, send_counts, tails);
   else
     exchangePointToPointVerySparse(outgoing, send_counts, tails);
-
-  for (int r = 0; r < num_ranks_; ++r) {
-    for (const auto& v : outgoing[r]) domain_.addOutgoingVisitor(v);
-  }
 }
 
 void DomainCommunicator::exchangeAllToAll(

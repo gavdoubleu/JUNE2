@@ -77,8 +77,6 @@ class Domain {
 
   std::vector<VisitorData>
       incoming_visitors;  // Visitors at our venues (from other ranks)
-  std::vector<VisitorData>
-      outgoing_visitors;  // Our residents visiting other ranks' venues
 
   // Domain-local state
   WorldState* world;  // Pointer to shared read-only world state
@@ -123,17 +121,10 @@ class Domain {
   void assignPeopleAndVenues();
 
   // Visitor management
-  void clearVisitors() {
-    incoming_visitors.clear();
-    outgoing_visitors.clear();
-  }
+  void clearVisitors() { incoming_visitors.clear(); }
 
   void addIncomingVisitor(const VisitorData& visitor) {
     incoming_visitors.push_back(visitor);
-  }
-
-  void addOutgoingVisitor(const VisitorData& visitor) {
-    outgoing_visitors.push_back(visitor);
   }
 
   // Print domain statistics

@@ -83,8 +83,7 @@ class DomainCommunicator {
       const VisitorTailCounts& tails);
 
   // Sparsity-driven dispatch: chooses among all-to-all, P2P, or very-sparse
-  // P2P based on the cross-rank send-pair density (MPI_Allreduce), then
-  // records the outgoing visitors locally.
+  // P2P based on the cross-rank send-pair density (MPI_Allreduce).
   void dispatchVisitorExchange(
       const std::vector<std::vector<Domain::VisitorData>>& outgoing,
       const std::vector<int>& send_counts, const VisitorTailCounts& tails);
