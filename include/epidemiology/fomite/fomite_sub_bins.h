@@ -37,7 +37,8 @@ class FomiteSubBinSchedule {
   // Fill `deposits_out` (resized to totalSubBins()) with the deposit per
   // sub-bin of the slot [current_time, current_time + delta_hours / 24).
   // All zero when `infection` is null. Deposition is keyed by symptom, so an
-  // infected Person may deposit before becoming infectious.
+  // infected Person may deposit before becoming infectious; a sub-bin
+  // straddling a transition deposits on each symptom's curve in turn.
   void integrateDeposits(const Infection* infection, double current_time,
                          std::vector<double>& deposits_out) const;
 

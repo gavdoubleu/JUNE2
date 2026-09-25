@@ -128,23 +128,29 @@ TEST_CASE("Deposits: sub-bins against hand-computed values") {
   schedule.integrateDeposits(infection.get(), 10.0, deposits);
 
   // Deposit = 24 * integral over the sub-bin of the curve of the symptom held
-  // at the sub-bin's start; the untabulated curves integrate by midpoint.
+  // at each instant; the untabulated curves integrate by midpoint.
   const double sub_bin_days = 0.25 / 3.0;
-  // Sub-bins 0 and 1 start exposed. Sub-bin 1 straddles the transition but is
-  // integrated wholly on the exposed curve.
+  // Sub-bin 0 is wholly exposed.
   const double exposed_sub_bin = 24.0 * 2.0 * sub_bin_days;  // 4
+  // Sub-bin 1 straddles the transition: exposed until 10.1, then mild with
+  // time in stage [0, 10.1667 - 10.1].
+  const double straddle_exposed_days = transition_time - (10.0 + sub_bin_days);
+  const double straddle_mild_days = 10.0 + 2 * sub_bin_days - transition_time;
+  const double straddle_sub_bin =
+      24.0 * 2.0 * straddle_exposed_days +
+      24.0 * (1.0 + 2.0 * 0.5 * straddle_mild_days) * straddle_mild_days;
   // Sub-bin 2 is mild, time in stage [10.1667 - 10.1, 10.25 - 10.1].
   const double mild_midpoint =
       0.5 * ((10.0 + 2 * sub_bin_days - transition_time) +
              (10.25 - transition_time));
   const double mild_sub_bin =
       24.0 * (1.0 + 2.0 * mild_midpoint) * sub_bin_days;  // ~2.4333
-  // Whole slot exposed on the second mode.
-  const double whole_slot = 24.0 * 1.0 * 0.25;  // 6
+  // Second mode: one sub-bin, deposits only while exposed (mild has no curve).
+  const double whole_slot = 24.0 * 1.0 * (transition_time - 10.0);  // 2.4
 
   REQUIRE(deposits.size() == 4);
   CHECK(deposits[0] == doctest::Approx(exposed_sub_bin));
-  CHECK(deposits[1] == doctest::Approx(exposed_sub_bin));
+  CHECK(deposits[1] == doctest::Approx(straddle_sub_bin));
   CHECK(deposits[2] == doctest::Approx(mild_sub_bin));
   CHECK(deposits[3] == doctest::Approx(whole_slot));
 }
