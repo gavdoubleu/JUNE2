@@ -11,6 +11,7 @@
 #include "core/config.h"
 #include "core/world_state.h"
 #include "disease.h"
+#include "epidemiology/emission/emission.h"
 #include "epidemiology/fomite/fomite_sub_bins.h"
 #include "policy.h"
 #include "utils/age_utils.h"
@@ -657,7 +658,7 @@ class InteractionManager {
   std::vector<double> binMembersAndPrepareBuffers(
       const std::vector<InteractionMember>& members, Venue* venue,
       const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
-      const FomiteSubBinSchedule& fomite_schedule, double current_time,
+      const EmissionCalculator& emission_calculator, double current_time,
       double delta_hours, uint8_t encounter_type_id,
       const std::string& venue_type, uint8_t venue_type_id,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data);
@@ -711,12 +712,12 @@ class InteractionManager {
   // STEP 1 classification dispatch for one (member, person, visitor) tuple
   // already pinned to bin_index. Pushes susceptible into
   // bins_buffer_[bin_index] or routes to accumulate{Visitor,Local}* helpers
-  // when infectious.
+  // when infectious. A local's Emission comes from `emission_calculator`.
   void binMemberClassification(const InteractionMember& member, Person* person,
                                const VisitorInfo* visitor, int bin_index,
                                int num_modes,
-                               const FomiteSubBinSchedule& fomite_schedule,
-                               double current_time, double delta_hours);
+                               const EmissionCalculator& emission_calculator,
+                               double current_time);
 
   // Resolve the matrix bin for a member: route through
   // computeBinIndexForMatrix, bump stats_.bin_lookups when matrix is non-null,
@@ -736,9 +737,9 @@ class InteractionManager {
   void binOneMember(
       const InteractionMember& member, Venue* venue,
       const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
-      const FomiteSubBinSchedule& fomite_schedule, double current_time,
-      double delta_hours, uint8_t encounter_type_id,
-      const std::string& venue_type, uint8_t venue_type_id,
+      const EmissionCalculator& emission_calculator, double current_time,
+      uint8_t encounter_type_id, const std::string& venue_type,
+      uint8_t venue_type_id,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data);
 
   // Append a cross-rank visitor's per-mode infectiousness (pre-computed on
@@ -749,17 +750,16 @@ class InteractionManager {
                                        int num_modes);
 
   // Append a local infectious person's per-mode integrated infectiousness
-  // into bins_buffer_[bin_index]. Caller has already confirmed
-  // person->infection && person->infection->isInfectious(current_time). Uses
-  // im_scratch_buffer_ as scratch.
-  void accumulateLocalInfectiousness(const Person* person, PersonId pid,
-                                     int bin_index, int num_modes,
-                                     double current_time, double delta_hours);
+  // (Emission::infectiousness_by_mode, non-empty) into
+  // bins_buffer_[bin_index].
+  void accumulateLocalInfectiousness(
+      const std::vector<double>& infectiousness_by_mode, PersonId pid,
+      int bin_index);
 
   // Add one infected member's deposits, flat in fomite_schedule order (see
   // FomiteSubBinSchedule::integrateDeposits), into
-  // bins_buffer_[bin_index].total_fomite_deposition_sub. Locals integrate
-  // theirs into fomite_deposit_scratch_; visitors arrive with theirs
+  // bins_buffer_[bin_index].total_fomite_deposition_sub. Locals' come from
+  // their Emission; visitors arrive with theirs
   // (VisitorInfo::fomite_deposition_sub).
   void addFomiteDeposits(int bin_index,
                          const FomiteSubBinSchedule& fomite_schedule,
@@ -913,8 +913,8 @@ class InteractionManager {
   // Per-mode infectiousness scratch buffer
   std::vector<double> im_scratch_buffer_;
 
-  // Per-(fomite mode, sub-bin) deposit scratch buffer
-  std::vector<double> fomite_deposit_scratch_;
+  // A local member's Emission, reused across members
+  Emission emission_scratch_;
 
   // Cached uniform distribution for transmission rolls
   std::uniform_real_distribution<double> uniform_dist_{0.0, 1.0};

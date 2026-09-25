@@ -61,7 +61,9 @@ int InteractionManager::processVenueTransmissions(
   int num_modes = std::max(1, disease_->numModes());
   const auto& trans_params = disease_->getTransmissionParams();
 
-  const FomiteSubBinSchedule fomite_schedule(trans_params, delta_hours);
+  const EmissionCalculator emission_calculator(*disease_, delta_hours);
+  const FomiteSubBinSchedule& fomite_schedule =
+      emission_calculator.fomiteSchedule();
   const auto& fomite_modes = fomite_schedule.modes();
   const auto& n_sub_per_mode = fomite_schedule.subBinsPerMode();
   const int num_fomite_modes = fomite_schedule.numModes();
@@ -73,7 +75,7 @@ int InteractionManager::processVenueTransmissions(
 
   std::vector<double> lambda_fomite_by_mode = binMembersAndPrepareBuffers(
       members, venue, *bin_structure, num_bins_needed, num_modes,
-      fomite_schedule, current_time, delta_hours, encounter_type_id,
+      emission_calculator, current_time, delta_hours, encounter_type_id,
       venue_type, venue_type_id, visitor_data);
 
   if (venueHasNoTransmissionPossible(num_bins_needed, comp_uptake_modes,
