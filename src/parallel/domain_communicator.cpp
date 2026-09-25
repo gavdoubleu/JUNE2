@@ -78,7 +78,7 @@ namespace june {
 
 DomainCommunicator::DomainCommunicator(WorldState& world, const Config& config,
                                        Domain& domain)
-    : world_(world), config_(config), domain_(domain), disease_(nullptr) {
+    : world_(world), config_(config), domain_(domain) {
   MPI_Comm_rank(MPI_COMM_WORLD, &rank_);
   MPI_Comm_size(MPI_COMM_WORLD, &num_ranks_);
 }

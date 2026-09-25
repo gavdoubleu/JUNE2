@@ -148,7 +148,6 @@ TEST_CASE(
   OutcomeRates outcome_rates;
   Disease disease("StageFlu", stags, stage_settings, trajectories,
                   outcome_rates, tp);
-  f.dm->setDisease(&disease);
 
   if (f.rank == 0) {
     Person* p = f.world.getPerson(TwoRankFixture::PERSON_R0);
@@ -218,7 +217,6 @@ TEST_CASE(
   td.selection_key = "general";
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("TrajFlu", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   if (f.rank == 0) {
     Person* p = f.world.getPerson(TwoRankFixture::PERSON_R0);
@@ -286,7 +284,6 @@ TEST_CASE("receivePendingInfections: transmission mode index is preserved") {
   td.selection_key = "general";
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("Plague", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   // Step 1: Person 0 visits Rank 1's venue
   int remote_venue = 1 - f.rank;
@@ -312,7 +309,7 @@ TEST_CASE("receivePendingInfections: transmission mode index is preserved") {
     pending.push_back(pi);
   }
 
-  f.dm->receivePendingInfections(pending);
+  f.dm->receivePendingInfections(pending, disease);
 
   // Step 3: Verify Person 0 on Rank 0 now has an infection with mode index 1
   if (f.rank == 0) {
@@ -363,7 +360,6 @@ TEST_CASE(
   td.selection_key = "general";
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("Plague2", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   // Step 1: rank 0's two people (0 and 2) visit rank 1's venue.
   std::vector<PersonLocation> locations;
@@ -415,7 +411,7 @@ TEST_CASE(
     pending.push_back(pi2);
   }
 
-  auto applied = f.dm->receivePendingInfections(pending);
+  auto applied = f.dm->receivePendingInfections(pending, disease);
 
   // Step 3: rank 0 must see both records with fields intact and
   // independent of each other — a wire-format desync corrupts the second

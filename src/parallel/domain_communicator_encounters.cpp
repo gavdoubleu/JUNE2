@@ -458,7 +458,7 @@ std::vector<char> packFinalizedLocal(
 namespace june {
 
 std::vector<PendingInfection> DomainCommunicator::receivePendingInfections(
-    const std::vector<PendingInfection>& pending) {
+    const std::vector<PendingInfection>& pending, const Disease& disease) {
   std::vector<std::vector<PendingInfection>> updates;
   std::vector<int> send_counts;
   routePendingByHomeRank(pending, updates, send_counts);
@@ -491,12 +491,12 @@ std::vector<PendingInfection> DomainCommunicator::receivePendingInfections(
   MPI_Alltoallv(sbuf.data(), sc.data(), sd.data(), MPI_BYTE, rbuf.data(),
                 rc.data(), rd.data(), MPI_BYTE, MPI_COMM_WORLD);
 
-  return unpackAndApplyIncoming(rbuf, rd, recv_counts);
+  return unpackAndApplyIncoming(rbuf, rd, recv_counts, disease);
 }
 
 std::vector<PendingInfection> DomainCommunicator::unpackAndApplyIncoming(
     const std::vector<char>& rbuf, const std::vector<int>& rd,
-    const std::vector<int>& recv_counts) {
+    const std::vector<int>& recv_counts, const Disease& disease) {
   std::vector<PendingInfection> newly_infected;
   for (int r = 0; r < num_ranks_; ++r) {
     if (r == rank_) continue;
@@ -505,7 +505,7 @@ std::vector<PendingInfection> DomainCommunicator::unpackAndApplyIncoming(
       PendingInfection record;
       ptr = kInfectionWire.unpack(ptr, record);
 
-      if (auto applied = applyOnePendingInfection(record)) {
+      if (auto applied = applyOnePendingInfection(record, disease)) {
         newly_infected.push_back(*applied);
       }
     }
@@ -532,10 +532,9 @@ void DomainCommunicator::routePendingByHomeRank(
 }
 
 std::optional<PendingInfection> DomainCommunicator::applyOnePendingInfection(
-    const PendingInfection& pending) {
+    const PendingInfection& pending, const Disease& disease) {
   Person* person = world_.getPerson(pending.person_id);
-  if (!person || person->infection || !domain_.ownsPerson(pending.person_id) ||
-      !disease_) {
+  if (!person || person->infection || !domain_.ownsPerson(pending.person_id)) {
     return std::nullopt;
   }
 
@@ -560,7 +559,7 @@ std::optional<PendingInfection> DomainCommunicator::applyOnePendingInfection(
       mix_seed(config_.simulation.random_seed, pending.person_id,
                static_cast<uint64_t>(pending.infection_time * 1000), venue_key);
   person->infection = std::make_unique<Infection>(
-      disease_, pending.infection_time, person,
+      &disease, pending.infection_time, person,
       static_cast<unsigned int>(infection_seed), &world_, venue_type_name,
       pending.venue_id, severity_factor, pending.infector_symptom_id, "", "",
       pending.transmission_mode_index);

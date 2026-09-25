@@ -178,10 +178,6 @@ void DomainManager::setMPI(int rank, int num_ranks) {
         std::make_unique<DomainCommunicator>(world_, config_, domain_);
 }
 
-void DomainManager::setDisease(const Disease* disease) {
-  if (communicator_) communicator_->setDisease(disease);
-}
-
 void DomainManager::loadGeographyOnNonZeroRanks() {
   WorldState temp = HDF5Loader::loadGeographyOnly(world_state_file_);
   world_.geo_units = std::move(temp.geo_units);
@@ -498,8 +494,8 @@ std::unordered_set<PersonId> DomainManager::getVisitorIds() const {
 }
 
 std::vector<PendingInfection> DomainManager::receivePendingInfections(
-    const std::vector<PendingInfection>& pending) {
-  return communicator_->receivePendingInfections(pending);
+    const std::vector<PendingInfection>& pending, const Disease& disease) {
+  return communicator_->receivePendingInfections(pending, disease);
 }
 
 void DomainManager::exchangeEncounterProposals(

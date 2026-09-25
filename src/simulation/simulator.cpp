@@ -495,13 +495,6 @@ Simulator::Simulator(WorldState& world, Config& config,
     std::cerr << "Continuing without policies." << std::endl;
   }
 
-  // Set disease in domain manager (if in parallel mode)
-#ifdef USE_MPI
-  if (domain_mgr_) {
-    domain_mgr_->setDisease(disease_.get());
-  }
-#endif
-
   // Initialize locations (everyone starts at residence)
   activity_manager_.initializeLocations(locations_);
 

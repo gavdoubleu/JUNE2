@@ -163,7 +163,6 @@ TEST_CASE("H1: Stage-driven visitor infects local susceptible") {
   td.severity = 1.0;
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("StageFlu", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   // Rank 0: infect person 0
   if (f.rank == 0) {
@@ -234,7 +233,6 @@ TEST_CASE("H2: Trajectory-driven visitor infects local susceptible") {
   td.selection_key = "general";
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("TrajFlu", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   if (f.rank == 0) {
     Person* p = f.world.getPerson(TwoRankFixture::PERSON_R0);
@@ -303,7 +301,6 @@ TEST_CASE("H3: Local infector infects visitor, pending routed back") {
   td.severity = 1.0;
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("StageFlu", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   // Rank 1: infect person 1 (local infector)
   if (f.rank == 1) {
@@ -350,7 +347,7 @@ TEST_CASE("H3: Local infector infects visitor, pending routed back") {
   }
 
   // Route pending infections back to home rank
-  f.dm->receivePendingInfections(pending);
+  f.dm->receivePendingInfections(pending, disease);
 
   // On rank 0: person 0 should now be infected
   if (f.rank == 0) {
@@ -392,7 +389,6 @@ TEST_CASE("H4: Multi-mode stage-driven infectiousness across ranks") {
   td.severity = 1.0;
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("MultiModeFlu", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   // Rank 0: infect person 0
   if (f.rank == 0) {
@@ -447,7 +443,6 @@ TEST_CASE("H5: Transmission mode index preserved across ranks") {
   td.severity = 1.0;
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("Plague", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   // Person 0 visits rank 1's venue
   f.dm->exchangeVisitors({makeRemoteLocation(f.rank)}, disease, 0.0, 1.0);
@@ -465,7 +460,7 @@ TEST_CASE("H5: Transmission mode index preserved across ranks") {
     pending.push_back(pi);
   }
 
-  f.dm->receivePendingInfections(pending);
+  f.dm->receivePendingInfections(pending, disease);
 
   if (f.rank == 0) {
     Person* p = f.world.getPerson(0);
@@ -503,7 +498,6 @@ TEST_CASE("H6: Immune visitor resists cross-rank infection") {
   td.severity = 1.0;
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("StageFlu", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   // Rank 1: infect person 1 (local infector)
   if (f.rank == 1) {
@@ -557,7 +551,7 @@ TEST_CASE("H6: Immune visitor resists cross-rank infection") {
   }
 
   // Route any pending infections back
-  f.dm->receivePendingInfections(pending);
+  f.dm->receivePendingInfections(pending, disease);
 
   // Person 0 should NOT be infected (immune)
   if (f.rank == 0) {
@@ -592,7 +586,6 @@ TEST_CASE("H7: Bidirectional cross-rank transmission") {
   td.severity = 1.0;
   td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
   Disease disease("StageFlu", stags, {}, {td}, {}, tp);
-  f.dm->setDisease(&disease);
 
   // Both persons are infectious
   Person* local_p = f.world.getPerson(f.rank);
@@ -702,7 +695,6 @@ static void checkVisitorDepositsLikeLocal(
   TwoRankFixture f;
   REQUIRE(f.size == 2);
   Disease disease = makeFomiteDisease(sub_bin_time);
-  f.dm->setDisease(&disease);
 
   Person* local_person = f.world.getPerson(f.rank);
   local_person->infection =

@@ -169,7 +169,7 @@ void Simulator::receivePendingAndApply(
   if (domain_mgr_ == nullptr) return;
   try {
     auto mpi_infected =
-        domain_mgr_->receivePendingInfections(pending_infections);
+        domain_mgr_->receivePendingInfections(pending_infections, *disease_);
     for (const auto& applied : mpi_infected) {
       epidemiology_->trackInfection(applied.person_id);
       event_logger_.logInfection(

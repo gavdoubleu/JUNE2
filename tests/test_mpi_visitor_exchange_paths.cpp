@@ -160,7 +160,6 @@ void checkExchange(const std::vector<std::pair<int, int>>& pairs) {
   RankPerPersonFixture fixture;
   REQUIRE(fixture.size == kNumRanks);
   Disease disease = makeFomiteDisease();
-  fixture.dm->setDisease(&disease);
 
   const HomeState state = homeState(fixture.rank);
   if (state != HomeState::Uninfected) {
