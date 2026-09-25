@@ -281,18 +281,6 @@ class Disease {
   double evaluateStageDrivenInfectiousness(int mode_index, uint16_t symptom_id,
                                            float time_in_stage) const;
 
-  /// Integrate stage-driven infectiousness over [t_in_stage_start,
-  /// t_in_stage_end] (both in days). Returns 24 * integral (in hours).
-  double integrateStageDrivenInfectiousness(int mode_index, uint16_t symptom_id,
-                                            double t_in_stage_start,
-                                            double t_in_stage_end) const;
-
-  /// Evaluate fomite deposition rate for a given fomite mode, symptom, and
-  /// time-in-stage. Used by the host rank to reconstruct per-mode deposition
-  /// for cross-rank visitors.
-  double evaluateFomiteDeposition(int fomite_mode_index, uint16_t symptom_id,
-                                  double time_in_stage) const;
-
  private:
   std::string name_;
   std::vector<SymptomTag> symptom_tags_;

@@ -81,7 +81,7 @@ TEST_CASE("FoI: Single infectious person, single susceptible, single mode") {
 
   // Theoretical: I_integrated = curve(t_in_stage) * delta_hours
   //   ConstantCurve(1.0) evaluated over [t_in_stage, t_in_stage + delta/24]
-  //   integrateStageDrivenInfectiousness returns 24 * integral(days)
+  //   Infection::getIntegratedInfectiousness returns 24 * integral(days)
   //   = 24 * 1.0 * (delta_hours/24) = delta_hours
   // lambda = contacts / N_bin * I_integrated
   //   N_bin = max(1, 2-1) = 1 (same bin, self-subtracted)

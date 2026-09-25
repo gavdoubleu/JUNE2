@@ -205,35 +205,6 @@ double Disease::evaluateStageDrivenInfectiousness(int mode_index,
   return curves[symptom_id]->evaluate(static_cast<double>(time_in_stage));
 }
 
-double Disease::integrateStageDrivenInfectiousness(
-    int mode_index, uint16_t symptom_id, double t_in_stage_start,
-    double t_in_stage_end) const {
-  if (transmission_params_.mode != InfectiousnessMode::STAGE_DRIVEN) return 0.0;
-
-  const auto& modes = transmission_params_.modes;
-  int safe_mode =
-      (mode_index >= 0 && mode_index < (int)modes.size()) ? mode_index : 0;
-  const auto& curves = modes.empty() ? transmission_params_.symptom_id_curves
-                                     : modes[safe_mode].symptom_curves;
-
-  if (symptom_id >= curves.size() || !curves[symptom_id]) return 0.0;
-  return curves[symptom_id]->integrate(t_in_stage_start, t_in_stage_end) * 24.0;
-}
-
-double Disease::evaluateFomiteDeposition(int fomite_mode_index,
-                                         uint16_t symptom_id,
-                                         double time_in_stage) const {
-  const auto& modes = transmission_params_.modes;
-  if (fomite_mode_index < 0 || fomite_mode_index >= (int)modes.size())
-    return 0.0;
-  if (modes[fomite_mode_index].type != TransmissionModeType::Fomite) return 0.0;
-  const auto& cfg = std::get<FomiteConfig>(modes[fomite_mode_index].config);
-  if (symptom_id >= cfg.deposition_by_symptom.size()) return 0.0;
-  const auto& curve = cfg.deposition_by_symptom[symptom_id];
-  if (!curve) return 0.0;
-  return curve->evaluate(time_in_stage);
-}
-
 // =============================================================================
 // Infection Implementation
 // =============================================================================
