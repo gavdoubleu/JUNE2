@@ -57,7 +57,8 @@ std::vector<double> InteractionManager::binMembersAndPrepareBuffers(
 bool InteractionManager::venueHasNoTransmissionPossible(
     int num_bins_needed, const std::vector<int>& comp_uptake_modes,
     const std::vector<double>& lambda_fomite_by_mode, VenueId actual_venue_id,
-    const CompartmentalModelManager* comp_model) const {
+    const CompartmentalModelManager* comp_model,
+    bool has_sibling_source) const {
   bool has_infectious = false;
   bool has_susceptible = false;
   for (int b = 0; b < num_bins_needed; ++b) {
@@ -72,7 +73,29 @@ bool InteractionManager::venueHasNoTransmissionPossible(
       comp_model->venueToLocalNodeIndex(static_cast<int>(actual_venue_id)) >= 0;
 
   return !has_susceptible || (!has_infectious && total_lambda_fomite <= 0.0 &&
-                              !has_comp_uptake_potential);
+                              !has_comp_uptake_potential &&
+                              !has_sibling_source);
+}
+
+bool InteractionManager::venueHasSiblingSource(
+    const Venue* venue, VenueId venue_id, bool is_virtual_encounter) const {
+  if (!venue || venue->parent_id < 0 || is_virtual_encounter) return false;
+  auto parent_it = parent_aggregates_.find(venue->parent_id);
+  if (parent_it == parent_aggregates_.end()) return false;
+  const ParentAggregate& parent_aggregate = parent_it->second;
+
+  // Same parent-total-minus-own-share sum as appendSiblingMixingSources.
+  auto own_it = parent_aggregate.child_inf_by_bin_mode.find(venue_id);
+  const auto& total_inf = parent_aggregate.total_inf_by_bin_mode;
+  for (size_t parent_bin = 0; parent_bin < total_inf.size(); ++parent_bin) {
+    for (size_t mode = 0; mode < total_inf[parent_bin].size(); ++mode) {
+      double own_inf = (own_it != parent_aggregate.child_inf_by_bin_mode.end())
+                           ? own_it->second[parent_bin][mode]
+                           : 0.0;
+      if (total_inf[parent_bin][mode] - own_inf > 0.0) return true;
+    }
+  }
+  return false;
 }
 
 std::pair<const ParentAggregate*, const ContactMatrix*>
