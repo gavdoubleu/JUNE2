@@ -18,13 +18,7 @@
 #include <utility>
 #include <vector>
 
-#include "core/config.h"
-#include "core/types.h"
-#include "core/world_state.h"
-#include "epidemiology/disease.h"
-#include "epidemiology/infectiousness_curves.h"
-#include "parallel/domain.h"
-#include "parallel/domain_manager.h"
+#include "mpi_test_helpers.h"
 
 using namespace june;
 
@@ -32,107 +26,11 @@ namespace {
 
 constexpr int kNumRanks = 4;
 
-// Symptom ids: 0 = healthy, 1 = mild.
-constexpr uint16_t kHealthy = 0;
-constexpr uint16_t kMild = 1;
-
-// Rank r owns geo unit r, venue r and person r.
-struct RankPerPersonFixture {
-  int rank;
-  int size;
-
-  WorldState world;
-  Config config;
-  std::unique_ptr<DomainManager> dm;
-
-  RankPerPersonFixture() {
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    world.venue_type_names = {"household"};
-    world.geo_level_names = {"MGU"};
-    world.activity_names = {"residence", "work", "visiting", "none", "dead"};
-
-    GeographicalUnit geo_unit;
-    geo_unit.id = rank;
-    geo_unit.name = "MGU_" + std::to_string(rank);
-    geo_unit.level_id = 0;
-    geo_unit.parent_id = -1;
-    world.geo_units.push_back(geo_unit);
-
-    Venue venue;
-    venue.id = rank;
-    venue.type_id = 0;
-    venue.geo_unit_id = rank;
-    venue.is_residence = true;
-    world.venues.push_back(venue);
-
-    Person& person = world.people.emplace_back();
-    person.id = rank;
-    person.age = 30.0f;
-    person.sex = Sex::MALE;
-    person.geo_unit_id = rank;
-
-    world.buildIndices();
-
-    config.parallel.partition_level = "MGU";
-    config.parallel.geo_unit_chunk_size = 1000;
-
-    dm = std::make_unique<DomainManager>(world, config);
-    dm->setMPI(rank, size);
-    dm->setMaxPersonId(size - 1);
-    for (int owner = 0; owner < size; ++owner) {
-      dm->setGeoUnitRank(owner, owner);
-      dm->setPersonRank(owner, owner);
-      dm->setVenueRank(owner, owner);
-    }
-
-    Domain& domain = dm->getDomain();
-    domain.addGeoUnit(rank);
-    domain.resident_ids.push_back(rank);
-    domain.resident_set.insert(rank);
-    domain.local_venue_ids.push_back(rank);
-    domain.local_venue_set.insert(rank);
-  }
-};
+using fomite_flu::kHealthy;
+using fomite_flu::kMild;
 
 // Direct mode 0 plus fomite mode 1 in 2 h sub-bins.
-Disease makeFomiteDisease() {
-  TransmissionParams params;
-  params.mode = InfectiousnessMode::STAGE_DRIVEN;
-  auto curve = std::make_shared<ConstantCurve>(5.0);
-  params.symptom_id_curves = {nullptr, curve};
-
-  TransmissionMode direct;
-  direct.name = "direct";
-  direct.symptom_curves = params.symptom_id_curves;
-  params.modes.push_back(std::move(direct));
-
-  TransmissionMode fomite;
-  fomite.name = "fomite";
-  fomite.type = TransmissionModeType::Fomite;
-  fomite.symptom_curves = {nullptr, nullptr};
-  FomiteConfig fomite_config;
-  fomite_config.mode_index = 1;
-  fomite_config.max_age = 2.0;
-  fomite_config.sub_bin_time = 2.0;
-  fomite_config.infectiousness_curve = std::make_shared<ConstantCurve>(1.0);
-  fomite_config.deposition_by_symptom = {std::make_shared<ConstantCurve>(0.7),
-                                         std::make_shared<ConstantCurve>(2.0)};
-  fomite.config = std::move(fomite_config);
-  params.modes.push_back(std::move(fomite));
-
-  std::vector<SymptomTag> symptom_tags = {{"healthy", -1, kHealthy},
-                                          {"mild", 1, kMild}};
-  TrajectoryDefinition trajectory_definition;
-  trajectory_definition.selection_key = "general";
-  trajectory_definition.severity = 1.0;
-  trajectory_definition.stages.push_back(
-      {"mild", {"constant", {{"value", 100.0}}}});
-  return Disease("FomiteFlu", symptom_tags, {}, {trajectory_definition}, {},
-                 params);
-}
-
+constexpr double kSubBinTime = 2.0;
 constexpr int kNumModes = 2;
 constexpr double kCurrentTime = 10.0;
 constexpr double kDeltaHours = 6.0;
@@ -159,7 +57,7 @@ HomeState homeState(int home_rank) {
 void checkExchange(const std::vector<std::pair<int, int>>& pairs) {
   RankPerPersonFixture fixture;
   REQUIRE(fixture.size == kNumRanks);
-  Disease disease = makeFomiteDisease();
+  Disease disease = makeFomiteDisease(kSubBinTime);
 
   const HomeState state = homeState(fixture.rank);
   if (state != HomeState::Uninfected) {
@@ -173,9 +71,8 @@ void checkExchange(const std::vector<std::pair<int, int>>& pairs) {
             : std::vector<std::pair<double, uint16_t>>{{9.0, kHealthy},
                                                        {11.0, kMild}};
     fixture.world.getPerson(fixture.rank)->infection =
-        Infection::fromCheckpoint(&disease, 9.0, trajectory, 1.0, 1.0, 1.0,
-                                  0.0, /*last_checked_time=*/-1.0, kHealthy,
-                                  9.0);
+        Infection::fromCheckpoint(&disease, 9.0, trajectory, 1.0, 1.0, 1.0, 0.0,
+                                  /*last_checked_time=*/-1.0, kHealthy, 9.0);
   }
 
   std::vector<PersonLocation> locations;

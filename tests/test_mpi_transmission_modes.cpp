@@ -18,92 +18,14 @@
 #include <algorithm>
 #include <cmath>
 
-#include "core/config.h"
-#include "core/types.h"
-#include "core/world_state.h"
-#include "epidemiology/disease.h"
-#include "epidemiology/infectiousness_curves.h"
 #include "epidemiology/interaction_manager.h"
-#include "parallel/domain.h"
-#include "parallel/domain_manager.h"
+#include "mpi_test_helpers.h"
 #include "test_utils.h"
 
 using namespace june;
-
-// ---------------------------------------------------------------------------
-// TwoRankFixture: minimal 2-rank world (same pattern as
-// test_mpi_communication.cpp)
-//
-// rank 0 owns: geo_unit 0, venue 0, person 0
-// rank 1 owns: geo_unit 1, venue 1, person 1
-// ---------------------------------------------------------------------------
-struct TwoRankFixture {
-  int rank;
-  int size;
-
-  WorldState world;
-  Config config;
-  std::unique_ptr<DomainManager> dm;
-
-  static constexpr PersonId PERSON_R0 = 0;
-  static constexpr PersonId PERSON_R1 = 1;
-  static constexpr VenueId VENUE_R0 = 0;
-  static constexpr VenueId VENUE_R1 = 1;
-
-  TwoRankFixture() {
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &size);
-
-    world.venue_type_names = {"household"};
-    world.geo_level_names = {"MGU"};
-    world.activity_names = {"residence", "work", "visiting", "none", "dead"};
-    world.encounter_type_names = {};
-    world.subset_type_names = {};
-
-    GeographicalUnit gu;
-    gu.id = rank;
-    gu.name = "MGU_" + std::to_string(rank);
-    gu.level_id = 0;
-    gu.parent_id = -1;
-    world.geo_units.push_back(gu);
-
-    Venue v;
-    v.id = rank;
-    v.type_id = 0;
-    v.geo_unit_id = rank;
-    v.is_residence = true;
-    world.venues.push_back(v);
-
-    Person& p = world.people.emplace_back();
-    p.id = rank;
-    p.age = 30.0f;
-    p.sex = Sex::MALE;
-    p.geo_unit_id = rank;
-
-    world.buildIndices();
-
-    config.parallel.partition_level = "MGU";
-    config.parallel.geo_unit_chunk_size = 1000;
-
-    dm = std::make_unique<DomainManager>(world, config);
-    dm->setMPI(rank, size);
-    dm->setMaxPersonId(1);
-
-    dm->setGeoUnitRank(0, 0);
-    dm->setGeoUnitRank(1, 1);
-    dm->setPersonRank(PERSON_R0, 0);
-    dm->setPersonRank(PERSON_R1, 1);
-    dm->setVenueRank(VENUE_R0, 0);
-    dm->setVenueRank(VENUE_R1, 1);
-
-    Domain& domain = dm->getDomain();
-    domain.addGeoUnit(rank);
-    domain.resident_ids.push_back(rank);
-    domain.resident_set.insert(rank);
-    domain.local_venue_ids.push_back(rank);
-    domain.local_venue_set.insert(rank);
-  }
-};
+using fomite_flu::kExposed;
+using fomite_flu::kHealthy;
+using fomite_flu::kMild;
 
 // ---------------------------------------------------------------------------
 // Helper: build a PersonLocation targeting the remote rank's venue
@@ -144,25 +66,7 @@ TEST_CASE("H1: Stage-driven visitor infects local susceptible") {
   TwoRankFixture f;
   REQUIRE(f.size == 2);
 
-  TransmissionParams tp;
-  tp.mode = InfectiousnessMode::STAGE_DRIVEN;
-  auto curve = std::make_shared<ConstantCurve>(5.0);
-  tp.stage_curves["mild"] = curve;
-  tp.symptom_id_curves = {nullptr, curve};
-
-  {
-    TransmissionMode m;
-    m.name = "default";
-    m.symptom_curves = tp.symptom_id_curves;
-    tp.modes.push_back(std::move(m));
-  }
-
-  std::vector<SymptomTag> stags = {{"healthy", -1, 0}, {"mild", 1, 1}};
-  TrajectoryDefinition td;
-  td.selection_key = "general";
-  td.severity = 1.0;
-  td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
-  Disease disease("StageFlu", stags, {}, {td}, {}, tp);
+  Disease disease = makeStageDisease(std::make_shared<ConstantCurve>(5.0));
 
   // Rank 0: infect person 0
   if (f.rank == 0) {
@@ -220,19 +124,7 @@ TEST_CASE("H2: Trajectory-driven visitor infects local susceptible") {
   TwoRankFixture f;
   REQUIRE(f.size == 2);
 
-  TransmissionParams tp;
-  tp.mode = InfectiousnessMode::TRAJECTORY_DRIVEN;
-  tp.type = "gamma";
-  tp.max_infectiousness = {"constant", {{"value", 10.0}}};
-  tp.shape = {"constant", {{"value", 2.0}}};
-  tp.rate = {"constant", {{"value", 1.0}}};
-  tp.shift = {"constant", {{"value", 0.0}}};
-
-  std::vector<SymptomTag> stags = {{"healthy", -1, 0}, {"mild", 1, 1}};
-  TrajectoryDefinition td;
-  td.selection_key = "general";
-  td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
-  Disease disease("TrajFlu", stags, {}, {td}, {}, tp);
+  Disease disease = makeTrajectoryDisease(/*max_infectiousness=*/10.0);
 
   if (f.rank == 0) {
     Person* p = f.world.getPerson(TwoRankFixture::PERSON_R0);
@@ -282,25 +174,7 @@ TEST_CASE("H3: Local infector infects visitor, pending routed back") {
   TwoRankFixture f;
   REQUIRE(f.size == 2);
 
-  TransmissionParams tp;
-  tp.mode = InfectiousnessMode::STAGE_DRIVEN;
-  auto curve = std::make_shared<ConstantCurve>(5.0);
-  tp.stage_curves["mild"] = curve;
-  tp.symptom_id_curves = {nullptr, curve};
-
-  {
-    TransmissionMode m;
-    m.name = "default";
-    m.symptom_curves = tp.symptom_id_curves;
-    tp.modes.push_back(std::move(m));
-  }
-
-  std::vector<SymptomTag> stags = {{"healthy", -1, 0}, {"mild", 1, 1}};
-  TrajectoryDefinition td;
-  td.selection_key = "general";
-  td.severity = 1.0;
-  td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
-  Disease disease("StageFlu", stags, {}, {td}, {}, tp);
+  Disease disease = makeStageDisease(std::make_shared<ConstantCurve>(5.0));
 
   // Rank 1: infect person 1 (local infector)
   if (f.rank == 1) {
@@ -363,32 +237,8 @@ TEST_CASE("H4: Multi-mode stage-driven infectiousness across ranks") {
   TwoRankFixture f;
   REQUIRE(f.size == 2);
 
-  TransmissionParams tp;
-  tp.mode = InfectiousnessMode::STAGE_DRIVEN;
-  auto curve_resp = std::make_shared<ConstantCurve>(2.0);
-  auto curve_bite = std::make_shared<ConstantCurve>(0.8);
-  tp.stage_curves["mild"] = curve_resp;
-  tp.symptom_id_curves = {nullptr, curve_resp};
-
-  {
-    TransmissionMode m;
-    m.name = "respiratory";
-    m.symptom_curves = {nullptr, curve_resp};
-    tp.modes.push_back(std::move(m));
-  }
-  {
-    TransmissionMode m;
-    m.name = "animal_bite";
-    m.symptom_curves = {nullptr, curve_bite};
-    tp.modes.push_back(std::move(m));
-  }
-
-  std::vector<SymptomTag> stags = {{"healthy", -1, 0}, {"mild", 1, 1}};
-  TrajectoryDefinition td;
-  td.selection_key = "general";
-  td.severity = 1.0;
-  td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
-  Disease disease("MultiModeFlu", stags, {}, {td}, {}, tp);
+  Disease disease =
+      makeTwoModeStageDisease({"respiratory", 2.0}, {"animal_bite", 0.8});
 
   // Rank 0: infect person 0
   if (f.rank == 0) {
@@ -417,32 +267,8 @@ TEST_CASE("H5: Transmission mode index preserved across ranks") {
   TwoRankFixture f;
   REQUIRE(f.size == 2);
 
-  TransmissionParams tp;
-  tp.mode = InfectiousnessMode::STAGE_DRIVEN;
-  auto curve_bite = std::make_shared<ConstantCurve>(1.0);
-  auto curve_resp = std::make_shared<ConstantCurve>(2.0);
-  tp.stage_curves["mild"] = curve_bite;
-  tp.symptom_id_curves = {nullptr, curve_bite};
-
-  {
-    TransmissionMode m;
-    m.name = "animal_bite";
-    m.symptom_curves = {nullptr, curve_bite};
-    tp.modes.push_back(std::move(m));
-  }
-  {
-    TransmissionMode m;
-    m.name = "respiratory";
-    m.symptom_curves = {nullptr, curve_resp};
-    tp.modes.push_back(std::move(m));
-  }
-
-  std::vector<SymptomTag> stags = {{"healthy", -1, 0}, {"mild", 1, 1}};
-  TrajectoryDefinition td;
-  td.selection_key = "general";
-  td.severity = 1.0;
-  td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
-  Disease disease("Plague", stags, {}, {td}, {}, tp);
+  Disease disease =
+      makeTwoModeStageDisease({"animal_bite", 1.0}, {"respiratory", 2.0});
 
   // Person 0 visits rank 1's venue
   f.dm->exchangeVisitors({makeRemoteLocation(f.rank)}, disease, 0.0, 1.0);
@@ -479,25 +305,7 @@ TEST_CASE("H6: Immune visitor resists cross-rank infection") {
   TwoRankFixture f;
   REQUIRE(f.size == 2);
 
-  TransmissionParams tp;
-  tp.mode = InfectiousnessMode::STAGE_DRIVEN;
-  auto curve = std::make_shared<ConstantCurve>(5.0);
-  tp.stage_curves["mild"] = curve;
-  tp.symptom_id_curves = {nullptr, curve};
-
-  {
-    TransmissionMode m;
-    m.name = "default";
-    m.symptom_curves = tp.symptom_id_curves;
-    tp.modes.push_back(std::move(m));
-  }
-
-  std::vector<SymptomTag> stags = {{"healthy", -1, 0}, {"mild", 1, 1}};
-  TrajectoryDefinition td;
-  td.selection_key = "general";
-  td.severity = 1.0;
-  td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
-  Disease disease("StageFlu", stags, {}, {td}, {}, tp);
+  Disease disease = makeStageDisease(std::make_shared<ConstantCurve>(5.0));
 
   // Rank 1: infect person 1 (local infector)
   if (f.rank == 1) {
@@ -567,25 +375,7 @@ TEST_CASE("H7: Bidirectional cross-rank transmission") {
   TwoRankFixture f;
   REQUIRE(f.size == 2);
 
-  TransmissionParams tp;
-  tp.mode = InfectiousnessMode::STAGE_DRIVEN;
-  auto curve = std::make_shared<ConstantCurve>(5.0);
-  tp.stage_curves["mild"] = curve;
-  tp.symptom_id_curves = {nullptr, curve};
-
-  {
-    TransmissionMode m;
-    m.name = "default";
-    m.symptom_curves = tp.symptom_id_curves;
-    tp.modes.push_back(std::move(m));
-  }
-
-  std::vector<SymptomTag> stags = {{"healthy", -1, 0}, {"mild", 1, 1}};
-  TrajectoryDefinition td;
-  td.selection_key = "general";
-  td.severity = 1.0;
-  td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
-  Disease disease("StageFlu", stags, {}, {td}, {}, tp);
+  Disease disease = makeStageDisease(std::make_shared<ConstantCurve>(5.0));
 
   // Both persons are infectious
   Person* local_p = f.world.getPerson(f.rank);
@@ -608,51 +398,6 @@ TEST_CASE("H7: Bidirectional cross-rank transmission") {
 // ---------------------------------------------------------------------------
 // H8: a Visitor deposits exactly what an identical local would
 // ---------------------------------------------------------------------------
-// Symptom ids: 0 = healthy, 1 = exposed, 2 = mild. Healthy is infected but
-// not infectious (incubation).
-static constexpr uint16_t kHealthy = 0;
-static constexpr uint16_t kExposed = 1;
-static constexpr uint16_t kMild = 2;
-
-// Direct mode 0 plus fomite mode 1, sub-binned at `sub_bin_time` hours. Each
-// symptom deposits on a different curve; mild ramps, so a deposit depends on
-// the exact time in stage.
-static Disease makeFomiteDisease(double sub_bin_time) {
-  TransmissionParams tp;
-  tp.mode = InfectiousnessMode::STAGE_DRIVEN;
-  auto curve = std::make_shared<ConstantCurve>(5.0);
-  tp.symptom_id_curves = {nullptr, curve, curve};
-
-  TransmissionMode direct;
-  direct.name = "direct";
-  direct.symptom_curves = tp.symptom_id_curves;
-  tp.modes.push_back(std::move(direct));
-
-  TransmissionMode fomite;
-  fomite.name = "fomite";
-  fomite.type = TransmissionModeType::Fomite;
-  fomite.symptom_curves = {nullptr, nullptr, nullptr};
-  FomiteConfig fomite_config;
-  fomite_config.mode_index = 1;
-  fomite_config.max_age = 2.0;
-  fomite_config.sub_bin_time = sub_bin_time;
-  fomite_config.infectiousness_curve = std::make_shared<ConstantCurve>(1.0);
-  fomite_config.deposition_by_symptom = {
-      std::make_shared<ConstantCurve>(0.7),
-      std::make_shared<ConstantCurve>(2.0),
-      std::make_shared<LinearRampCurve>(1.0, 3.0, 1.0)};
-  fomite.config = std::move(fomite_config);
-  tp.modes.push_back(std::move(fomite));
-
-  std::vector<SymptomTag> stags = {
-      {"healthy", -1, kHealthy}, {"exposed", 0, kExposed}, {"mild", 1, kMild}};
-  TrajectoryDefinition td;
-  td.selection_key = "general";
-  td.severity = 1.0;
-  td.stages.push_back({"mild", {"constant", {{"value", 100.0}}}});
-  return Disease("FomiteFlu", stags, {}, {td}, {}, tp);
-}
-
 // An Infection following exactly `transitions` (time, symptom id).
 static std::unique_ptr<Infection> makeInfection(
     const Disease& disease, double infection_time,
@@ -681,8 +426,8 @@ static std::deque<Venue::DepositEvent> depositsFromOneSlot(
   SimulationConfig sim;
   ParallelConfig par;
   InteractionManager im(f.world, cm, sim, par, &disease, nullptr);
-  im.processTransmissions(locs, current_time, delta_hours, nullptr,
-                          visitor_ids, pending, visitor_data);
+  im.processTransmissions(locs, current_time, delta_hours, nullptr, visitor_ids,
+                          pending, visitor_data);
   return venue->fomite_history[0];
 }
 
@@ -697,8 +442,7 @@ static void checkVisitorDepositsLikeLocal(
   Disease disease = makeFomiteDisease(sub_bin_time);
 
   Person* local_person = f.world.getPerson(f.rank);
-  local_person->infection =
-      makeInfection(disease, infection_time, transitions);
+  local_person->infection = makeInfection(disease, infection_time, transitions);
 
   f.dm->exchangeVisitors({makeRemoteLocation(f.rank)}, disease, current_time,
                          delta_hours);
@@ -715,9 +459,9 @@ static void checkVisitorDepositsLikeLocal(
   auto visitor_deposits = depositsFromOneSlot(
       f, disease, {{visitor_id, f.rank, -1, 0, 255, 0}}, current_time,
       delta_hours, &visitor_ids, &pending, &visitor_data);
-  auto local_deposits = depositsFromOneSlot(
-      f, disease, {{f.rank, f.rank, -1, 0, 255, 0}}, current_time,
-      delta_hours, nullptr, nullptr, nullptr);
+  auto local_deposits =
+      depositsFromOneSlot(f, disease, {{f.rank, f.rank, -1, 0, 255, 0}},
+                          current_time, delta_hours, nullptr, nullptr, nullptr);
 
   REQUIRE_FALSE(local_deposits.empty());
   REQUIRE(visitor_deposits.size() == local_deposits.size());
@@ -749,9 +493,9 @@ TEST_CASE("H8c: Incubating Visitor alone still deposits") {
 // H9: uninfected, incubating and infectious Visitors in one exchange
 // ---------------------------------------------------------------------------
 enum class VisitorState { Uninfected, Incubating, Infectious };
-constexpr VisitorState kVisitorStates[] = {
-    VisitorState::Uninfected, VisitorState::Incubating,
-    VisitorState::Infectious};
+constexpr VisitorState kVisitorStates[] = {VisitorState::Uninfected,
+                                           VisitorState::Incubating,
+                                           VisitorState::Infectious};
 
 // Person on `owner` in `state`: ids 2.. so the fixture's persons 0 and 1 stay.
 static PersonId statePersonId(int owner, VisitorState state) {
@@ -844,8 +588,8 @@ static void checkMixedStateExchange(const std::vector<int>& senders) {
     std::unordered_set<PersonId> visitor_ids = {visitor.person_id};
     std::vector<PendingInfection> pending;
     auto visitor_deposits = depositsFromOneSlot(
-        f, disease, {{visitor.person_id, f.rank, -1, 0, 255, 0}},
-        kCurrentTime, kDeltaHours, &visitor_ids, &pending, &visitor_data);
+        f, disease, {{visitor.person_id, f.rank, -1, 0, 255, 0}}, kCurrentTime,
+        kDeltaHours, &visitor_ids, &pending, &visitor_data);
 
     const PersonId twin_id = statePersonId(f.rank, state);
     const size_t twin_index = f.world.person_index.at(twin_id);
