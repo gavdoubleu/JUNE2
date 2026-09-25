@@ -170,7 +170,7 @@ TEST_CASE(
   // [current_time, current_time + delta_hours/24].
   constexpr double delta_hours = 6.0;
   constexpr double current_time = 0.0;
-  f.dm->exchangeVisitors({loc}, current_time, delta_hours);
+  f.dm->exchangeVisitors({loc}, disease, current_time, delta_hours);
 
   Domain& domain = f.dm->getDomain();
   REQUIRE(domain.incoming_visitors.size() == 1);
@@ -238,7 +238,7 @@ TEST_CASE(
   loc.venue_id = remote_venue;
   loc.subset_index = 0;
   loc.activity_index = 1;
-  f.dm->exchangeVisitors({loc}, current_time, delta_hours);
+  f.dm->exchangeVisitors({loc}, disease, current_time, delta_hours);
 
   // Compute expected value on rank 0 and broadcast — verifying the
   // pre-computation invariant across ranks.
@@ -295,7 +295,7 @@ TEST_CASE("receivePendingInfections: transmission mode index is preserved") {
   loc.venue_id = remote_venue;
   loc.subset_index = 0;
   loc.activity_index = 1;
-  f.dm->exchangeVisitors({loc}, 0.0);
+  f.dm->exchangeVisitors({loc}, disease, 0.0);
 
   // Step 2: Rank 1 reports that Person 0 was infected via RESPIRATORY mode
   // (index 1)
@@ -382,7 +382,7 @@ TEST_CASE(
     loc2.activity_index = 1;
     locations.push_back(loc2);
   }
-  f.dm->exchangeVisitors(locations, 0.0);
+  f.dm->exchangeVisitors(locations, disease, 0.0);
 
   if (f.rank == 1) {
     REQUIRE(f.dm->getDomain().incoming_visitors.size() == 2);

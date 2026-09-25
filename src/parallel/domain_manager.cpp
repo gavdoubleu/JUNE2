@@ -484,10 +484,11 @@ void DomainManager::loadGlobalPersonMetadata() {
 }
 
 void DomainManager::exchangeVisitors(
-    const std::vector<PersonLocation>& locations, double current_time,
-    double delta_hours, const RuntimeGroupAllocator* alloc) {
-  communicator_->exchangeVisitors(locations, *this, current_time, delta_hours,
-                                  alloc);
+    const std::vector<PersonLocation>& locations, const Disease& disease,
+    double current_time, double delta_hours,
+    const RuntimeGroupAllocator* alloc) {
+  communicator_->exchangeVisitors(locations, disease, *this, current_time,
+                                  delta_hours, alloc);
 }
 
 std::unordered_set<PersonId> DomainManager::getVisitorIds() const {

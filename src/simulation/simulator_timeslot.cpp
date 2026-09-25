@@ -194,8 +194,9 @@ void Simulator::exchangeVisitorsAndBuildAugmented(
   }
   try {
     ScopedTimer timer("02_MPI_VisitorExchange");
-    domain_mgr_->exchangeVisitors(locations_, current_simulation_time_,
-                                  delta_hours, runtime_group_allocator_.get());
+    domain_mgr_->exchangeVisitors(locations_, *disease_,
+                                  current_simulation_time_, delta_hours,
+                                  runtime_group_allocator_.get());
 
     Domain& domain = domain_mgr_->getDomain();
 

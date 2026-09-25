@@ -194,7 +194,7 @@ void checkExchange(const std::vector<std::pair<int, int>>& pairs) {
     if (destination == fixture.rank) expected_senders.push_back(source);
   }
 
-  fixture.dm->exchangeVisitors(locations, kCurrentTime, kDeltaHours);
+  fixture.dm->exchangeVisitors(locations, disease, kCurrentTime, kDeltaHours);
 
   const auto& incoming = fixture.dm->getDomain().incoming_visitors;
   std::vector<int> senders;

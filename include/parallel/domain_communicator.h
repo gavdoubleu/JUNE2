@@ -34,8 +34,8 @@ class DomainCommunicator {
 
   // Exchange visitors across ranks
   void exchangeVisitors(const std::vector<PersonLocation>& locations,
-                        const DomainManager& dm, double current_time,
-                        double delta_hours = 0.0,
+                        const Disease& disease, const DomainManager& dm,
+                        double current_time, double delta_hours = 0.0,
                         const RuntimeGroupAllocator* alloc = nullptr);
 
   // Exchange pending infections across ranks. Returns the PendingInfection

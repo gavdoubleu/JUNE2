@@ -48,7 +48,8 @@ class DomainManager {
 
   // Delegated exchanges
   void exchangeVisitors(const std::vector<PersonLocation>& locations,
-                        double current_time, double delta_hours = 0.0,
+                        const Disease& disease, double current_time,
+                        double delta_hours = 0.0,
                         const RuntimeGroupAllocator* alloc = nullptr);
   std::unordered_set<PersonId> getVisitorIds() const;
   std::vector<PendingInfection> receivePendingInfections(
