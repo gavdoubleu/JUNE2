@@ -62,7 +62,7 @@ class Domain {
     // rank using the same code path as locals, ensuring bit-identical FP).
     // Sized at runtime to disease->numModes() at the visitor-build site
     // (DomainCommunicator::buildOutgoing). Wire format reads/writes the
-    // active count's worth of doubles. See packVisitor/unpackVisitor.
+    // active count's worth of doubles. See parallel/visitor_wire.h.
     std::vector<double> integrated_infectiousness;
 
     // Fomite deposit per (fomite mode, sub-bin), flat in

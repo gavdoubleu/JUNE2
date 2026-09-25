@@ -218,7 +218,8 @@ if(MPI_FOUND)
        src/parallel/seed_offer_exchange_mpi.cpp
        src/parallel/geography_partitioner.cpp
        src/parallel/domain_communicator.cpp
-       src/parallel/domain_communicator_encounters.cpp)
+       src/parallel/domain_communicator_encounters.cpp
+       src/parallel/visitor_wire.cpp)
 endif()
 
 # Create the library
@@ -338,6 +339,7 @@ if(BUILD_TESTING)
   endmacro()
 
   add_june_test(test_domain_communicator_detail "tests/test_domain_communicator_detail.cpp")
+  add_june_test(test_visitor_wire "tests/test_visitor_wire.cpp")
   add_june_test(test_run_dir "tests/test_run_dir.cpp")
   add_june_test(test_world_state "tests/test_world_state.cpp")
   add_june_test(test_selection_criterion_geography "tests/test_selection_criterion_geography.cpp")

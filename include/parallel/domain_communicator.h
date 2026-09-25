@@ -17,6 +17,7 @@
 #include "core/world_state.h"
 #include "domain.h"
 #include "epidemiology/disease.h"
+#include "parallel/visitor_wire.h"
 
 namespace june {
 class DomainManager;
@@ -58,13 +59,7 @@ class DomainCommunicator {
       std::vector<CoordinatedEncounter>& finalized_for_this_rank);
 
  private:
-  // Lengths of a visitor record's two count-known-elsewhere tails. Derived
-  // from the Disease and timestep, so identical on every rank and fixed for
-  // one exchange.
-  struct VisitorTailCounts {
-    int num_modes;        // integrated_infectiousness
-    int fomite_sub_bins;  // fomite_deposition_sub
-  };
+  using VisitorTailCounts = visitor_wire::TailCounts;
 
   void exchangeAllToAll(
       const std::vector<std::vector<Domain::VisitorData>>& outgoing,

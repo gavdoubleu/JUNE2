@@ -2,107 +2,18 @@
 
 #include "parallel/domain_communicator.h"
 
-#include <cstddef>
-#include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include "epidemiology/fomite/fomite_sub_bins.h"
-#include "parallel/domain_communicator_detail.h"
 #include "parallel/domain_manager.h"
 #include "parallel/mpi_utils.h"
+#include "parallel/visitor_wire.h"
 #include "utils/profiler.h"
 
 namespace {
-
-using june::domain_comm_detail::makeWireRecord;
-using june::domain_comm_detail::packField;
-using june::domain_comm_detail::unpackField;
-
-// Fixed header of the visitor wire format (everything before the
-// integrated_infectiousness payload); the variable-length per-mode payload and
-// the per-fomite-sub-bin deposits are appended manually after this, outside
-// WireRecord.
-// Total wire size =
-//   VISITOR_WIRE_HEADER + (num_modes + total_sub_bins) * sizeof(double).
-constexpr auto kVisitorWire = makeWireRecord(
-    &june::Domain::VisitorData::person_id,
-    &june::Domain::VisitorData::home_rank, &june::Domain::VisitorData::venue_id,
-    &june::Domain::VisitorData::subset_idx,
-    &june::Domain::VisitorData::is_infected,
-    &june::Domain::VisitorData::is_infectious,
-    &june::Domain::VisitorData::immunity_level,
-    &june::Domain::VisitorData::encounter_type_id,
-    &june::Domain::VisitorData::symptom_id);
-constexpr int VISITOR_WIRE_HEADER = kVisitorWire.size();
-// Tripwire: VisitorData's trailing integrated_infectiousness and
-// fomite_deposition_sub are std::vector<double>s packed manually as
-// count-known-elsewhere tails (not via WireRecord), and fields after them
-// (newly_infected etc.) are pure return data never on the wire, so
-// sizeof(VisitorData) isn't a useful proxy here.
-// offsetof(integrated_infectiousness) instead marks where the fixed header
-// covered by kVisitorWire ends - it moves if a field is added/removed/resized
-// anywhere before the tails.
-// offsetof is only standard-guaranteed for standard-layout types; guard that
-// assumption explicitly so a future member (e.g. a std::set) that breaks it
-// fails loudly here rather than degrading to a silent -Winvalid-offsetof.
-static_assert(std::is_standard_layout_v<june::Domain::VisitorData>,
-              "VisitorData must stay standard-layout for the offsetof check "
-              "below to be well-defined");
-static_assert(offsetof(june::Domain::VisitorData, integrated_infectiousness) ==
-                  32,
-              "VisitorData's fixed-header region changed - check kVisitorWire "
-              "covers every field, then update this literal");
-inline int visitorWireSize(int num_modes, int total_sub_bins) {
-  return VISITOR_WIRE_HEADER +
-         (num_modes + total_sub_bins) * static_cast<int>(sizeof(double));
-}
-
-// Tails are exactly `count` long; sender and receiver agree on the counts from
-// the Disease and timestep, which every rank loads identically. A mismatch is
-// a config bug, caught loud rather than papered over.
-char* packTail(char* ptr, const std::vector<double>& tail, int count,
-               const char* name) {
-  if (static_cast<int>(tail.size()) != count) {
-    throw std::runtime_error(std::string("packVisitor: ") + name + " size " +
-                             std::to_string(tail.size()) + " != " +
-                             std::to_string(count));
-  }
-  if (count > 0) {
-    std::memcpy(ptr, tail.data(), count * sizeof(double));
-    ptr += count * sizeof(double);
-  }
-  return ptr;
-}
-
-const char* unpackTail(const char* ptr, std::vector<double>& tail,
-                       int count) {
-  tail.assign(count, 0.0);
-  if (count > 0) {
-    std::memcpy(tail.data(), ptr, count * sizeof(double));
-    ptr += count * sizeof(double);
-  }
-  return ptr;
-}
-
-char* packVisitor(char* ptr, const june::Domain::VisitorData& v, int num_modes,
-                  int total_sub_bins) {
-  ptr = kVisitorWire.pack(ptr, v);
-  ptr = packTail(ptr, v.integrated_infectiousness, num_modes,
-                 "integrated_infectiousness");
-  return packTail(ptr, v.fomite_deposition_sub, total_sub_bins,
-                  "fomite_deposition_sub");
-}
-
-const char* unpackVisitor(const char* ptr, june::Domain::VisitorData& v,
-                          int num_modes, int total_sub_bins) {
-  ptr = kVisitorWire.unpack(ptr, v);
-  ptr = unpackTail(ptr, v.integrated_infectiousness, num_modes);
-  return unpackTail(ptr, v.fomite_deposition_sub, total_sub_bins);
-}
 
 // Builds a fully-populated VisitorData for a person attending a remote
 // venue. Pre-computes integrated_infectiousness per mode and the fomite
@@ -281,7 +192,8 @@ void DomainCommunicator::exchangeAllToAll(
   MPI_Alltoall(send_counts.data(), 1, MPI_INT, recv_counts.data(), 1, MPI_INT,
                MPI_COMM_WORLD);
 
-  const int wire_size = visitorWireSize(tails.num_modes, tails.fomite_sub_bins);
+  // Every record has full-length tails, so one size fits all.
+  const int wire_size = visitor_wire::recordSize(Domain::VisitorData{}, tails);
 
   std::vector<int> sdisp, rdisp;
   int stotal, rtotal;
@@ -294,7 +206,7 @@ void DomainCommunicator::exchangeAllToAll(
   for (int r = 0; r < num_ranks_; ++r) {
     char* ptr = sbuf.data() + sdisp[r];
     for (const auto& v : outgoing[r]) {
-      ptr = packVisitor(ptr, v, tails.num_modes, tails.fomite_sub_bins);
+      ptr = visitor_wire::pack(ptr, v, tails);
     }
   }
 
@@ -311,7 +223,7 @@ void DomainCommunicator::exchangeAllToAll(
     const char* ptr = rbuf.data() + rdisp[r];
     for (int i = 0; i < recv_counts[r]; ++i) {
       Domain::VisitorData v;
-      ptr = unpackVisitor(ptr, v, tails.num_modes, tails.fomite_sub_bins);
+      ptr = visitor_wire::unpack(ptr, v, tails);
       if (domain_.ownsVenue(v.venue_id)) domain_.addIncomingVisitor(v);
     }
   }
@@ -335,7 +247,8 @@ void DomainCommunicator::performP2PVisitorExchange(
   std::vector<MPI_Request> sreqs, rreqs;
   std::vector<std::vector<char>> rbufs(num_ranks_);
 
-  const int wire_size = visitorWireSize(tails.num_modes, tails.fomite_sub_bins);
+  // Every record has full-length tails, so one size fits all.
+  const int wire_size = visitor_wire::recordSize(Domain::VisitorData{}, tails);
 
   for (int r = 0; r < num_ranks_; ++r) {
     if (r != rank_ && recv_counts[r] > 0) {
@@ -364,7 +277,7 @@ void DomainCommunicator::performP2PVisitorExchange(
       }
       char* ptr = sbufs[r].data();
       for (const auto& v : outgoing[r]) {
-        ptr = packVisitor(ptr, v, tails.num_modes, tails.fomite_sub_bins);
+        ptr = visitor_wire::pack(ptr, v, tails);
       }
       MPI_Request req;
       MPI_Isend(sbufs[r].data(), sbufs[r].size(), MPI_BYTE, r, 101,
@@ -381,7 +294,7 @@ void DomainCommunicator::performP2PVisitorExchange(
       const char* ptr = rbufs[r].data();
       for (int i = 0; i < recv_counts[r]; ++i) {
         Domain::VisitorData v;
-        ptr = unpackVisitor(ptr, v, tails.num_modes, tails.fomite_sub_bins);
+        ptr = visitor_wire::unpack(ptr, v, tails);
         if (domain_.ownsVenue(v.venue_id)) domain_.addIncomingVisitor(v);
       }
     }
