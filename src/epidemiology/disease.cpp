@@ -481,7 +481,9 @@ InfectionTrajectory Infection::generateTrajectoryFromRates(
     std::cerr
         << "WARNING: person pointer is null in generateTrajectoryFromRates"
         << std::endl;
-    return InfectionTrajectory();
+    InfectionTrajectory traj;
+    traj.infection_time = infection_time_;
+    return traj;
   }
 
   InfectionTrajectory traj;

@@ -60,6 +60,34 @@ TEST_CASE("Disease trajectory progression") {
   }
 }
 
+TEST_CASE("Trajectory carries infection time without a person") {
+  TransmissionParams trans;
+  trans.mode = InfectiousnessMode::STAGE_DRIVEN;
+
+  TrajectoryDefinition td;
+  td.selection_key = "general_population";
+  td.stages.push_back({"mild", {"constant", {{"value", 5.0}}}});
+
+  SymptomTag healthy;
+  healthy.name = "healthy";
+  healthy.id = 0;
+  healthy.value = -1;
+  SymptomTag mild;
+  mild.name = "mild";
+  mild.id = 1;
+  mild.value = 1;
+
+  DiseaseStageSettings stage_settings;
+  stage_settings.recovered_stages = {"healthy"};
+
+  Disease disease("TestFlu", {healthy, mild}, stage_settings, {td}, {}, trans);
+
+  // Null person takes the warning path, which builds no transitions; the first
+  // stage start is still the infection time.
+  Infection infection(&disease, 7.5, nullptr, 123);
+  CHECK(infection.getTrajectory().infection_time == 7.5);
+}
+
 TEST_CASE("Sentinel venue_id=-1 filtered by processTransmissions") {
   WorldState world = TestWorldFactory::createMinimalWorld(2, 1);
   Venue& venue = world.venues[0];

@@ -298,7 +298,7 @@ class Disease {
 // =============================================================================
 
 struct InfectionTrajectory {
-  double infection_time;
+  double infection_time = 0.0;
   double infectiousness_factor = 1.0;
 
   std::vector<std::pair<double, uint16_t>> transitions;  // (time, symptom_id)
