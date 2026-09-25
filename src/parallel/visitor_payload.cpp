@@ -2,8 +2,6 @@
 
 #include "parallel/visitor_payload.h"
 
-#include <utility>
-
 namespace june {
 
 Domain::VisitorData buildVisitorPayload(const PersonLocation& location,
@@ -31,11 +29,7 @@ Domain::VisitorData buildVisitorPayload(const PersonLocation& location,
   visitor.symptom_id =
       visitor.is_infected ? person.infection->symptomIdAt(slot_start) : 0;
 
-  Emission emission;
-  calculator.emit(person, slot_start, emission);
-  visitor.integrated_infectiousness =
-      std::move(emission.infectiousness_by_mode);
-  visitor.fomite_deposition_sub = std::move(emission.fomite_deposits);
+  calculator.emit(person, slot_start, visitor.emission);
   return visitor;
 }
 

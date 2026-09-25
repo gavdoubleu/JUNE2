@@ -104,12 +104,13 @@ void checkExchange(const std::vector<std::pair<int, int>>& pairs) {
     CHECK(visitor.is_infected == infected);
     CHECK(visitor.is_infectious == infectious);
     // A tail arrives full length if its header gate sends it, else empty.
-    REQUIRE(visitor.integrated_infectiousness.size() ==
+    REQUIRE(visitor.emission.infectiousness_by_mode.size() ==
             (infectious ? kNumModes : 0));
-    REQUIRE(visitor.fomite_deposition_sub.size() ==
+    REQUIRE(visitor.emission.fomite_deposits.size() ==
             (infected ? kFomiteSubBins : 0));
-    if (infectious) CHECK(visitor.integrated_infectiousness[0] > 0.0);
-    for (double deposit : visitor.fomite_deposition_sub) CHECK(deposit > 0.0);
+    if (infectious) CHECK(visitor.emission.infectiousness_by_mode[0] > 0.0);
+    for (double deposit : visitor.emission.fomite_deposits)
+      CHECK(deposit > 0.0);
   }
   std::sort(senders.begin(), senders.end());
   std::sort(expected_senders.begin(), expected_senders.end());

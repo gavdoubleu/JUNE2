@@ -17,10 +17,9 @@ namespace {
 
 using june::domain_comm_detail::makeWireRecord;
 
-// Fixed header of the visitor wire format (everything before the
-// integrated_infectiousness payload); the variable-length per-mode payload and
-// the per-fomite-sub-bin deposits are appended manually after this, outside
-// WireRecord.
+// Fixed header of the visitor wire format (everything before the emission);
+// the variable-length per-mode infectiousness and the per-fomite-sub-bin
+// deposits are appended manually after this, outside WireRecord.
 constexpr auto kVisitorWire = makeWireRecord(
     &Domain::VisitorData::person_id, &Domain::VisitorData::home_rank,
     &Domain::VisitorData::venue_id, &Domain::VisitorData::subset_idx,
@@ -28,12 +27,12 @@ constexpr auto kVisitorWire = makeWireRecord(
     &Domain::VisitorData::immunity_level,
     &Domain::VisitorData::encounter_type_id, &Domain::VisitorData::symptom_id);
 constexpr int VISITOR_WIRE_HEADER = kVisitorWire.size();
-// Tripwire: VisitorData's trailing integrated_infectiousness and
-// fomite_deposition_sub are std::vector<double>s packed manually as
+// Tripwire: VisitorData's trailing emission holds two std::vector<double>s,
+// infectiousness_by_mode and fomite_deposits, packed manually as
 // count-known-elsewhere tails (not via WireRecord), and fields after them
 // (newly_infected etc.) are pure return data never on the wire, so
 // sizeof(VisitorData) isn't a useful proxy here.
-// offsetof(integrated_infectiousness) instead marks where the fixed header
+// offsetof(emission) instead marks where the fixed header
 // covered by kVisitorWire ends - it moves if a field is added/removed/resized
 // anywhere before the tails.
 // offsetof is only standard-guaranteed for standard-layout types; guard that
@@ -42,7 +41,7 @@ constexpr int VISITOR_WIRE_HEADER = kVisitorWire.size();
 static_assert(std::is_standard_layout_v<Domain::VisitorData>,
               "VisitorData must stay standard-layout for the offsetof check "
               "below to be well-defined");
-static_assert(offsetof(Domain::VisitorData, integrated_infectiousness) == 32,
+static_assert(offsetof(Domain::VisitorData, emission) == 32,
               "VisitorData's fixed-header region changed - check kVisitorWire "
               "covers every field, then update this literal");
 
@@ -114,19 +113,22 @@ int recordSize(const Domain::VisitorData& visitor, const TailCounts& tails) {
 char* pack(char* ptr, const Domain::VisitorData& visitor,
            const TailCounts& tails) {
   ptr = kVisitorWire.pack(ptr, visitor);
-  ptr = packGatedTail(ptr, visitor.integrated_infectiousness,
+  ptr = packGatedTail(ptr, visitor.emission.infectiousness_by_mode,
                       visitor.is_infectious, tails.num_modes,
-                      "integrated_infectiousness");
-  return packGatedTail(ptr, visitor.fomite_deposition_sub, visitor.is_infected,
-                       tails.fomite_sub_bins, "fomite_deposition_sub");
+                      "infectiousness_by_mode");
+  return packGatedTail(ptr, visitor.emission.fomite_deposits,
+                       visitor.is_infected, tails.fomite_sub_bins,
+                       "fomite_deposits");
 }
 
 const char* unpack(const char* ptr, Domain::VisitorData& visitor,
                    const TailCounts& tails) {
   ptr = kVisitorWire.unpack(ptr, visitor);
   const TailCounts sent = sentTailCounts(visitor, tails);
-  ptr = unpackTail(ptr, visitor.integrated_infectiousness, sent.num_modes);
-  return unpackTail(ptr, visitor.fomite_deposition_sub, sent.fomite_sub_bins);
+  ptr = unpackTail(ptr, visitor.emission.infectiousness_by_mode,
+                   sent.num_modes);
+  return unpackTail(ptr, visitor.emission.fomite_deposits,
+                    sent.fomite_sub_bins);
 }
 
 namespace detail {
@@ -149,8 +151,8 @@ const char* unpackWithin(const char* ptr, const char* end,
   }
   const TailCounts sent = sentTailCounts(visitor, tails);
   const char* next = unpackTail(
-      tails_begin, visitor.integrated_infectiousness, sent.num_modes);
-  return unpackTail(next, visitor.fomite_deposition_sub,
+      tails_begin, visitor.emission.infectiousness_by_mode, sent.num_modes);
+  return unpackTail(next, visitor.emission.fomite_deposits,
                     sent.fomite_sub_bins);
 }
 

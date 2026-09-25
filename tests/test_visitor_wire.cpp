@@ -28,9 +28,9 @@ Domain::VisitorData makeVisitor(int num_modes, int fomite_sub_bins) {
   visitor.encounter_type_id = 5;
   visitor.symptom_id = 9;
   for (int mode = 0; mode < num_modes; ++mode)
-    visitor.integrated_infectiousness.push_back(0.1 * (mode + 1) + 1e-17);
+    visitor.emission.infectiousness_by_mode.push_back(0.1 * (mode + 1) + 1e-17);
   for (int bin = 0; bin < fomite_sub_bins; ++bin)
-    visitor.fomite_deposition_sub.push_back(1.0 / 3.0 * (bin + 1));
+    visitor.emission.fomite_deposits.push_back(1.0 / 3.0 * (bin + 1));
   return visitor;
 }
 
@@ -56,8 +56,9 @@ void checkRoundTrip(const Domain::VisitorData& sent,
   CHECK(received.encounter_type_id == sent.encounter_type_id);
   CHECK(received.symptom_id == sent.symptom_id);
   // Exact equality: tails must arrive bit-identical.
-  CHECK(received.integrated_infectiousness == sent.integrated_infectiousness);
-  CHECK(received.fomite_deposition_sub == sent.fomite_deposition_sub);
+  CHECK(received.emission.infectiousness_by_mode ==
+        sent.emission.infectiousness_by_mode);
+  CHECK(received.emission.fomite_deposits == sent.emission.fomite_deposits);
 }
 
 }  // namespace
@@ -98,11 +99,11 @@ TEST_CASE("visitor wire: pack throws when a tail's length differs from its "
   std::vector<char> buffer(visitor_wire::recordSize(makeVisitor(2, 10), tails) +
                            64);
 
-  SUBCASE("integrated_infectiousness") {
+  SUBCASE("infectiousness_by_mode") {
     CHECK_THROWS_AS(visitor_wire::pack(buffer.data(), makeVisitor(3, 10), tails),
                     std::runtime_error);
   }
-  SUBCASE("fomite_deposition_sub") {
+  SUBCASE("fomite_deposits") {
     CHECK_THROWS_AS(visitor_wire::pack(buffer.data(), makeVisitor(2, 9), tails),
                     std::runtime_error);
   }
@@ -135,8 +136,8 @@ TEST_CASE("visitor wire: slice of records round-trips in order") {
   REQUIRE(received.size() == sent.size());
   for (std::size_t index = 0; index < sent.size(); ++index) {
     CHECK(received[index].person_id == sent[index].person_id);
-    CHECK(received[index].fomite_deposition_sub ==
-          sent[index].fomite_deposition_sub);
+    CHECK(received[index].emission.fomite_deposits ==
+          sent[index].emission.fomite_deposits);
   }
 }
 
@@ -181,14 +182,14 @@ TEST_CASE("visitor wire: pack throws when a tail it skips is nonzero") {
 
   SUBCASE("uninfected with a deposit") {
     Domain::VisitorData uninfected = makeUninfectedVisitor();
-    uninfected.fomite_deposition_sub.assign(10, 0.0);
-    uninfected.fomite_deposition_sub[4] = 1e-9;
+    uninfected.emission.fomite_deposits.assign(10, 0.0);
+    uninfected.emission.fomite_deposits[4] = 1e-9;
     CHECK_THROWS_AS(visitor_wire::pack(buffer.data(), uninfected, tails),
                     std::runtime_error);
   }
   SUBCASE("not infectious with integrated infectiousness") {
     Domain::VisitorData incubating = makeIncubatingVisitor(10);
-    incubating.integrated_infectiousness = {0.0, 1e-9};
+    incubating.emission.infectiousness_by_mode = {0.0, 1e-9};
     CHECK_THROWS_AS(visitor_wire::pack(buffer.data(), incubating, tails),
                     std::runtime_error);
   }
@@ -197,15 +198,15 @@ TEST_CASE("visitor wire: pack throws when a tail it skips is nonzero") {
 TEST_CASE("visitor wire: an all-zero skipped tail packs and arrives empty") {
   const visitor_wire::TailCounts tails{2, 10};
   Domain::VisitorData uninfected = makeUninfectedVisitor();
-  uninfected.integrated_infectiousness.assign(2, 0.0);
-  uninfected.fomite_deposition_sub.assign(10, 0.0);
+  uninfected.emission.infectiousness_by_mode.assign(2, 0.0);
+  uninfected.emission.fomite_deposits.assign(10, 0.0);
   std::vector<char> buffer(visitor_wire::recordSize(uninfected, tails));
   visitor_wire::pack(buffer.data(), uninfected, tails);
 
   Domain::VisitorData received{};
   visitor_wire::unpack(buffer.data(), received, tails);
-  CHECK(received.integrated_infectiousness.empty());
-  CHECK(received.fomite_deposition_sub.empty());
+  CHECK(received.emission.infectiousness_by_mode.empty());
+  CHECK(received.emission.fomite_deposits.empty());
 }
 
 #endif  // USE_MPI

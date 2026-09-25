@@ -80,7 +80,7 @@ TEST_CASE(
     CHECK(v.person_id == 0);
     CHECK(v.is_infectious == true);
     CHECK(v.symptom_id == 1);
-    CHECK(v.integrated_infectiousness[0] == doctest::Approx(expected_ii));
+    CHECK(v.emission.infectiousness_by_mode[0] == doctest::Approx(expected_ii));
   }
 }
 
@@ -128,7 +128,7 @@ TEST_CASE(
   if (f.rank == 1) {
     const auto& v = f.dm->getDomain().incoming_visitors[0];
     CHECK(v.is_infectious == true);
-    CHECK(v.integrated_infectiousness[0] ==
+    CHECK(v.emission.infectiousness_by_mode[0] ==
           doctest::Approx(expected_ii).epsilon(0.001));
   }
 }

@@ -248,10 +248,10 @@ void Simulator::exchangeVisitorsAndBuildAugmented(
       info.is_infectious = visitor.is_infectious;
       info.immunity_level = visitor.immunity_level;
       info.symptom_id = visitor.symptom_id;
-      std::copy(std::begin(visitor.integrated_infectiousness),
-                std::end(visitor.integrated_infectiousness),
+      std::copy(std::begin(visitor.emission.infectiousness_by_mode),
+                std::end(visitor.emission.infectiousness_by_mode),
                 std::begin(info.integrated_infectiousness));
-      info.fomite_deposition_sub = visitor.fomite_deposition_sub;
+      info.fomite_deposition_sub = visitor.emission.fomite_deposits;
       visitor_data_map[visitor.person_id] = std::move(info);
     }
   } catch (const std::exception& e) {

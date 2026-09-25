@@ -38,8 +38,7 @@ void checkMatchesEmit(const Domain::VisitorData& visitor, const Person& person,
                       const EmissionCalculator& calculator) {
   Emission expected;
   calculator.emit(person, kSlotStart, expected);
-  CHECK(visitor.integrated_infectiousness == expected.infectiousness_by_mode);
-  CHECK(visitor.fomite_deposition_sub == expected.fomite_deposits);
+  CHECK(visitor.emission == expected);
 }
 
 }  // namespace
@@ -59,8 +58,8 @@ TEST_CASE("Uninfected Person packs empty tails and symptom 0") {
   CHECK_FALSE(visitor.is_infected);
   CHECK_FALSE(visitor.is_infectious);
   CHECK(visitor.symptom_id == 0);
-  CHECK(visitor.integrated_infectiousness.empty());
-  CHECK(visitor.fomite_deposition_sub.empty());
+  CHECK(visitor.emission.infectiousness_by_mode.empty());
+  CHECK(visitor.emission.fomite_deposits.empty());
   checkMatchesEmit(visitor, person, calculator);
 }
 
@@ -76,8 +75,8 @@ TEST_CASE("Infected, not yet infectious: deposits only") {
   CHECK(visitor.is_infected);
   CHECK_FALSE(visitor.is_infectious);
   CHECK(visitor.symptom_id == person.infection->symptomIdAt(kSlotStart));
-  CHECK(visitor.integrated_infectiousness.empty());
-  CHECK(visitor.fomite_deposition_sub.size() == 3);
+  CHECK(visitor.emission.infectiousness_by_mode.empty());
+  CHECK(visitor.emission.fomite_deposits.size() == 3);
   checkMatchesEmit(visitor, person, calculator);
 }
 
@@ -94,7 +93,7 @@ TEST_CASE("Infectious: per-mode integrals and deposits") {
   CHECK(visitor.is_infectious);
   CHECK(visitor.symptom_id == kMild);
   CHECK(visitor.symptom_id == person.infection->symptomIdAt(kSlotStart));
-  CHECK(visitor.integrated_infectiousness.size() == 3);
+  CHECK(visitor.emission.infectiousness_by_mode.size() == 3);
   checkMatchesEmit(visitor, person, calculator);
 }
 
