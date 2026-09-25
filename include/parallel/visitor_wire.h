@@ -2,6 +2,9 @@
 
 #ifdef USE_MPI
 
+#include <utility>
+#include <vector>
+
 #include "parallel/domain.h"
 
 // Wire format of one Visitor record: a fixed header (WireRecord over
@@ -27,6 +30,29 @@ char* pack(char* ptr, const Domain::VisitorData& visitor,
 // Reads one record at `ptr` into `visitor`, returns the end of the record.
 const char* unpack(const char* ptr, Domain::VisitorData& visitor,
                    const TailCounts& tails);
+
+// Bytes `visitors` occupy on the wire, packed back to back.
+int sliceSize(const std::vector<Domain::VisitorData>& visitors,
+              const TailCounts& tails);
+
+namespace detail {
+// unpack(), but throws if the record would run past `end`.
+const char* unpackWithin(const char* ptr, const char* end,
+                         Domain::VisitorData& visitor, const TailCounts& tails);
+}  // namespace detail
+
+// Unpacks every record in [begin, end), passing each to `sink` as an rvalue.
+// Throws if the records don't end exactly at `end`.
+template <typename Sink>
+void unpackSlice(const char* begin, const char* end, const TailCounts& tails,
+                 Sink&& sink) {
+  const char* ptr = begin;
+  while (ptr < end) {
+    Domain::VisitorData visitor;
+    ptr = detail::unpackWithin(ptr, end, visitor, tails);
+    sink(std::move(visitor));
+  }
+}
 
 }  // namespace june::visitor_wire
 

@@ -89,4 +89,56 @@ TEST_CASE("visitor wire: zero fomite sub-bins round-trips") {
   checkRoundTrip(makeVisitor(2, 0), tails);
 }
 
+TEST_CASE("visitor wire: slice of records round-trips in order") {
+  const visitor_wire::TailCounts tails{2, 10};
+  std::vector<Domain::VisitorData> sent;
+  for (int index = 0; index < 3; ++index) {
+    sent.push_back(makeVisitor(2, 10));
+    sent.back().person_id = 100 + index;
+  }
+
+  const int size = visitor_wire::sliceSize(sent, tails);
+  std::vector<char> buffer(size);
+  char* ptr = buffer.data();
+  for (const auto& visitor : sent) ptr = visitor_wire::pack(ptr, visitor, tails);
+  CHECK(ptr - buffer.data() == size);
+
+  std::vector<Domain::VisitorData> received;
+  visitor_wire::unpackSlice(
+      buffer.data(), buffer.data() + buffer.size(), tails,
+      [&](Domain::VisitorData&& visitor) { received.push_back(visitor); });
+  REQUIRE(received.size() == sent.size());
+  for (std::size_t index = 0; index < sent.size(); ++index) {
+    CHECK(received[index].person_id == sent[index].person_id);
+    CHECK(received[index].fomite_deposition_sub ==
+          sent[index].fomite_deposition_sub);
+  }
+}
+
+TEST_CASE("visitor wire: unpacking a slice throws unless records end exactly "
+          "at its end") {
+  const visitor_wire::TailCounts tails{2, 10};
+  const std::vector<Domain::VisitorData> sent{makeVisitor(2, 10),
+                                              makeVisitor(2, 10)};
+  std::vector<char> buffer(visitor_wire::sliceSize(sent, tails));
+  char* ptr = buffer.data();
+  for (const auto& visitor : sent) ptr = visitor_wire::pack(ptr, visitor, tails);
+  auto ignore = [](Domain::VisitorData&&) {};
+
+  SUBCASE("truncated: last record's tail cut short") {
+    buffer.pop_back();
+    CHECK_THROWS_AS(visitor_wire::unpackSlice(buffer.data(),
+                                              buffer.data() + buffer.size(),
+                                              tails, ignore),
+                    std::runtime_error);
+  }
+  SUBCASE("leftover: bytes after the last record") {
+    buffer.insert(buffer.end(), 3, '\0');
+    CHECK_THROWS_AS(visitor_wire::unpackSlice(buffer.data(),
+                                              buffer.data() + buffer.size(),
+                                              tails, ignore),
+                    std::runtime_error);
+  }
+}
+
 #endif  // USE_MPI

@@ -97,6 +97,40 @@ const char* unpack(const char* ptr, Domain::VisitorData& visitor,
   return unpackTail(ptr, visitor.fomite_deposition_sub, tails.fomite_sub_bins);
 }
 
+namespace detail {
+
+const char* unpackWithin(const char* ptr, const char* end,
+                         Domain::VisitorData& visitor,
+                         const TailCounts& tails) {
+  // Header first: the record's full size may depend on it.
+  if (end - ptr < VISITOR_WIRE_HEADER) {
+    throw std::runtime_error(
+        "visitor_wire::unpackSlice: " + std::to_string(end - ptr) +
+        " bytes left, too few for a record header");
+  }
+  const char* tails_begin = kVisitorWire.unpack(ptr, visitor);
+  const int size = recordSize(visitor, tails);
+  if (end - ptr < size) {
+    throw std::runtime_error("visitor_wire::unpackSlice: record of " +
+                             std::to_string(size) + " bytes runs past slice "
+                             "end (" + std::to_string(end - ptr) + " left)");
+  }
+  const char* next =
+      unpackTail(tails_begin, visitor.integrated_infectiousness,
+                 tails.num_modes);
+  return unpackTail(next, visitor.fomite_deposition_sub,
+                    tails.fomite_sub_bins);
+}
+
+}  // namespace detail
+
+int sliceSize(const std::vector<Domain::VisitorData>& visitors,
+              const TailCounts& tails) {
+  int size = 0;
+  for (const auto& visitor : visitors) size += recordSize(visitor, tails);
+  return size;
+}
+
 }  // namespace june::visitor_wire
 
 #endif  // USE_MPI

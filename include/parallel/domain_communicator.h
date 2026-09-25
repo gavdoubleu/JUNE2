@@ -71,6 +71,10 @@ class DomainCommunicator {
       const std::vector<std::vector<Domain::VisitorData>>& outgoing,
       const std::vector<int>& send_counts, const VisitorTailCounts& tails);
 
+  // Adds every record in one received byte slice whose venue this rank owns.
+  void unpackIncomingVisitors(const char* begin, const char* end,
+                              const VisitorTailCounts& tails);
+
   // Shared P2P logic for visitor exchange
   void performP2PVisitorExchange(
       const std::vector<std::vector<Domain::VisitorData>>& outgoing,
