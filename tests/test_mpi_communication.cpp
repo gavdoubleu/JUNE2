@@ -292,7 +292,7 @@ TEST_CASE("receivePendingInfections: transmission mode index is preserved") {
   loc.venue_id = remote_venue;
   loc.subset_index = 0;
   loc.activity_index = 1;
-  f.dm->exchangeVisitors({loc}, disease, 0.0);
+  f.dm->exchangeVisitors({loc}, disease, 0.0, /*delta_hours=*/0.0);
 
   // Step 2: Rank 1 reports that Person 0 was infected via RESPIRATORY mode
   // (index 1)
@@ -378,7 +378,7 @@ TEST_CASE(
     loc2.activity_index = 1;
     locations.push_back(loc2);
   }
-  f.dm->exchangeVisitors(locations, disease, 0.0);
+  f.dm->exchangeVisitors(locations, disease, 0.0, /*delta_hours=*/0.0);
 
   if (f.rank == 1) {
     REQUIRE(f.dm->getDomain().incoming_visitors.size() == 2);
