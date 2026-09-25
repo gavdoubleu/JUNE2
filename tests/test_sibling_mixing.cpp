@@ -16,7 +16,7 @@ using namespace june;
 // infectious people in the other children of the same parent (school).
 //
 // World: school (venue 0) with classrooms A (venue 1) and B (venue 2).
-// Person 0 sits in A; persons 1-4 sit in B. The only possible source for B
+// Person 0 sits in A; persons 1-5 sit in B. The only possible source for B
 // is its sibling A, so any infection in B is a sibling infection.
 // =============================================================================
 
