@@ -454,10 +454,10 @@ class InteractionManager {
 
   // Fast pre-check: true iff processVenueTransmissions could possibly produce
   // transmission for this venue group, considering fomite history,
-  // compartmental uptake, and the presence of any infected member in
-  // group_members_buffer_ (infected, not infectious: an incubating member may
-  // still deposit fomites). Used to skip venues with no source before paying
-  // the FOI cost.
+  // compartmental uptake, sibling infectiousness, and the presence of any
+  // infected member in group_members_buffer_ (infected, not infectious: an
+  // incubating member may still deposit fomites). Used to skip venues with no
+  // source before paying the FOI cost.
   bool venueGroupHasTransmissionSource(
       const Venue* venue, VenueId venue_id,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data,
@@ -500,13 +500,21 @@ class InteractionManager {
 
   // STEP 2c: pre-STEP-3 early exit check. Returns true iff every
   // transmission source is empty (no infectious bin, no positive fomite
-  // lambda, no compartmental uptake potential) OR every bin has no
-  // susceptibles. On true return the caller must still call clearAfterUse
-  // on used_bins_. This helper only inspects state.
+  // lambda, no compartmental uptake potential, no sibling source) OR every
+  // bin has no susceptibles. On true return the caller must still call
+  // clearAfterUse on used_bins_. This helper only inspects state.
   bool venueHasNoTransmissionPossible(
       int num_bins_needed, const std::vector<int>& comp_uptake_modes,
       const std::vector<double>& lambda_fomite_by_mode, VenueId actual_venue_id,
-      const CompartmentalModelManager* comp_model) const;
+      const CompartmentalModelManager* comp_model,
+      bool has_sibling_source) const;
+
+  // True iff the other children of this venue's parent carry positive
+  // infectiousness this tick, i.e. appendSiblingMixingSources could add a
+  // sibling FOI term. Reads parent_aggregates_, so call after
+  // buildParentAggregates.
+  bool venueHasSiblingSource(const Venue* venue, VenueId venue_id,
+                             bool is_virtual_encounter) const;
 
   // STEP 2d: look up the ParentAggregate (and its flat-bin contact matrix)
   // that this venue's susceptibles should read sibling-mixing FOI from. Returns

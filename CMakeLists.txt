@@ -405,6 +405,7 @@ if(BUILD_TESTING)
   add_june_test(test_infection_seeder "tests/test_infection_seeder.cpp")
   add_june_test(test_transmission_determinism "tests/test_transmission_determinism.cpp;src/loaders/disease_loader.cpp")
   add_june_test(test_foi_calculation "tests/test_foi_calculation.cpp;src/loaders/disease_loader.cpp")
+  add_june_test(test_sibling_mixing "tests/test_sibling_mixing.cpp;src/loaders/disease_loader.cpp")
   add_june_test(test_presence_window "tests/test_presence_window.cpp")
   add_june_test(test_partial_presence_foi "tests/test_partial_presence_foi.cpp;src/loaders/disease_loader.cpp")
 
