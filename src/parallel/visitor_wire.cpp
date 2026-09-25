@@ -63,6 +63,28 @@ char* packTail(char* ptr, const std::vector<double>& tail, int count,
   return ptr;
 }
 
+// A tail the header says is zero is left off the wire; it must be empty or
+// all zero. Nonzero means the sender's emission gating has drifted from the
+// wire gate, and the receiver would silently lose emission.
+void requireSkippedTailZero(const std::vector<double>& tail, const char* name) {
+  for (double value : tail) {
+    if (value != 0.0) {
+      throw std::runtime_error(std::string("visitor_wire::pack: ") + name +
+                               " is nonzero but its header gate skips it");
+    }
+  }
+}
+
+// Packs `tail` if the header sends it, else checks it is zero.
+char* packGatedTail(char* ptr, const std::vector<double>& tail, bool sent,
+                    int count, const char* name) {
+  if (!sent) {
+    requireSkippedTailZero(tail, name);
+    return ptr;
+  }
+  return packTail(ptr, tail, count, name);
+}
+
 const char* unpackTail(const char* ptr, std::vector<double>& tail,
                        int count) {
   tail.assign(count, 0.0);
@@ -73,28 +95,38 @@ const char* unpackTail(const char* ptr, std::vector<double>& tail,
   return ptr;
 }
 
+// Tail lengths on the wire for `visitor`: a tail travels only when the header
+// says it can be nonzero, and is omitted otherwise.
+TailCounts sentTailCounts(const Domain::VisitorData& visitor,
+                          const TailCounts& tails) {
+  return {visitor.is_infectious ? tails.num_modes : 0,
+          visitor.is_infected ? tails.fomite_sub_bins : 0};
+}
+
 }  // namespace
 
-int recordSize(const Domain::VisitorData& /*visitor*/,
-               const TailCounts& tails) {
-  return VISITOR_WIRE_HEADER + (tails.num_modes + tails.fomite_sub_bins) *
+int recordSize(const Domain::VisitorData& visitor, const TailCounts& tails) {
+  const TailCounts sent = sentTailCounts(visitor, tails);
+  return VISITOR_WIRE_HEADER + (sent.num_modes + sent.fomite_sub_bins) *
                                    static_cast<int>(sizeof(double));
 }
 
 char* pack(char* ptr, const Domain::VisitorData& visitor,
            const TailCounts& tails) {
   ptr = kVisitorWire.pack(ptr, visitor);
-  ptr = packTail(ptr, visitor.integrated_infectiousness, tails.num_modes,
-                 "integrated_infectiousness");
-  return packTail(ptr, visitor.fomite_deposition_sub, tails.fomite_sub_bins,
-                  "fomite_deposition_sub");
+  ptr = packGatedTail(ptr, visitor.integrated_infectiousness,
+                      visitor.is_infectious, tails.num_modes,
+                      "integrated_infectiousness");
+  return packGatedTail(ptr, visitor.fomite_deposition_sub, visitor.is_infected,
+                       tails.fomite_sub_bins, "fomite_deposition_sub");
 }
 
 const char* unpack(const char* ptr, Domain::VisitorData& visitor,
                    const TailCounts& tails) {
   ptr = kVisitorWire.unpack(ptr, visitor);
-  ptr = unpackTail(ptr, visitor.integrated_infectiousness, tails.num_modes);
-  return unpackTail(ptr, visitor.fomite_deposition_sub, tails.fomite_sub_bins);
+  const TailCounts sent = sentTailCounts(visitor, tails);
+  ptr = unpackTail(ptr, visitor.integrated_infectiousness, sent.num_modes);
+  return unpackTail(ptr, visitor.fomite_deposition_sub, sent.fomite_sub_bins);
 }
 
 namespace detail {
@@ -115,11 +147,11 @@ const char* unpackWithin(const char* ptr, const char* end,
                              std::to_string(size) + " bytes runs past slice "
                              "end (" + std::to_string(end - ptr) + " left)");
   }
-  const char* next =
-      unpackTail(tails_begin, visitor.integrated_infectiousness,
-                 tails.num_modes);
+  const TailCounts sent = sentTailCounts(visitor, tails);
+  const char* next = unpackTail(
+      tails_begin, visitor.integrated_infectiousness, sent.num_modes);
   return unpackTail(next, visitor.fomite_deposition_sub,
-                    tails.fomite_sub_bins);
+                    sent.fomite_sub_bins);
 }
 
 }  // namespace detail

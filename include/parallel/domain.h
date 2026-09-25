@@ -61,13 +61,14 @@ class Domain {
     // Pre-computed integrated infectiousness per mode (computed on sending
     // rank using the same code path as locals, ensuring bit-identical FP).
     // Sized at runtime to disease->numModes() at the visitor-build site
-    // (DomainCommunicator::buildOutgoing). Wire format reads/writes the
-    // active count's worth of doubles. See parallel/visitor_wire.h.
+    // (DomainCommunicator::buildOutgoing) when is_infectious, else empty.
+    // See parallel/visitor_wire.h.
     std::vector<double> integrated_infectiousness;
 
     // Fomite deposit per (fomite mode, sub-bin), flat in
     // FomiteSubBinSchedule order, computed on the sending rank by the same
-    // integration as locals. Always FomiteSubBinSchedule::totalSubBins() long.
+    // integration as locals. FomiteSubBinSchedule::totalSubBins() long when
+    // is_infected, else empty.
     std::vector<double> fomite_deposition_sub;
 
     // Return data: infection status changes

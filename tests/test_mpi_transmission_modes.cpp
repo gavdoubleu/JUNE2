@@ -5,7 +5,8 @@
 //
 // Tests cover stage-driven and trajectory-driven infectiousness propagation
 // across rank boundaries, pending infection routing, multi-mode dispatch,
-// immunity, bidirectional exchange, and visitor/local fomite deposit parity.
+// immunity, bidirectional exchange, visitor/local fomite deposit parity, and
+// mixed-state exchanges where records carry different tails.
 
 #define DOCTEST_CONFIG_IMPLEMENT  // custom main so we can wrap MPI
                                   // init/finalize
@@ -14,6 +15,7 @@
 #ifdef USE_MPI
 #include <mpi.h>
 
+#include <algorithm>
 #include <cmath>
 
 #include "core/config.h"
@@ -749,6 +751,132 @@ TEST_CASE("H8c: Incubating Visitor alone still deposits") {
   // Infected, not infectious, and the only person at a fomite-free Venue.
   checkVisitorDepositsLikeLocal(/*sub_bin_time=*/0.0, 9.0,
                                 {{9.0, kHealthy}, {11.0, kMild}}, 10.0, 6.0);
+}
+
+// ---------------------------------------------------------------------------
+// H9: uninfected, incubating and infectious Visitors in one exchange
+// ---------------------------------------------------------------------------
+enum class VisitorState { Uninfected, Incubating, Infectious };
+constexpr VisitorState kVisitorStates[] = {
+    VisitorState::Uninfected, VisitorState::Incubating,
+    VisitorState::Infectious};
+
+// Person on `owner` in `state`: ids 2.. so the fixture's persons 0 and 1 stay.
+static PersonId statePersonId(int owner, VisitorState state) {
+  return 2 + 3 * owner + static_cast<int>(state);
+}
+
+static VisitorState stateOf(PersonId id) {
+  return static_cast<VisitorState>((id - 2) % 3);
+}
+
+// Adds one person per state to each rank; this rank gets its own and an
+// infection matching the state. Current time 10, 6 h slot.
+static void addStatePeople(TwoRankFixture& f, const Disease& disease) {
+  for (int owner = 0; owner < 2; ++owner) {
+    for (VisitorState state : kVisitorStates) {
+      const PersonId id = statePersonId(owner, state);
+      f.dm->setPersonRank(id, owner);
+      if (owner != f.rank) continue;
+      Person& person = f.world.people.emplace_back();
+      person.id = id;
+      person.age = 30.0f;
+      person.sex = Sex::MALE;
+      person.geo_unit_id = f.rank;
+      if (state == VisitorState::Incubating) {
+        person.infection =
+            makeInfection(disease, 9.0, {{9.0, kHealthy}, {11.0, kMild}});
+      } else if (state == VisitorState::Infectious) {
+        person.infection =
+            makeInfection(disease, 9.0, {{9.0, kExposed}, {10.1, kMild}});
+      }
+      Domain& domain = f.dm->getDomain();
+      domain.resident_ids.push_back(id);
+      domain.resident_set.insert(id);
+    }
+  }
+  f.dm->setMaxPersonId(statePersonId(1, VisitorState::Infectious));
+  f.world.buildIndices();
+}
+
+// `senders` each send their three state people to the other rank's Venue.
+// Every receiver checks each Visitor's tails against its state, and that the
+// infected ones deposit exactly what their local twin on this rank does.
+static void checkMixedStateExchange(const std::vector<int>& senders) {
+  constexpr double kCurrentTime = 10.0;
+  constexpr double kDeltaHours = 6.0;
+  constexpr int kNumModes = 2;
+  constexpr int kFomiteSubBins = 3;  // 6 h slot / 2 h sub-bins
+  TwoRankFixture f;
+  REQUIRE(f.size == 2);
+  Disease disease = makeFomiteDisease(/*sub_bin_time=*/2.0);
+  f.dm->setDisease(&disease);
+  addStatePeople(f, disease);
+
+  std::vector<PersonLocation> locations;
+  const bool sends =
+      std::find(senders.begin(), senders.end(), f.rank) != senders.end();
+  if (sends) {
+    for (VisitorState state : kVisitorStates) {
+      PersonLocation location = makeRemoteLocation(f.rank);
+      location.person_id = statePersonId(f.rank, state);
+      locations.push_back(location);
+    }
+  }
+  f.dm->exchangeVisitors(locations, kCurrentTime, kDeltaHours);
+
+  const auto& incoming = f.dm->getDomain().incoming_visitors;
+  const bool receives =
+      std::find(senders.begin(), senders.end(), 1 - f.rank) != senders.end();
+  REQUIRE(incoming.size() == (receives ? 3u : 0u));
+
+  for (const auto& visitor : incoming) {
+    const VisitorState state = stateOf(visitor.person_id);
+    const bool infected = state != VisitorState::Uninfected;
+    const bool infectious = state == VisitorState::Infectious;
+    CHECK(visitor.is_infected == infected);
+    CHECK(visitor.is_infectious == infectious);
+    // A tail arrives full length if its header gate sends it, else empty.
+    CHECK(visitor.integrated_infectiousness.size() ==
+          (infectious ? kNumModes : 0u));
+    REQUIRE(visitor.fomite_deposition_sub.size() ==
+            (infected ? kFomiteSubBins : 0u));
+
+    const VisitorInfo info = toVisitorInfo(visitor);
+    for (double integrated : info.integrated_infectiousness) {
+      if (!infectious) CHECK(integrated == 0.0);
+    }
+    if (!infected) continue;
+
+    std::unordered_map<PersonId, VisitorInfo> visitor_data = {
+        {visitor.person_id, info}};
+    std::unordered_set<PersonId> visitor_ids = {visitor.person_id};
+    std::vector<PendingInfection> pending;
+    auto visitor_deposits = depositsFromOneSlot(
+        f, disease, {{visitor.person_id, f.rank, -1, 0, 255, 0}},
+        kCurrentTime, kDeltaHours, &visitor_ids, &pending, &visitor_data);
+
+    const PersonId twin_id = statePersonId(f.rank, state);
+    const size_t twin_index = f.world.person_index.at(twin_id);
+    auto local_deposits = depositsFromOneSlot(
+        f, disease, {{twin_id, f.rank, -1, 0, 255, twin_index}}, kCurrentTime,
+        kDeltaHours, nullptr, nullptr, nullptr);
+
+    REQUIRE_FALSE(local_deposits.empty());
+    REQUIRE(visitor_deposits.size() == local_deposits.size());
+    for (size_t k = 0; k < local_deposits.size(); ++k) {
+      CHECK(visitor_deposits[k].time == local_deposits[k].time);
+      CHECK(visitor_deposits[k].amount == local_deposits[k].amount);
+    }
+  }
+}
+
+TEST_CASE("H9: mixed-state Visitors, one-way (P2P)") {
+  checkMixedStateExchange({0});
+}
+
+TEST_CASE("H9b: mixed-state Visitors, two-way (all-to-all)") {
+  checkMixedStateExchange({0, 1});
 }
 
 #endif  // USE_MPI

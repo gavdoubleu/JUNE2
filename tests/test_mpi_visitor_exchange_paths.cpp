@@ -138,22 +138,41 @@ constexpr double kCurrentTime = 10.0;
 constexpr double kDeltaHours = 6.0;
 constexpr int kFomiteSubBins = 3;  // 6 h slot / 2 h sub-bins
 
-// Even ranks' people are infectious; odd ranks' are uninfected.
-bool isInfectedHome(int home_rank) { return home_rank % 2 == 0; }
+// Each rank's person is in one disease state, so every exchange mixes
+// record lengths: infectious (both tails), incubating (deposits only) and
+// uninfected (header only).
+enum class HomeState { Uninfected, Incubating, Infectious };
+HomeState homeState(int home_rank) {
+  switch (home_rank % 3) {
+    case 0:
+      return HomeState::Infectious;
+    case 1:
+      return HomeState::Uninfected;
+    default:
+      return HomeState::Incubating;
+  }
+}
 
 // Every (source, destination) pair in `pairs` sends person `source` to venue
 // `destination` for one exchange. Each rank then checks it received exactly
-// its expected visitors, intact.
+// its expected visitors, intact, whatever mix of record lengths it gets.
 void checkExchange(const std::vector<std::pair<int, int>>& pairs) {
   RankPerPersonFixture fixture;
   REQUIRE(fixture.size == kNumRanks);
   Disease disease = makeFomiteDisease();
   fixture.dm->setDisease(&disease);
 
-  if (isInfectedHome(fixture.rank)) {
+  const HomeState state = homeState(fixture.rank);
+  if (state != HomeState::Uninfected) {
     InfectionTrajectory trajectory;
     trajectory.infection_time = 9.0;
-    trajectory.transitions = {{9.0, kMild}};
+    // Healthy has no direct-contact curve, so incubating isn't infectious
+    // but still deposits.
+    trajectory.transitions =
+        state == HomeState::Infectious
+            ? std::vector<std::pair<double, uint16_t>>{{9.0, kMild}}
+            : std::vector<std::pair<double, uint16_t>>{{9.0, kHealthy},
+                                                       {11.0, kMild}};
     fixture.world.getPerson(fixture.rank)->infection =
         Infection::fromCheckpoint(&disease, 9.0, trajectory, 1.0, 1.0, 1.0,
                                   0.0, /*last_checked_time=*/-1.0, kHealthy,
@@ -183,14 +202,18 @@ void checkExchange(const std::vector<std::pair<int, int>>& pairs) {
     senders.push_back(visitor.home_rank);
     CHECK(visitor.person_id == visitor.home_rank);
     CHECK(visitor.venue_id == fixture.rank);
-    CHECK(visitor.is_infected == isInfectedHome(visitor.home_rank));
-    CHECK(visitor.is_infectious == isInfectedHome(visitor.home_rank));
-    REQUIRE(visitor.integrated_infectiousness.size() == kNumModes);
-    REQUIRE(visitor.fomite_deposition_sub.size() == kFomiteSubBins);
-    const bool emits = isInfectedHome(visitor.home_rank);
-    CHECK((visitor.integrated_infectiousness[0] > 0.0) == emits);
-    for (double deposit : visitor.fomite_deposition_sub)
-      CHECK((deposit > 0.0) == emits);
+    const HomeState sender_state = homeState(visitor.home_rank);
+    const bool infected = sender_state != HomeState::Uninfected;
+    const bool infectious = sender_state == HomeState::Infectious;
+    CHECK(visitor.is_infected == infected);
+    CHECK(visitor.is_infectious == infectious);
+    // A tail arrives full length if its header gate sends it, else empty.
+    REQUIRE(visitor.integrated_infectiousness.size() ==
+            (infectious ? kNumModes : 0));
+    REQUIRE(visitor.fomite_deposition_sub.size() ==
+            (infected ? kFomiteSubBins : 0));
+    if (infectious) CHECK(visitor.integrated_infectiousness[0] > 0.0);
+    for (double deposit : visitor.fomite_deposition_sub) CHECK(deposit > 0.0);
   }
   std::sort(senders.begin(), senders.end());
   std::sort(expected_senders.begin(), expected_senders.end());

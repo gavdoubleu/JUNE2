@@ -74,7 +74,7 @@ struct VisitorInfo {
   double integrated_infectiousness[MAX_MODES] = {};
 
   // Fomite deposit per (fomite mode, sub-bin), flat in FomiteSubBinSchedule
-  // order (from sending rank)
+  // order (from sending rank). Empty unless is_infected.
   std::vector<double> fomite_deposition_sub;
 };
 

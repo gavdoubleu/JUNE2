@@ -20,8 +20,8 @@ namespace {
 // deposit per sub-bin using the SAME code paths as local people
 // (getIntegratedInfectiousness, FomiteSubBinSchedule::integrateDeposits) so
 // FP results are bit-identical regardless of where a person is processed.
-// Both tails are always full length (zero-filled for people who emit
-// nothing); the wire format expects exactly that many doubles.
+// Each tail is filled only when its header gate sends it (ii when infectious,
+// deposits when infected) and left empty otherwise; see visitor_wire.h.
 june::Domain::VisitorData buildVisitorPayload(
     const june::PersonLocation& loc, const june::Person& person, int home_rank,
     double current_time, double delta_hours, int num_modes,
@@ -49,11 +49,6 @@ june::Domain::VisitorData buildVisitorPayload(
   visitor.new_infection_time = -1.0;
 
   visitor.symptom_id = 0;
-  visitor.integrated_infectiousness.assign(num_modes, 0.0);
-  if (fomite_schedule) {
-    fomite_schedule->integrateDeposits(person.infection.get(), current_time,
-                                       visitor.fomite_deposition_sub);
-  }
   if (visitor.is_infected) {
     const june::InfectionTrajectory& traj = person.infection->getTrajectory();
     uint16_t cur_symptom_id = 0;
@@ -66,11 +61,19 @@ june::Domain::VisitorData buildVisitorPayload(
     }
     visitor.symptom_id = cur_symptom_id;
 
-    if (visitor.is_infectious && disease) {
-      double t1 = current_time + delta_hours / 24.0;
-      for (int m = 0; m < num_modes; ++m) {
-        visitor.integrated_infectiousness[m] =
-            person.infection->getIntegratedInfectiousness(m, current_time, t1);
+    if (fomite_schedule) {
+      fomite_schedule->integrateDeposits(person.infection.get(), current_time,
+                                         visitor.fomite_deposition_sub);
+    }
+    if (visitor.is_infectious) {
+      visitor.integrated_infectiousness.assign(num_modes, 0.0);
+      if (disease) {
+        double t1 = current_time + delta_hours / 24.0;
+        for (int m = 0; m < num_modes; ++m) {
+          visitor.integrated_infectiousness[m] =
+              person.infection->getIntegratedInfectiousness(m, current_time,
+                                                            t1);
+        }
       }
     }
   }
