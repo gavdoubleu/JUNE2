@@ -202,33 +202,30 @@ std::vector<PersonLocation> InteractionManager::buildPersonIdSortedMembers(
   return mem_sorted;
 }
 
+const Emission* InteractionManager::memberEmission(
+    const Person* person, const VisitorInfo* visitor, double current_time,
+    const EmissionCalculator& emission_calculator, Emission& emission_scratch) {
+  if (visitor) return &visitor->emission;
+  if (!person) return nullptr;
+  emission_calculator.emit(*person, current_time, emission_scratch);
+  return &emission_scratch;
+}
+
 bool InteractionManager::gatherMemberInfectiousnessByMode(
     const Person* person, const VisitorInfo* visitor, double current_time,
     const EmissionCalculator& emission_calculator, int num_modes,
     Emission& emission_scratch, std::vector<double>& inf_by_mode) const {
   inf_by_mode.assign(num_modes, 0.0);
+  const Emission* emission = memberEmission(
+      person, visitor, current_time, emission_calculator, emission_scratch);
+  if (!emission) return false;
+  const std::vector<double>& emitted = emission->infectiousness_by_mode;
+  if (emitted.empty()) return false;
+  const int num_emitted = std::min(num_modes, static_cast<int>(emitted.size()));
   double total = 0.0;
-  if (visitor) {
-    if (!visitor->is_infectious) return false;
-    for (int m = 0; m < num_modes; ++m) {
-      inf_by_mode[m] = (m < VisitorInfo::MAX_MODES)
-                           ? visitor->integrated_infectiousness[m]
-                           : 0.0;
-      total += inf_by_mode[m];
-    }
-  } else if (person) {
-    emission_calculator.emit(*person, current_time, emission_scratch);
-    const std::vector<double>& emitted =
-        emission_scratch.infectiousness_by_mode;
-    if (emitted.empty()) return false;
-    const int num_emitted =
-        std::min(num_modes, static_cast<int>(emitted.size()));
-    for (int m = 0; m < num_emitted; ++m) {
-      inf_by_mode[m] = emitted[m];
-      total += inf_by_mode[m];
-    }
-  } else {
-    return false;
+  for (int m = 0; m < num_emitted; ++m) {
+    inf_by_mode[m] = emitted[m];
+    total += inf_by_mode[m];
   }
   return total > 0.0;
 }

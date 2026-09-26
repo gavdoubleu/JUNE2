@@ -33,7 +33,7 @@ std::vector<double> InteractionManager::binMembersAndPrepareBuffers(
       emission_calculator.fomiteSchedule();
   // Pass 1: bin each member by contact-matrix row.
   for (const auto& member : members) {
-    binOneMember(member, venue, bin_structure, num_bins_needed, num_modes,
+    binOneMember(member, venue, bin_structure, num_bins_needed,
                  emission_calculator, current_time, encounter_type_id,
                  venue_type, venue_type_id, visitor_data);
   }
@@ -228,32 +228,23 @@ void InteractionManager::buildCumulativeWeightsPerBin(int num_bins_needed,
 
 void InteractionManager::binMemberClassification(
     const InteractionMember& member, Person* person, const VisitorInfo* visitor,
-    int bin_index, int num_modes, const EmissionCalculator& emission_calculator,
+    int bin_index, const EmissionCalculator& emission_calculator,
     double current_time) {
   const FomiteSubBinSchedule& fomite_schedule =
       emission_calculator.fomiteSchedule();
-  const int num_fomite_modes = fomite_schedule.numModes();
   PersonId pid = member.id;
-  if (visitor) {
-    if (visitor->is_infectious) {
-      accumulateVisitorInfectiousness(visitor, pid, bin_index, num_modes);
-    } else if (!visitor->is_infected && visitor->immunity_level < 1.0) {
+  if (!visitor && (!person || person->is_dead)) return;
+
+  const Emission& emission = *memberEmission(
+      person, visitor, current_time, emission_calculator, emission_scratch_);
+  if (!emission.infectiousness_by_mode.empty()) {
+    accumulateInfectiousness(emission.infectiousness_by_mode, pid, bin_index);
+  } else if (visitor) {
+    if (!visitor->is_infected && visitor->immunity_level < 1.0) {
       double susceptibility = 1.0 - visitor->immunity_level;
       bins_buffer_[bin_index].susceptible.push_back(
           {pid, susceptibility, visitor, member.encounter_type_id});
     }
-    if (visitor->is_infected && num_fomite_modes > 0) {
-      addFomiteDeposits(bin_index, fomite_schedule,
-                        visitor->fomite_deposition_sub);
-    }
-    return;
-  }
-  if (!person || person->is_dead) return;
-
-  emission_calculator.emit(*person, current_time, emission_scratch_);
-  if (!emission_scratch_.infectiousness_by_mode.empty()) {
-    accumulateLocalInfectiousness(emission_scratch_.infectiousness_by_mode, pid,
-                                  bin_index);
   } else if (!person->infection) {
     double susceptibility =
         person->getSusceptibility(current_time, disease_->getName());
@@ -262,9 +253,8 @@ void InteractionManager::binMemberClassification(
           {pid, susceptibility, /*visitor=*/nullptr, member.encounter_type_id});
     }
   }
-  if (!emission_scratch_.fomite_deposits.empty()) {
-    addFomiteDeposits(bin_index, fomite_schedule,
-                      emission_scratch_.fomite_deposits);
+  if (!emission.fomite_deposits.empty()) {
+    addFomiteDeposits(bin_index, fomite_schedule, emission.fomite_deposits);
   }
 }
 
@@ -302,7 +292,7 @@ int InteractionManager::resolveMemberBinIndex(
 
 void InteractionManager::binOneMember(
     const InteractionMember& member, Venue* venue,
-    const ContactMatrix& bin_structure, int num_bins_needed, int num_modes,
+    const ContactMatrix& bin_structure, int num_bins_needed,
     const EmissionCalculator& emission_calculator, double current_time,
     uint8_t encounter_type_id, const std::string& venue_type,
     uint8_t venue_type_id,
@@ -334,36 +324,11 @@ void InteractionManager::binOneMember(
     auto it = visitor_data->find(pid);
     if (it != visitor_data->end()) visitor = &it->second;
   }
-  binMemberClassification(member, person, visitor, bin_index, num_modes,
+  binMemberClassification(member, person, visitor, bin_index,
                           emission_calculator, current_time);
 }
 
-void InteractionManager::accumulateVisitorInfectiousness(
-    const VisitorInfo* visitor, PersonId pid, int bin_index, int num_modes) {
-  // Use pre-computed integrated infectiousness from the sending rank.
-  // These values were computed using the identical code path as local
-  // people (Infection::getIntegratedInfectiousness), guaranteeing
-  // bit-identical FP results regardless of local vs visitor status.
-  im_scratch_buffer_.assign(num_modes, 0.0);
-  double total_im_visitor = 0.0;
-  for (int m = 0; m < num_modes; ++m) {
-    im_scratch_buffer_[m] = (m < VisitorInfo::MAX_MODES)
-                                ? visitor->integrated_infectiousness[m]
-                                : 0.0;
-    total_im_visitor += im_scratch_buffer_[m];
-  }
-  if (total_im_visitor > 0.0) {
-    bins_buffer_[bin_index].infectious_ids.push_back(pid);
-    for (int m = 0; m < num_modes; ++m) {
-      bins_buffer_[bin_index].infectiousness_by_mode[m].push_back(
-          im_scratch_buffer_[m]);
-      bins_buffer_[bin_index].total_infectiousness_by_mode[m] +=
-          im_scratch_buffer_[m];
-    }
-  }
-}
-
-void InteractionManager::accumulateLocalInfectiousness(
+void InteractionManager::accumulateInfectiousness(
     const std::vector<double>& infectiousness_by_mode, PersonId pid,
     int bin_index) {
   const int num_modes = static_cast<int>(infectiousness_by_mode.size());

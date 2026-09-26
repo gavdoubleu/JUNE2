@@ -718,15 +718,6 @@ Disease DiseaseLoader::loadFromYAML(const std::string& yaml_path,
     loadNaturalImmunity(config, transmission);
     validateOutcomeRowSums(outcome_rates);
 
-    if (static_cast<int>(transmission.modes.size()) > VisitorInfo::MAX_MODES) {
-      throw std::runtime_error(
-          "Disease '" + disease_name + "' has " +
-          std::to_string(transmission.modes.size()) +
-          " transmission modes but VisitorInfo::MAX_MODES=" +
-          std::to_string(VisitorInfo::MAX_MODES) +
-          ". Increase MAX_MODES in include/core/types.h.");
-    }
-
     // Create and return Disease object
     return Disease(disease_name, symptom_tags, stage_settings, trajectories,
                    outcome_rates, transmission);

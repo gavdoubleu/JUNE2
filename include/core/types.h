@@ -12,6 +12,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "epidemiology/emission/emission_record.h"
 #include "epidemiology/vaccine.h"
 #include "variant.h"
 
@@ -69,13 +70,8 @@ struct VisitorInfo {
   int32_t home_array_index = -1;  // For lookup on home rank
   uint16_t symptom_id = 0;
 
-  // Pre-computed integrated infectiousness per mode (from sending rank)
-  static constexpr int MAX_MODES = 8;
-  double integrated_infectiousness[MAX_MODES] = {};
-
-  // Fomite deposit per (fomite mode, sub-bin), flat in FomiteSubBinSchedule
-  // order (from sending rank). Empty unless is_infected.
-  std::vector<double> fomite_deposition_sub;
+  // What this Visitor emits this slot, computed on the sending rank.
+  Emission emission;
 };
 
 // Special venue ID for infection seed events

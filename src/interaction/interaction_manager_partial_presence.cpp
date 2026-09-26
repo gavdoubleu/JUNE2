@@ -158,19 +158,17 @@ void InteractionManager::classifyMembersInSubInterval(
     const bool dead = (m.person && m.person->is_dead);
     if (!dead) sub_bins[bin].total_size++;
 
-    // Infectious? A local's fomite deposits are ignored: partial presence
-    // makes none.
-    if (m.person)
-      emission_calculator.emit(*m.person, current_time, emission_scratch);
-    const std::vector<double>& local_infectiousness =
-        emission_scratch.infectiousness_by_mode;
-    const bool locally_infectious = m.person && !local_infectiousness.empty();
-    bool added_inf = false;
-    if (m.visitor && m.visitor->is_infectious) {
+    // Infectious? Fomite deposits are ignored: partial presence makes none.
+    const Emission* emission =
+        memberEmission(m.person, m.visitor, current_time, emission_calculator,
+                       emission_scratch);
+    const std::vector<double>* infectiousness =
+        emission ? &emission->infectiousness_by_mode : nullptr;
+    if (infectiousness && !infectiousness->empty()) {
+      const int num_emitted = static_cast<int>(infectiousness->size());
+      bool added_inf = false;
       for (int mode = 0; mode < num_modes; ++mode) {
-        double inf_full = (mode < VisitorInfo::MAX_MODES)
-                              ? m.visitor->integrated_infectiousness[mode]
-                              : 0.0;
+        double inf_full = (mode < num_emitted) ? (*infectiousness)[mode] : 0.0;
         // f_I: this infectious rider's presence cap (1.0 unless over-long).
         double inf_sub = inf_full * scale * m.f_presence;
         if (inf_sub > 0.0) {
@@ -182,24 +180,6 @@ void InteractionManager::classifyMembersInSubInterval(
           sub_bins[bin].total_inf_by_mode[mode] += inf_sub;
         } else if (added_inf) {
           // Keep arrays aligned across modes.
-          sub_bins[bin].inf_per_person_by_mode[mode].push_back(0.0);
-        }
-      }
-    } else if (locally_infectious) {
-      for (int mode = 0; mode < num_modes; ++mode) {
-        double inf_full = (mode < static_cast<int>(local_infectiousness.size()))
-                              ? local_infectiousness[mode]
-                              : 0.0;
-        // f_I: this infectious rider's presence cap (1.0 unless over-long).
-        double inf_sub = inf_full * scale * m.f_presence;
-        if (inf_sub > 0.0) {
-          if (!added_inf) {
-            sub_bins[bin].infectious_ids.push_back(m.pid);
-            added_inf = true;
-          }
-          sub_bins[bin].inf_per_person_by_mode[mode].push_back(inf_sub);
-          sub_bins[bin].total_inf_by_mode[mode] += inf_sub;
-        } else if (added_inf) {
           sub_bins[bin].inf_per_person_by_mode[mode].push_back(0.0);
         }
       }

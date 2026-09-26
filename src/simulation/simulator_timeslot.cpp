@@ -241,17 +241,15 @@ void Simulator::exchangeVisitorsAndBuildAugmented(
     visitor_ids = domain_mgr_->getVisitorIds();
 
     // Populate visitor data map for transmission calculations
-    for (const auto& visitor : domain.incoming_visitors) {
+    // Emission is moved out: incoming_visitors is only read for ids after this.
+    for (auto& visitor : domain.incoming_visitors) {
       VisitorInfo info;
       info.person_id = visitor.person_id;
       info.is_infected = visitor.is_infected;
       info.is_infectious = visitor.is_infectious;
       info.immunity_level = visitor.immunity_level;
       info.symptom_id = visitor.symptom_id;
-      std::copy(std::begin(visitor.emission.infectiousness_by_mode),
-                std::end(visitor.emission.infectiousness_by_mode),
-                std::begin(info.integrated_infectiousness));
-      info.fomite_deposition_sub = visitor.emission.fomite_deposits;
+      info.emission = std::move(visitor.emission);
       visitor_data_map[visitor.person_id] = std::move(info);
     }
   } catch (const std::exception& e) {
