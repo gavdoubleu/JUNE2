@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <stdexcept>
 #include <unordered_set>
 
 #include "epidemiology/trajectory/stage_curve_integral.h"
@@ -32,12 +33,42 @@ double OutcomeRates::getRate(const Person& person, const WorldState* world,
   return 0.0;
 }
 
-std::vector<std::string> OutcomeRates::resolve(const WorldState& world) {
+// Throw unless every value `criterion` names is one of `known_names`.
+static void requireKnownContextValue(const SelectionCriterion& criterion,
+                                     const std::vector<std::string>& known_names,
+                                     const std::string& row_label) {
+  const std::string* value = std::get_if<std::string>(&criterion.value);
+  if (value && std::find(known_names.begin(), known_names.end(), *value) !=
+                   known_names.end()) {
+    return;
+  }
+  std::string known_list;
+  for (const std::string& name : known_names) {
+    known_list += (known_list.empty() ? "" : ", ") + name;
+  }
+  throw std::runtime_error(
+      row_label + ": " + criterion.property_path + " '" +
+      (value ? *value : std::string("<not a single name>")) +
+      "' is not one this disease defines. Known: " + known_list);
+}
+
+std::vector<std::string> OutcomeRates::resolve(
+    const WorldState& world, const std::vector<std::string>& symptom_names,
+    const std::vector<std::string>& mode_names) {
   std::vector<std::string> absent;
   for (size_t i = 0; i < rows.size(); ++i) {
+    const std::string row_label =
+        "disease outcome rates row " + std::to_string(i);
     for (auto& c : rows[i].criteria) {
+      if (filtering::isInfectionContextCriterion(c)) {
+        requireKnownContextValue(
+            c, c.property_path == "infector_symptom" ? symptom_names
+                                                      : mode_names,
+            row_label);
+        continue;
+      }
       c.allow_absent_geo_units = true;
-      c.resolveOrThrow(world, "disease outcome rates row " + std::to_string(i));
+      c.resolveOrThrow(world, row_label);
       for (const std::string& name : c.absentGeoUnitNames()) {
         absent.push_back("row " + std::to_string(i) +
                          ": no geographical unit named '" + name + "'");

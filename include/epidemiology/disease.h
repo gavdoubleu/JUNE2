@@ -113,8 +113,12 @@ struct OutcomeRates {
   // Resolve every row's filters against the world, throwing on anything the
   // world cannot answer. An outcome table is reference data, so a row may name
   // a geographical unit this world does not contain; those names are returned,
-  // one line each, for the caller to report, and match nobody.
-  std::vector<std::string> resolve(const WorldState& world);
+  // one line each, for the caller to report, and match nobody. Infection
+  // Context criteria are exempt from world resolution; their values must name
+  // one of `symptom_names` or `mode_names`, or resolving throws.
+  std::vector<std::string> resolve(const WorldState& world,
+                                   const std::vector<std::string>& symptom_names,
+                                   const std::vector<std::string>& mode_names);
 };
 
 // =============================================================================
@@ -260,7 +264,11 @@ class Disease {
 
   // Resolve outcome rate criteria after WorldState is built.
   std::vector<std::string> resolve(const WorldState& world) {
-    return outcome_rates_.resolve(world);
+    std::vector<std::string> mode_names;
+    for (const auto& mode : transmission_params_.modes) {
+      mode_names.push_back(mode.name);
+    }
+    return outcome_rates_.resolve(world, id_to_name_, mode_names);
   }
 
   // Fast lookup

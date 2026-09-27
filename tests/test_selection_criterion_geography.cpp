@@ -127,7 +127,7 @@ TEST_CASE("an outcome table reports rows naming units the world lacks, and those
   everyone.probabilities = {{"mild", 0.4}};
   rates.rows = {elsewhere, everyone};
 
-  const std::vector<std::string> absent = rates.resolve(world);
+  const std::vector<std::string> absent = rates.resolve(world, {}, {});
   REQUIRE(absent.size() == 1);
   CHECK(absent[0].find("row 0") != std::string::npos);
   CHECK(absent[0].find("Atlantis") != std::string::npos);
@@ -147,7 +147,7 @@ TEST_CASE("an outcome table row the world cannot answer is an error") {
   OutcomeRow row;
   row.criteria = {unknown};
   rates.rows = {row};
-  CHECK_THROWS_AS(rates.resolve(world), std::runtime_error);
+  CHECK_THROWS_AS(rates.resolve(world, {}, {}), std::runtime_error);
 }
 
 TEST_CASE("an infection seed attribute filter the world cannot answer is an error") {

@@ -146,6 +146,10 @@ bool matchesCriteria(const Person& person, const WorldState* world,
                      const std::vector<SelectionCriterion>& criteria,
                      const InfectionContext& ctx = {});
 
+/// True when `criterion` filters on an Infection Context fact rather than a
+/// Person property. Only outcome-rate tables may carry such criteria.
+bool isInfectionContextCriterion(const SelectionCriterion& criterion);
+
 /// Scans CSV headers and returns (column_index, property_path) for every
 /// column whose header begins with `"filter."`.
 ///

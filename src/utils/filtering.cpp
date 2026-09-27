@@ -227,6 +227,11 @@ bool matchesCriteria(const Person& person, const WorldState* world,
   return true;
 }
 
+bool isInfectionContextCriterion(const SelectionCriterion& criterion) {
+  return criterion.property_path == "infector_symptom" ||
+         criterion.property_path == "transmission_mode";
+}
+
 std::vector<std::pair<int, std::string>> findFilterColumns(
     const std::vector<std::string>& headers) {
   std::vector<std::pair<int, std::string>> result;
