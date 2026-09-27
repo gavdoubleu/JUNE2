@@ -7,6 +7,7 @@
 #include "epidemiology/disease.h"
 #include "epidemiology/infection_seed.h"
 #include "epidemiology/infectiousness_curves.h"
+#include "utils/event_logging/event_logger.h"
 
 using namespace june;
 
@@ -120,4 +121,20 @@ TEST_CASE(
       9,  10, 11, 12,  44,  45, 46, 47, 113, 114, 115, 116, 78,
       79, 80, 81, 120, 121, 94, 95, 86, 87,  23,  24,  105, 106};
   CHECK(infected == expected);
+}
+
+TEST_CASE(
+    "an undeclared seed is logged with source Seed and no symptom or mode") {
+  WorldState world = makeHouseholdWorld();
+  Disease disease = makeDisease();
+  EventLogger logger;
+  InfectionSeeder seeder(world, &disease, clusteredConfig(1), &logger, 12345);
+
+  seeder.seedInfections("2024-01-01 08:00", 0.0);
+
+  const std::vector<InfectionEvent>& infections = logger.getInfectionEvents();
+  REQUIRE(infections.size() == 1);
+  CHECK(infections[0].source == InfectionSource::Seed);
+  CHECK(infections[0].infector_symptom_id == kNoSymptomId);
+  CHECK(infections[0].transmission_mode_index == kNoModeIndex);
 }

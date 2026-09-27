@@ -9,6 +9,7 @@
 #include "epidemiology/disease.h"
 #include "epidemiology/interaction_manager.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -101,7 +102,8 @@ TEST_CASE("FoI: Single infectious person, single susceptible, single mode") {
     world.people[1].infection.reset();
     if (!world.people[0].infection) {
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
     }
 
     SimulationConfig trial_cfg;
@@ -177,8 +179,9 @@ TEST_CASE("FoI: Zero susceptibility means zero infections") {
   SimulationConfig sim_cfg;
   ParallelConfig parallel_config;
 
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 42, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 42,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   cm.allow_default_matrix = true;
   finalizeContactMatrices(cm, world, disease);
@@ -244,7 +247,8 @@ TEST_CASE("FoI: Higher contacts produce higher infection rate") {
     for (int t = 0; t < trials; ++t) {
       world.people[1].infection.reset();
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], t, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], t, kNoTransmissionContext, nullptr,
+          "office", 0);
 
       SimulationConfig trial_cfg;
       trial_cfg.random_seed = static_cast<uint64_t>(t);

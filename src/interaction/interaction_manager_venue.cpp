@@ -207,17 +207,19 @@ bool InteractionManager::processOneVenueSusceptible(
   if (src_idx < 0) src_idx = 0;
 
   InfectionSource infection_source = InfectionSource::Person;
-  uint8_t transmission_mode_index = 0;
+  uint8_t transmission_mode_index = kNoModeIndex;
   PersonId infector_id = sampleVenueInfector(
       src_idx, susc_bin, actual_venue_id, venue, susceptible_id, parent_agg,
       susc_rng, infection_source, transmission_mode_index);
-  uint16_t infector_symptom_id =
-      resolveInfectorSymptomId(infector_id, current_time, visitor_data);
+  const TransmissionRecord transmission{
+      infection_source,
+      static_cast<uint8_t>(
+          resolveInfectorSymptomId(infector_id, current_time, visitor_data)),
+      transmission_mode_index};
 
-  applyVenueInfection(susc_mem, infector_id, infection_source,
-                      transmission_mode_index, infector_symptom_id,
-                      current_time, venue_type_id, actual_venue_id, venue_key,
-                      visitor_data, active_infections, pending_infections);
+  applyVenueInfection(susc_mem, infector_id, transmission, current_time,
+                      venue_type_id, actual_venue_id, venue_key, visitor_data,
+                      active_infections, pending_infections);
   return true;
 }
 
@@ -307,9 +309,8 @@ PersonId InteractionManager::sampleVenueInfector(
 
 void InteractionManager::applyVenueInfection(
     const SusceptibleMember& susc_mem, PersonId infector_id,
-    InfectionSource infection_source, uint8_t transmission_mode_index,
-    uint16_t infector_symptom_id, double current_time, uint8_t venue_type_id,
-    VenueId actual_venue_id, uint64_t venue_key,
+    const TransmissionRecord& transmission, double current_time,
+    uint8_t venue_type_id, VenueId actual_venue_id, uint64_t venue_key,
     const std::unordered_map<PersonId, VisitorInfo>* /*visitor_data*/,
     std::unordered_set<PersonId>* active_infections,
     std::vector<PendingInfection>* pending_infections) {
@@ -329,8 +330,8 @@ void InteractionManager::applyVenueInfection(
     pending.venue_type_id = venue_type_id;
     pending.encounter_type_id = susc_mem.encounter_type_id;
     pending.venue_id = actual_venue_id;
-    pending.infector_symptom_id = infector_symptom_id;
-    pending.transmission_mode_index = transmission_mode_index;
+    pending.infector_symptom_id = transmission.infector_symptom_id;
+    pending.transmission_mode_index = transmission.transmission_mode_index;
     if (visitor) pending.home_array_index = visitor->home_array_index;
     pending_infections->push_back(pending);
     return;
@@ -354,15 +355,13 @@ void InteractionManager::applyVenueInfection(
                static_cast<uint64_t>(current_time * 1000), venue_key);
   susc_person->infection = std::make_unique<Infection>(
       disease_, current_time, susc_person,
-      static_cast<unsigned int>(infection_seed), &world_, venue_type_name,
-      actual_venue_id, severity_factor, infector_symptom_id, "", "",
-      transmission_mode_index);
+      static_cast<unsigned int>(infection_seed), transmission, &world_,
+      venue_type_name, actual_venue_id, severity_factor);
 
   if (event_logger_ != nullptr) {
     event_logger_->logInfection(susceptible_id, infector_id, actual_venue_id,
                                 current_time, susc_mem.encounter_type_id,
-                                static_cast<uint8_t>(infector_symptom_id),
-                                transmission_mode_index, infection_source);
+                                transmission);
   }
 
   if (active_infections != nullptr) {

@@ -11,6 +11,7 @@
 #include "epidemiology/disease.h"
 #include "epidemiology/interaction_manager.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -99,7 +100,8 @@ TEST_CASE("Transmission determinism: same seed, shuffled input order") {
     WorldState world1 = setup_world();
     for (int i = 0; i < num_infectious; ++i) {
       world1.people[i].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world1.people[i], 500 + i, nullptr, "office", 0);
+          &disease, 0.0, &world1.people[i], 500 + i, kNoTransmissionContext,
+          nullptr, "office", 0);
     }
     std::vector<PersonLocation> locs1;
     for (int i = 0; i < num_people; ++i) {
@@ -111,7 +113,8 @@ TEST_CASE("Transmission determinism: same seed, shuffled input order") {
     WorldState world2 = setup_world();
     for (int i = 0; i < num_infectious; ++i) {
       world2.people[i].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world2.people[i], 500 + i, nullptr, "office", 0);
+          &disease, 0.0, &world2.people[i], 500 + i, kNoTransmissionContext,
+          nullptr, "office", 0);
     }
     std::vector<PersonLocation> locs2;
     for (int i = 0; i < num_people; ++i) {
@@ -134,7 +137,8 @@ TEST_CASE("Transmission determinism: same seed, shuffled input order") {
       WorldState world = setup_world();
       for (int i = 0; i < num_infectious; ++i) {
         world.people[i].infection = std::make_unique<Infection>(
-            &disease, 0.0, &world.people[i], 500 + i, nullptr, "office", 0);
+            &disease, 0.0, &world.people[i], 500 + i, kNoTransmissionContext,
+            nullptr, "office", 0);
       }
       std::vector<PersonLocation> locs;
       for (int i = 0; i < num_people; ++i) {
@@ -151,9 +155,11 @@ TEST_CASE("Transmission determinism: same seed, shuffled input order") {
     WorldState world2 = setup_world();
     for (int i = 0; i < num_infectious; ++i) {
       world1.people[i].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world1.people[i], 500 + i, nullptr, "office", 0);
+          &disease, 0.0, &world1.people[i], 500 + i, kNoTransmissionContext,
+          nullptr, "office", 0);
       world2.people[i].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world2.people[i], 500 + i, nullptr, "office", 0);
+          &disease, 0.0, &world2.people[i], 500 + i, kNoTransmissionContext,
+          nullptr, "office", 0);
     }
     std::vector<PersonLocation> locs;
     for (int i = 0; i < num_people; ++i) {

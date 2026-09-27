@@ -11,6 +11,7 @@
 #include "epidemiology/interaction_manager.h"
 #include "epidemiology/vaccine.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -119,7 +120,8 @@ double measureInfectionRate(TestFixture& fix, Disease& disease, int N = 500) {
     // Infector stays infected with "mild" symptom
     if (!fix.world.people[0].infection) {
       fix.world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &fix.world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &fix.world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
     }
 
     ParallelConfig parallel_config;
@@ -376,8 +378,9 @@ TEST_CASE(
                   {}, fix.trans);
 
   // Phase 1: Infect person 0 (the infector)
-  fix.world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &fix.world.people[0], 42, nullptr, "office", 0);
+  fix.world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &fix.world.people[0], 42,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   // Phase 2: Transmit to person 1
   {
@@ -413,8 +416,9 @@ TEST_CASE(
 
   // Phase 4: Attempt reinfection — person 1 should be protected
   // Reset infector
-  fix.world.people[0].infection = std::make_unique<Infection>(
-      &disease, 11.0, &fix.world.people[0], 99, nullptr, "office", 0);
+  fix.world.people[0].infection =
+      std::make_unique<Infection>(&disease, 11.0, &fix.world.people[0], 99,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   double susc_after_recovery =
       fix.world.people[1].getSusceptibility(11.0, "TestFlu");
@@ -429,9 +433,9 @@ TEST_CASE(
   int trials = 500;
   for (int trial = 0; trial < trials; ++trial) {
     fix.world.people[1].infection.reset();
-    fix.world.people[0].infection =
-        std::make_unique<Infection>(&disease, 11.0, &fix.world.people[0],
-                                    200 + trial, nullptr, "office", 0);
+    fix.world.people[0].infection = std::make_unique<Infection>(
+        &disease, 11.0, &fix.world.people[0], 200 + trial,
+        kNoTransmissionContext, nullptr, "office", 0);
 
     auto locs = fix.makeColocatedLocations();
     ParallelConfig parallel_config;

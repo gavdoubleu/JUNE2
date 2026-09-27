@@ -10,6 +10,7 @@
 #include "epidemiology/infectiousness_curves.h"
 #include "mock_compartmental_model.h"
 #include "simulation/compartmental_model_manager.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -190,8 +191,8 @@ TEST_CASE("Write-back: infected person at mapped venue → positive deposition")
   auto mgr = makeManager(plugin, {10});
   REQUIRE(mgr->isActive());
 
-  world.people[0].infection =
-      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 42);
+  world.people[0].infection = std::make_unique<Infection>(
+      &disease, 0.0, &world.people[0], 42, kNoTransmissionContext);
 
   std::vector<PersonLocation> locs = {{0, 10, -1, -1, 255, 0}};
   double t0 = 5.0, t1 = t0 + delta_days;
@@ -231,8 +232,8 @@ TEST_CASE(
   REQUIRE(mgr->venueToLocalNodeIndex(10) == 0);
   REQUIRE(mgr->venueToLocalNodeIndex(20) == -1);
 
-  world.people[0].infection =
-      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 42);
+  world.people[0].infection = std::make_unique<Infection>(
+      &disease, 0.0, &world.people[0], 42, kNoTransmissionContext);
 
   // person at venue 20 (unmapped)
   std::vector<PersonLocation> locs = {{0, 20, -1, -1, 255, 0}};

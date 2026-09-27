@@ -558,11 +558,15 @@ std::optional<PendingInfection> DomainCommunicator::applyOnePendingInfection(
   uint64_t infection_seed =
       mix_seed(config_.simulation.random_seed, pending.person_id,
                static_cast<uint64_t>(pending.infection_time * 1000), venue_key);
+  // PendingInfection carries no source yet, so a cross-rank infection is
+  // built as Person-sourced.
+  const TransmissionRecord transmission{InfectionSource::Person,
+                                        pending.infector_symptom_id,
+                                        pending.transmission_mode_index};
   person->infection = std::make_unique<Infection>(
       &disease, pending.infection_time, person,
-      static_cast<unsigned int>(infection_seed), &world_, venue_type_name,
-      pending.venue_id, severity_factor, pending.infector_symptom_id, "", "",
-      pending.transmission_mode_index);
+      static_cast<unsigned int>(infection_seed), transmission, &world_,
+      venue_type_name, pending.venue_id, severity_factor);
 
   return pending;
 }

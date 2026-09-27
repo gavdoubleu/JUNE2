@@ -9,6 +9,7 @@
 #include "epidemiology/interaction_manager.h"
 #include "loaders/config_loader.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -76,8 +77,9 @@ TEST_CASE("InteractionManager - Venue Matrix Lookups via Resolved Config") {
                         nullptr);
 
   // 6. Test transmission in "office" venue (venue.id = 0, type = 1)
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 0, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 0,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   std::vector<PersonLocation> locs;
   PersonLocation loc0, loc1;
@@ -196,7 +198,8 @@ TEST_CASE(
   // 5. Test transmission with romantic_encounter (encounter_type_id = 0)
   // Use the virtual venue ID
   world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 0, nullptr, "romantic_encounter", 0);
+      &disease, 0.0, &world.people[0], 0, kNoTransmissionContext, nullptr,
+      "romantic_encounter", 0);
 
   std::vector<PersonLocation> locs;
   PersonLocation loc0, loc1;

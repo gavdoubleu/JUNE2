@@ -10,6 +10,7 @@
 
 #include "core/config.h"
 #include "core/types.h"
+#include "epidemiology/transmission/transmission_record.h"
 #include "infectiousness_curves.h"
 #include "utils/deterministic_rng.h"
 #include "utils/filtering.h"
@@ -339,12 +340,12 @@ class Infection {
  public:
   Infection(const Disease* disease, double infection_time,
             const Person* person,  // Pass person for vaccine context
-            unsigned int random_seed, const WorldState* world = nullptr,
+            unsigned int random_seed, const TransmissionRecord& transmission,
+            const WorldState* world = nullptr,
             const std::string& venue_type = "", int venue_id = -1,
-            float severity_factor = 1.0f, uint16_t infector_symptom_id = 0,
+            float severity_factor = 1.0f,
             const std::string& trajectory_key_override = "",
-            const std::string& start_symptom_override = "",
-            uint8_t transmission_mode_index = 0);
+            const std::string& start_symptom_override = "");
 
   // Getters
   const Disease* getDisease() const { return disease_; }
@@ -472,11 +473,11 @@ class Infection {
 
   InfectionTrajectory generateTrajectoryFromRates(
       SplitMix64& rng, const Person* person, const WorldState* world,
+      const TransmissionRecord& transmission,
       const std::string& venue_type = "", int venue_id = -1,
-      float severity_factor = 1.0f, uint16_t infector_symptom_id = 0,
+      float severity_factor = 1.0f,
       const std::string& trajectory_key_override = "",
-      const std::string& start_symptom_override = "",
-      uint8_t transmission_mode_index = 0);
+      const std::string& start_symptom_override = "");
 
   // Sample transmission parameters from disease config
   void sampleTransmissionParameters(SplitMix64& rng);

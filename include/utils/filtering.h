@@ -20,11 +20,12 @@ struct InfectionContext {
   std::string
       infector_symptom;  ///< Symptom-tag name of the infector at the moment of
                          ///< transmission (e.g. "primary_pneumonic"). Empty
-                         ///< when there is no explicit infector (e.g. seeded
-                         ///< infections).
+                         ///< means absent: no infector Person (seed, fomite)
+                         ///< or its symptom could not be looked up.
   std::string transmission_mode;  ///< Name of the transmission mode that caused
                                   ///< the infection (e.g. "animal_bite",
-                                  ///< "respiratory"). Empty for seeds.
+                                  ///< "respiratory"). Empty means absent
+                                  ///< (e.g. an undeclared seed).
 };
 
 /// @namespace june::filtering
@@ -128,8 +129,9 @@ std::vector<SelectionCriterion> parseCriterionFromKeyValue(
 /// Criteria are evaluated conjunctively (AND). An empty criteria list matches
 /// all persons. Criteria with `property_path == "infector_symptom"` or
 /// `"transmission_mode"` are matched against the corresponding field of `ctx`
-/// rather than person attributes; a non-empty criterion on either field fails
-/// when the context field is empty (e.g. seeded infections).
+/// rather than person attributes. An empty context field is an absent fact:
+/// any criterion on it, `==` or `!=`, fails, so only rows that don't ask for
+/// that fact match.
 ///
 /// Args:
 ///   person:   The person being evaluated.

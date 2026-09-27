@@ -16,6 +16,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT  // custom main so we can wrap MPI
                                   // init/finalize
 #include "doctest.h"
+#include "transmission_fixtures.h"
 
 #ifdef USE_MPI
 #include <mpi.h>
@@ -40,8 +41,9 @@ TEST_CASE(
   if (f.rank == 0) {
     Person* p = f.world.getPerson(TwoRankFixture::PERSON_R0);
     // Infected at time -5.0, so at time 0.0 five days into "mild"
-    p->infection = std::make_unique<Infection>(
-        &disease, -5.0, p, 42u, &f.world, "household", 0, 1.0f, 0, "general");
+    p->infection = std::make_unique<Infection>(&disease, -5.0, p, 42u,
+                                               kNoTransmissionContext, &f.world,
+                                               "household", 0, 1.0f, "general");
   }
 
   int remote_venue = 1 - f.rank;
@@ -99,8 +101,9 @@ TEST_CASE(
     // Infected at time -1.0.
     // Gamma PDF(shape=2, rate=1) at x=1 is 1.0 * exp(-1) = 0.3678...
     // Max infectiousness = 2.0, so 2.0 * 0.3678 = 0.7357...
-    p->infection = std::make_unique<Infection>(
-        &disease, -1.0, p, 42u, &f.world, "household", 0, 1.0f, 0, "general");
+    p->infection = std::make_unique<Infection>(&disease, -1.0, p, 42u,
+                                               kNoTransmissionContext, &f.world,
+                                               "household", 0, 1.0f, "general");
   }
 
   constexpr double delta_hours = 6.0;

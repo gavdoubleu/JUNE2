@@ -5,6 +5,7 @@
 #include "epidemiology/disease.h"
 #include "epidemiology/policy.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -736,7 +737,8 @@ TEST_CASE("back-scan pins the venue forward path assigned under per-day-type "
   pm.resolveAll(disease);
 
   world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 42, nullptr, "guest_a", 0);
+      &disease, 0.0, &world.people[0], 42, kNoTransmissionContext, nullptr,
+      "guest_a", 0);
   world.people[0].applicable_symptom_policy_mask = 1;
 
   // --- Day 1 (dtB): policy now active. Transit slot resolves no_venue, the

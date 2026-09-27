@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "core/types.h"
+#include "epidemiology/transmission/transmission_record.h"
 
 namespace june {
 
@@ -31,8 +32,6 @@ struct PopulationSummaryRecord {
 // =============================================================================
 // Event Types (In-memory buffers)
 // =============================================================================
-
-enum class InfectionSource : uint8_t { Person, Fomite, Compartmental };
 
 struct InfectionEvent {
   PersonId person_id;

@@ -4,6 +4,7 @@
 #include "epidemiology/disease.h"
 #include "epidemiology/interaction_manager.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -44,8 +45,8 @@ TEST_CASE("Disease trajectory progression") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 123, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 123, kNoTransmissionContext, nullptr, "office", 0);
 
   SUBCASE("Initial stage") {
     CHECK(p.infection->getCurrentSymptom(0.0) == "mild");
@@ -84,7 +85,7 @@ TEST_CASE("Trajectory carries infection time without a person") {
 
   // Null person takes the warning path, which builds no transitions; the first
   // stage start is still the infection time.
-  Infection infection(&disease, 7.5, nullptr, 123);
+  Infection infection(&disease, 7.5, nullptr, 123, kNoTransmissionContext);
   CHECK(infection.getTrajectory().infection_time == 7.5);
 }
 
@@ -112,8 +113,8 @@ TEST_CASE("Integrated infectiousness splits at a stage transition") {
                   trans);
 
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
-  Infection infection(&disease, 0.0, &world.people[0], 123, nullptr, "office",
-                      0);
+  Infection infection(&disease, 0.0, &world.people[0], 123,
+                      kNoTransmissionContext, nullptr, "office", 0);
   REQUIRE(infection.getTrajectory().getCurrentSymptomId(1.0) == 1);
   REQUIRE(infection.getTrajectory().getCurrentSymptomId(3.0) == 2);
 
@@ -159,8 +160,9 @@ TEST_CASE("Sentinel venue_id=-1 filtered by processTransmissions") {
                         nullptr);
 
   // Infect Person 0
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 123, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 123,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   SUBCASE("Sentinel locations are skipped") {
     // Both people at venue_id=-1 with encounter_type_id=255 (unallocated)
@@ -250,9 +252,9 @@ TEST_CASE("Large venue transmission statistical correctness") {
 
     // Infect first num_infectious people
     for (int i = 0; i < num_infectious; ++i) {
-      world.people[i].infection =
-          std::make_unique<Infection>(&disease, 0.0, &world.people[i],
-                                      trial * 1000 + i, nullptr, "office", 0);
+      world.people[i].infection = std::make_unique<Infection>(
+          &disease, 0.0, &world.people[i], trial * 1000 + i,
+          kNoTransmissionContext, nullptr, "office", 0);
     }
 
     cm_config.allow_default_matrix = true;
@@ -329,8 +331,9 @@ TEST_CASE("InteractionManager basic transmission") {
                         nullptr);
 
   // Infect Person 0
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 123, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 123,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   // Both at same venue
   std::vector<PersonLocation> locs;

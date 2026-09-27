@@ -21,6 +21,7 @@
 #include "epidemiology/disease.h"
 #include "loaders/config_loader.h"
 #include "simulation/follow_bindings.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 using follow_detail::enrolFollowHosts;
@@ -702,6 +703,7 @@ TEST_CASE("the mirror gate pins nobody at the host's venue") {
 
   Person& follower = world.people[0];
   follower.infection = std::make_unique<Infection>(&disease, 0.0, &follower, 42,
+                                                   kNoTransmissionContext,
                                                    nullptr, "household", 0);
   follower.applicable_symptom_policy_mask = 1;
   constexpr int16_t kHoppedSchedule = 3;

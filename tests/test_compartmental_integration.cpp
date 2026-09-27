@@ -12,6 +12,7 @@
 #include "mock_compartmental_model.h"
 #include "simulation/compartmental_model_manager.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -246,8 +247,8 @@ TEST_CASE("Integration: infected person → non-zero deposition write-back") {
   REQUIRE(im_mgr.mgr->isActive());
 
   // Seed the person as infected at t=0
-  world.people[0].infection =
-      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 42);
+  world.people[0].infection = std::make_unique<Infection>(
+      &disease, 0.0, &world.people[0], 42, kNoTransmissionContext);
 
   ContactMatrixConfig cm;
   SimulationConfig sim;

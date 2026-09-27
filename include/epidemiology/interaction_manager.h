@@ -721,9 +721,8 @@ class InteractionManager {
   // but takes the susc_mem encounter_type_id and the venue-FOI InfectionSource.
   void applyVenueInfection(
       const SusceptibleMember& susc_mem, PersonId infector_id,
-      InfectionSource infection_source, uint8_t transmission_mode_index,
-      uint16_t infector_symptom_id, double current_time, uint8_t venue_type_id,
-      VenueId actual_venue_id, uint64_t venue_key,
+      const TransmissionRecord& transmission, double current_time,
+      uint8_t venue_type_id, VenueId actual_venue_id, uint64_t venue_key,
       const std::unordered_map<PersonId, VisitorInfo>* visitor_data,
       std::unordered_set<PersonId>* active_infections,
       std::vector<PendingInfection>* pending_infections);

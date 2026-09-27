@@ -9,6 +9,8 @@
 #include "epidemiology/epidemiology.h"
 #include "epidemiology/interaction_manager.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
+#include "utils/event_logging/event_logger.h"
 
 using namespace june;
 
@@ -104,8 +106,9 @@ TEST_CASE("Fomite Deposition") {
   initVenueFomiteHistory(world, 1);  // 1 fomite mode
 
   // Infect person 0
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 42, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 42,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   // Place person at venue
   std::vector<PersonLocation> locs;
@@ -390,8 +393,9 @@ TEST_CASE("No Stale Bin Data Across Venues With Different Bin Counts") {
   initVenueFomiteHistory(world, 1);
 
   // Infect person 0 (at venue 0)
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 42, nullptr, "school", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 42,
+                                  kNoTransmissionContext, nullptr, "school", 0);
 
   // --- Contact matrix for "school": 3 age-based bins with high contacts ---
   ContactMatrixConfig cm_config;
@@ -448,7 +452,8 @@ TEST_CASE("No Stale Bin Data Across Venues With Different Bin Counts") {
     // Ensure person 0 stays infectious
     if (!world.people[0].infection) {
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], 42, nullptr, "school", 0);
+          &disease, 0.0, &world.people[0], 42, kNoTransmissionContext, nullptr,
+          "school", 0);
     }
     // Clear fomite history to isolate direct-contact path
     for (auto& venue : world.venues) {
@@ -470,4 +475,161 @@ TEST_CASE("No Stale Bin Data Across Venues With Different Bin Counts") {
   // history. Any infection of person 2 is a false positive caused by stale
   // bin data leaking from venue 0 through the shared bins_buffer_.
   CHECK(false_infections == 0);
+}
+
+// =============================================================================
+// A fomite infection's Infection Context: no infector symptom, sampled mode
+// =============================================================================
+
+static SelectionCriterion contextCriterion(const std::string& fact,
+                                           const std::string& operator_type,
+                                           const std::string& value) {
+  SelectionCriterion criterion;
+  criterion.property_path = fact;
+  criterion.operator_type = operator_type;
+  criterion.value = value;
+  return criterion;
+}
+
+// A one-stage trajectory, so the chosen trajectory is visible as its symptom.
+static TrajectoryDefinition trajectoryInto(const std::string& selection_key,
+                                           const std::string& symptom) {
+  TrajectoryDefinition trajectory;
+  trajectory.selection_key = selection_key;
+  trajectory.stages.push_back({symptom, {"constant", {{"value", 100.0}}}});
+  return trajectory;
+}
+
+TEST_CASE("a fomite infection has no infector symptom but keeps its mode") {
+  WorldState world;
+  Venue venue;
+  venue.id = 0;
+  venue.type_id = 0;
+  world.venue_type_names = {"office"};
+  world.venues.push_back(venue);
+  Person& susceptible = world.people.emplace_back();
+  susceptible.id = 0;
+  susceptible.age = 30;
+  susceptible.geo_unit_id = -1;
+  world.buildIndices();
+
+  // First match wins: a known infector symptom would take the first row, a
+  // fomite infection must fall to the mode row.
+  OutcomeRow symptom_row;
+  symptom_row.criteria = {
+      contextCriterion("infector_symptom", "!=", "healthy")};
+  symptom_row.probabilities = {{"infector_symptom_row", 1.0}};
+  OutcomeRow mode_row;
+  mode_row.criteria = {
+      contextCriterion("transmission_mode", "==", "fomite_env")};
+  mode_row.probabilities = {{"fomite_row", 1.0}};
+  OutcomeRates rates;
+  rates.rows = {symptom_row, mode_row};
+  Disease base = makeDiseaseWithFomite(1.0, 10.0, 50.0);
+  Disease disease("TestFomite", base.getSymptomTags(), {},
+                  {trajectoryInto("infector_symptom_row", "healthy"),
+                   trajectoryInto("fomite_row", "mild")},
+                  rates, base.getTransmissionParams());
+  initVenueFomiteHistory(world, 1);
+  world.venues[0].fomite_history[0].push_back({4.0, 100.0});
+
+  PersonLocation location;
+  location.person_id = 0;
+  location.venue_id = 0;
+  location.subset_index = -1;
+  location.activity_index = -1;
+  location.encounter_type_id = 255;
+  location.person_array_index = 0;
+
+  ContactMatrixConfig contact_config;
+  contact_config.allow_default_matrix = true;
+  finalizeContactMatrices(contact_config, world, disease);
+  SimulationConfig simulation_config;
+  ParallelConfig parallel_config;
+  for (int trial = 0; trial < 50 && !world.people[0].infection; ++trial) {
+    InteractionManager interaction_manager(world, contact_config,
+                                           simulation_config, parallel_config,
+                                           &disease, nullptr);
+    interaction_manager.processTransmissions({location}, 5.0, 8.0, nullptr);
+  }
+  REQUIRE(world.people[0].infection);
+  CHECK(disease.getSymptomName(world.people[0]
+                                   .infection->getTrajectory()
+                                   .transitions.at(0)
+                                   .second) == "mild");
+}
+
+TEST_CASE("a Person-infector infection logs the context it was judged with") {
+  WorldState world;
+  Venue venue;
+  venue.id = 0;
+  venue.type_id = 0;
+  world.venue_type_names = {"office"};
+  world.venues.push_back(venue);
+  for (PersonId id : {0, 1}) {
+    Person& person = world.people.emplace_back();
+    person.id = id;
+    person.age = 30;
+    person.geo_unit_id = -1;
+  }
+  world.buildIndices();
+
+  // Only the (mild infector, direct mode) context reaches "mild".
+  OutcomeRow context_row;
+  context_row.criteria = {
+      contextCriterion("infector_symptom", "==", "mild"),
+      contextCriterion("transmission_mode", "==", "direct")};
+  context_row.probabilities = {{"context_row", 1.0}};
+  OutcomeRow default_row;
+  default_row.probabilities = {{"default_row", 1.0}};
+  OutcomeRates rates;
+  rates.rows = {context_row, default_row};
+  Disease base = makeDiseaseWithFomite(0.0 /* no fomite deposition */);
+  Disease disease("TestFomite", base.getSymptomTags(), {},
+                  {trajectoryInto("context_row", "mild"),
+                   trajectoryInto("default_row", "healthy")},
+                  rates, base.getTransmissionParams());
+  initVenueFomiteHistory(world, 1);
+  world.people[1].infection = std::make_unique<Infection>(
+      &disease, 0.0, &world.people[1], 42, kNoTransmissionContext, &world,
+      "office", 0, 1.0f, "context_row");
+
+  std::vector<PersonLocation> locations;
+  for (PersonId id : {0, 1}) {
+    PersonLocation location;
+    location.person_id = id;
+    location.venue_id = 0;
+    location.subset_index = -1;
+    location.activity_index = -1;
+    location.encounter_type_id = 255;
+    location.person_array_index = id;
+    locations.push_back(location);
+  }
+
+  ContactMatrixConfig contact_config;
+  ContactMatrix dense_contacts;
+  dense_contacts.bins = {"all"};
+  dense_contacts.contacts = {{100.0}};
+  contact_config.default_matrix = dense_contacts;
+  contact_config.allow_default_matrix = true;
+  finalizeContactMatrices(contact_config, world, disease);
+  SimulationConfig simulation_config;
+  ParallelConfig parallel_config;
+  EventLogger logger;
+  for (int trial = 0; trial < 50 && !world.people[0].infection; ++trial) {
+    InteractionManager interaction_manager(world, contact_config,
+                                           simulation_config, parallel_config,
+                                           &disease, &logger);
+    interaction_manager.processTransmissions(locations, 5.0, 8.0, nullptr);
+  }
+  REQUIRE(world.people[0].infection);
+  CHECK(disease.getSymptomName(world.people[0]
+                                   .infection->getTrajectory()
+                                   .transitions.at(0)
+                                   .second) == "mild");
+  REQUIRE(logger.getInfectionEvents().size() == 1);
+  const InfectionEvent& logged = logger.getInfectionEvents()[0];
+  CHECK(logged.source == InfectionSource::Person);
+  CHECK(disease.getSymptomName(logged.infector_symptom_id) == "mild");
+  CHECK(disease.getModeName(logged.transmission_mode_index) == "direct");
 }

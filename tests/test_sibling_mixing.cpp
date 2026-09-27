@@ -9,6 +9,7 @@
 #include "epidemiology/emission/emission.h"
 #include "epidemiology/interaction_manager.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -93,8 +94,8 @@ struct SiblingMixingWorld {
 
   void infect(int person_index, double infection_time) {
     world.people[person_index].infection = std::make_unique<Infection>(
-        disease.get(), infection_time, &world.people[person_index], 42, nullptr,
-        "classroom", 0);
+        disease.get(), infection_time, &world.people[person_index], 42,
+        kNoTransmissionContext, nullptr, "classroom", 0);
   }
 
   // Person 0 in classroom A, persons 1-5 in classroom B.

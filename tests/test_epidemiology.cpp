@@ -4,6 +4,7 @@
 #include "doctest.h"
 #include "epidemiology/disease.h"
 #include "epidemiology/epidemiology.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -112,8 +113,8 @@ TEST_CASE("Epidemiology - updateInfectionStates progression") {
   // Infect person 0 at t=0, person 1 at t=1, person 2 at t=2
   for (int i = 0; i < 3; ++i) {
     world.people[i].infection = std::make_unique<Infection>(
-        &disease, static_cast<double>(i), &world.people[i], 100 + i, nullptr,
-        "office", 0);
+        &disease, static_cast<double>(i), &world.people[i], 100 + i,
+        kNoTransmissionContext, nullptr, "office", 0);
     epi.trackInfection(i);
   }
 
@@ -201,8 +202,8 @@ TEST_CASE("Epidemiology - updateInfectionStates with fatal trajectory") {
   p.geo_unit_id = -1;
   world.buildIndices();
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
   epi.trackInfection(0);
 
   std::vector<PersonLocation> empty_locs;

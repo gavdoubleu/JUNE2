@@ -8,6 +8,7 @@
 #include "epidemiology/infectiousness_curves.h"
 #include "epidemiology/interaction_manager.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 #include "utils/random.h"
 
 using namespace june;
@@ -199,8 +200,8 @@ TEST_CASE("B1: Zero infectiousness during pre-infectious period") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // At t=0, time_since_infection=0, shifted_time = 0 - 1 = -1 → 0
   CHECK(p.infection->getInfectiousness(0.0) == doctest::Approx(0.0));
@@ -215,8 +216,8 @@ TEST_CASE("B2: Positive infectiousness after shift") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // At t=2.0, time_since_infection=2, shifted_time=1 → gamma PDF > 0
   CHECK(p.infection->getInfectiousness(2.0) > 0.0);
@@ -231,14 +232,14 @@ TEST_CASE("B3: infectiousness_factor scales entire profile uniformly") {
   Person& p = world.people[0];
 
   // Infection with factor=1.0
-  p.infection = std::make_unique<Infection>(&disease_full, 0.0, &p, 42, nullptr,
-                                            "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease_full, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
   double inf_full_t1 = p.infection->getInfectiousness(1.0);
   double inf_full_t3 = p.infection->getInfectiousness(3.0);
 
   // Infection with factor=0.5 (same seed so same gamma params)
-  p.infection = std::make_unique<Infection>(&disease_half, 0.0, &p, 42, nullptr,
-                                            "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease_half, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
   double inf_half_t1 = p.infection->getInfectiousness(1.0);
   double inf_half_t3 = p.infection->getInfectiousness(3.0);
 
@@ -261,8 +262,8 @@ TEST_CASE("B4: Gamma temporal profile shape") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // Gamma(shape=2, rate=1) peaks at x=1
   double v_early = p.infection->getInfectiousness(0.5);  // shifted=0.5
@@ -279,12 +280,12 @@ TEST_CASE("B5: Fixed seed produces identical infectiousness") {
   Person& p = world.people[0];
 
   // Create infection with same seed twice
-  p.infection = std::make_unique<Infection>(&disease, 0.0, &p, 12345, nullptr,
-                                            "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 12345, kNoTransmissionContext, nullptr, "office", 0);
   double inf1 = p.infection->getInfectiousness(3.0);
 
-  p.infection = std::make_unique<Infection>(&disease, 0.0, &p, 12345, nullptr,
-                                            "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 12345, kNoTransmissionContext, nullptr, "office", 0);
   double inf2 = p.infection->getInfectiousness(3.0);
 
   CHECK(inf1 == doctest::Approx(inf2));
@@ -329,8 +330,8 @@ TEST_CASE("B6: infectiousness_factor defaults to 1.0 when omitted") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // At t=1 (shifted_time=1), gamma(2,1) at x=1 = exp(-1) ≈ 0.368
   // Full profile: 5.0 * 0.368 = 1.839 (no scaling)
@@ -348,13 +349,13 @@ TEST_CASE("B7: infectiousness_factor is applied once, not per-timestep") {
 
   // Trajectory: asymptomatic 0-2, mild 2-10
   // Test at t=1 (asymptomatic) and t=3 (mild) — ratio should be the same
-  p.infection = std::make_unique<Infection>(&disease_full, 0.0, &p, 42, nullptr,
-                                            "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease_full, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
   double full_asymp = p.infection->getInfectiousness(1.0);
   double full_mild = p.infection->getInfectiousness(3.0);
 
-  p.infection = std::make_unique<Infection>(&disease_half, 0.0, &p, 42, nullptr,
-                                            "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease_half, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
   double half_asymp = p.infection->getInfectiousness(1.0);
   double half_mild = p.infection->getInfectiousness(3.0);
 
@@ -371,8 +372,8 @@ TEST_CASE("B8: Shift is linked to exposed stage duration") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // Before effective shift: no infectiousness
   CHECK(p.infection->getInfectiousness(0.0) == doctest::Approx(0.0));
@@ -391,8 +392,8 @@ TEST_CASE("B9: infectiousness_factor works with exposed+shift linkage") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // Effective shift = -2.0 + 5.0 = 3.0
   // At t=4.0, shifted_time=1.0, gamma peak region
@@ -409,8 +410,8 @@ TEST_CASE("B10: Stage-Driven mode ignores infectiousness_factor") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection = std::make_unique<Infection>(&disease_full, 0.0, &p, 42, nullptr,
-                                            "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease_full, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
   double inf = p.infection->getInfectiousness(1.0);
 
   // Stage-Driven constant curve = 3.0, unaffected by any trajectory factor
@@ -427,8 +428,8 @@ TEST_CASE("C1: Infectiousness uses time_in_stage") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // At t=5.0, person is in "mild" stage, time_in_stage=5.0
   // LinearRamp(0,1,10) at t=5 → 0.5
@@ -445,8 +446,8 @@ TEST_CASE("C2: Infectiousness resets at stage transition") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // At t=1.0: exposed stage, time_in_stage=1.0, ramp at 1.0 → 0.5
   double inf_exposed = p.infection->getInfectiousness(1.0);
@@ -466,8 +467,8 @@ TEST_CASE("C3: Different curve types per stage") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // Exposed at t=1: constant → 1.0
   CHECK(p.infection->getInfectiousness(1.0) == doctest::Approx(1.0));
@@ -487,8 +488,8 @@ TEST_CASE("C4: Null curve returns zero infectiousness") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // After recovery (t=6.0, healthy stage), curve is nullptr → 0
   CHECK(p.infection->getInfectiousness(6.0) == doctest::Approx(0.0));
@@ -525,8 +526,8 @@ TEST_CASE("D1: Trajectory-driven is continuous across stage transitions") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // Transition from asymptomatic to mild at t=2.0
   // With infectiousness_factor applied once at creation (not per-timestep),
@@ -549,8 +550,8 @@ TEST_CASE("D2: Both modes return zero for recovered/dead stages") {
   Disease sd_disease = makeStageDrivenDisease(curve, 5.0);
   WorldState world1 = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p1 = world1.people[0];
-  p1.infection = std::make_unique<Infection>(&sd_disease, 0.0, &p1, 42, nullptr,
-                                             "office", 0);
+  p1.infection = std::make_unique<Infection>(
+      &sd_disease, 0.0, &p1, 42, kNoTransmissionContext, nullptr, "office", 0);
   CHECK(p1.infection->getInfectiousness(6.0) == doctest::Approx(0.0));
 
   // Trajectory-driven: after all stages the gamma profile has decayed
@@ -558,8 +559,8 @@ TEST_CASE("D2: Both modes return zero for recovered/dead stages") {
   Disease td_disease = makeTrajectoryDrivenDisease(5.0, 2.0, 1.0, 0.0);
   WorldState world2 = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p2 = world2.people[0];
-  p2.infection = std::make_unique<Infection>(&td_disease, 0.0, &p2, 42, nullptr,
-                                             "office", 0);
+  p2.infection = std::make_unique<Infection>(
+      &td_disease, 0.0, &p2, 42, kNoTransmissionContext, nullptr, "office", 0);
   // After all stages (asymptomatic 2d + mild 8d = 10d), gamma(2,1) at x=11
   // = 11*exp(-11) ≈ 0.00016 — negligible infectiousness
   CHECK(p2.infection->getInfectiousness(11.0) < 0.01);
@@ -574,8 +575,8 @@ TEST_CASE("E1: Different mode indices yield different values") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // Mode 0 (respiratory): ConstantCurve(2.0) → 2.0
   double inf_mode0 = p.infection->getInfectiousness(0, 1.0);
@@ -600,8 +601,8 @@ TEST_CASE("E3: Out-of-range mode_index falls back to mode 0") {
   WorldState world = TestWorldFactory::createMinimalWorld(1, 0);
   Person& p = world.people[0];
 
-  p.infection =
-      std::make_unique<Infection>(&disease, 0.0, &p, 42, nullptr, "office", 0);
+  p.infection = std::make_unique<Infection>(
+      &disease, 0.0, &p, 42, kNoTransmissionContext, nullptr, "office", 0);
 
   // Mode 99 (out of range) should fall back to mode 0 (respiratory, 2.0)
   double inf_oor = p.infection->getInfectiousness(99, 1.0);
@@ -645,8 +646,9 @@ TEST_CASE("F1: Trajectory-driven transmission occurs") {
   finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease, nullptr);
 
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 123, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 123,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                       {1, 0, -1, 0, 255, 1}};
@@ -674,8 +676,9 @@ TEST_CASE("F2: Stage-driven transmission occurs") {
   finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease, nullptr);
 
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 123, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 123,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                       {1, 0, -1, 0, 255, 1}};
@@ -702,8 +705,9 @@ TEST_CASE("F3: Zero infectiousness prevents transmission") {
   finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease, nullptr);
 
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 123, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 123,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                       {1, 0, -1, 0, 255, 1}};
@@ -730,8 +734,9 @@ TEST_CASE("F4: Immune person resists infection") {
   finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease, nullptr);
 
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 123, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 123,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   // Give person 1 full natural immunity
   world.people[1].immunity.natural_level = 1.0;
@@ -775,7 +780,8 @@ TEST_CASE("F5: Higher infectiousness yields higher infection probability") {
       InteractionManager im(world, cm, sim, par, &disease, nullptr);
 
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
 
       std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                           {1, 0, -1, 0, 255, 1}};
@@ -804,7 +810,8 @@ TEST_CASE("F5: Higher infectiousness yields higher infection probability") {
       InteractionManager im(world, cm, sim, par, &disease, nullptr);
 
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
 
       std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                           {1, 0, -1, 0, 255, 1}};
@@ -871,10 +878,12 @@ TEST_CASE(
   InteractionManager im(world, cm, sim, par, &disease, nullptr);
 
   // Both people infected
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 123, nullptr, "office", 0);
-  world.people[1].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[1], 456, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 123,
+                                  kNoTransmissionContext, nullptr, "office", 0);
+  world.people[1].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[1], 456,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                       {1, 0, -1, 0, 255, 1}};
@@ -925,8 +934,9 @@ TEST_CASE("G5: Single person at venue, no self-infection") {
   finalizeContactMatrices(cm, world, disease);
   InteractionManager im(world, cm, sim, par, &disease, nullptr);
 
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 123, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 123,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0}};
 
@@ -1051,7 +1061,8 @@ TEST_CASE("H1: FoI scales with delta_hours (no beta/char_time division)") {
       finalizeContactMatrices(cm, world, disease);
       InteractionManager im(world, cm, sim, par, &disease, nullptr);
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
       std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                           {1, 0, -1, 0, 255, 1}};
       im.processTransmissions(locs, 1.0, 1.0, nullptr);
@@ -1076,7 +1087,8 @@ TEST_CASE("H1: FoI scales with delta_hours (no beta/char_time division)") {
       finalizeContactMatrices(cm, world, disease);
       InteractionManager im(world, cm, sim, par, &disease, nullptr);
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
       std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                           {1, 0, -1, 0, 255, 1}};
       im.processTransmissions(locs, 1.0, 8.0, nullptr);
@@ -1134,7 +1146,8 @@ TEST_CASE("H2: Susceptibility multiplier dampens per-mode transmission") {
       finalizeContactMatrices(cm, world, disease);
       InteractionManager im(world, cm, sim, par, &disease, nullptr);
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
       std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                           {1, 0, -1, 0, 255, 1}};
       im.processTransmissions(locs, 1.0, 8.0, nullptr);
@@ -1176,7 +1189,8 @@ TEST_CASE("H2: Susceptibility multiplier dampens per-mode transmission") {
       finalizeContactMatrices(cm, world, disease);
       InteractionManager im(world, cm, sim, par, &disease, nullptr);
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
       std::vector<PersonLocation> locs = {{0, 0, -1, 0, 255, 0},
                                           {1, 0, -1, 0, 255, 1}};
       im.processTransmissions(locs, 1.0, 8.0, nullptr);
@@ -1197,8 +1211,9 @@ TEST_CASE("H3: Plague multi-mode: no infection during exposed stage") {
 
   WorldState world = TestWorldFactory::createMinimalWorld(6, 1);
   world.venues[0].type_id = 0;
-  world.people[0].infection = std::make_unique<Infection>(
-      &disease, 0.0, &world.people[0], 42, nullptr, "office", 0);
+  world.people[0].infection =
+      std::make_unique<Infection>(&disease, 0.0, &world.people[0], 42,
+                                  kNoTransmissionContext, nullptr, "office", 0);
 
   std::vector<PersonLocation> locs;
   for (int i = 0; i < 6; ++i)
@@ -1221,7 +1236,8 @@ TEST_CASE("H4: Plague multi-mode: animal_bite infects during bacteraemia") {
     WorldState world = TestWorldFactory::createMinimalWorld(6, 1);
     world.venues[0].type_id = 0;
     world.people[0].infection = std::make_unique<Infection>(
-        &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+        &disease, 0.0, &world.people[0], trial, kNoTransmissionContext, nullptr,
+        "office", 0);
 
     std::vector<PersonLocation> locs;
     for (int i = 0; i < 6; ++i)
@@ -1258,7 +1274,8 @@ TEST_CASE(
       WorldState world = TestWorldFactory::createMinimalWorld(6, 1);
       world.venues[0].type_id = 0;
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
       std::vector<PersonLocation> locs;
       for (int i = 0; i < 6; ++i)
         locs.push_back({static_cast<PersonId>(i), 0, -1, 0, 255,
@@ -1273,7 +1290,8 @@ TEST_CASE(
       WorldState world = TestWorldFactory::createMinimalWorld(6, 1);
       world.venues[0].type_id = 0;
       world.people[0].infection = std::make_unique<Infection>(
-          &disease, 0.0, &world.people[0], trial, nullptr, "office", 0);
+          &disease, 0.0, &world.people[0], trial, kNoTransmissionContext,
+          nullptr, "office", 0);
       std::vector<PersonLocation> locs;
       for (int i = 0; i < 6; ++i)
         locs.push_back({static_cast<PersonId>(i), 0, -1, 0, 255,

@@ -26,12 +26,11 @@ class EventLogger {
   ~EventLogger();
 
   // Log events
+  // `transmission` is the record the Infection was built from, so the logged
+  // context is the one it was judged with.
   void logInfection(PersonId person_id, PersonId infector_id, VenueId venue_id,
-                    double time,
-                    uint8_t encounter_type_id = kDefaultEncounterTypeId,
-                    uint8_t infector_symptom_id = kNoSymptomId,
-                    uint8_t transmission_mode_index = 0,
-                    InfectionSource source = InfectionSource::Person);
+                    double time, uint8_t encounter_type_id,
+                    const TransmissionRecord& transmission);
   void logSymptomChange(PersonId person_id, VenueId venue_id, double time,
                         uint8_t old_symptom_id, uint8_t new_symptom_id);
   void logDeath(PersonId person_id, VenueId venue_id, double time);
@@ -69,6 +68,9 @@ class EventLogger {
 
   // Get event counts
   size_t getInfectionCount() const { return infections_.size(); }
+  const std::vector<InfectionEvent>& getInfectionEvents() const {
+    return infections_;
+  }
   size_t getSymptomChangeCount() const { return symptom_changes_.size(); }
   size_t getDeathCount() const { return deaths_.size(); }
   size_t getHospitalAdmissionCount() const {

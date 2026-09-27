@@ -62,6 +62,7 @@
 #include "core/world_state.h"
 #include "doctest.h"
 #include "test_utils.h"
+#include "transmission_fixtures.h"
 
 using namespace june;
 
@@ -1591,7 +1592,8 @@ static std::unique_ptr<Disease> createMinimalDisease(
 static void infect(Person& p, Disease* disease, uint16_t symptom_id,
                    double time) {
   // Create a minimal infection using the Disease constructor
-  p.infection = std::make_unique<Infection>(disease, time, &p, 42);
+  p.infection = std::make_unique<Infection>(disease, time, &p, 42,
+                                            kNoTransmissionContext);
   // Override the trajectory with a single fixed stage
   // Access the internal trajectory by creating a new infection with known state
   // Since Infection's trajectory is private, we'll use a workaround:
@@ -1726,8 +1728,8 @@ TEST_CASE(
                             1.0);
 
   // Person 1 is infected and symptomatic
-  tw.world.people[1].infection =
-      std::make_unique<Infection>(disease.get(), 0.0, &tw.world.people[1], 42);
+  tw.world.people[1].infection = std::make_unique<Infection>(
+      disease.get(), 0.0, &tw.world.people[1], 42, kNoTransmissionContext);
 
   // Set policy applicability: Person 1 is applicable to policy 0
   tw.world.people[1].applicable_symptom_policy_mask = 1;  // bit 0 = policy 0
@@ -1790,8 +1792,8 @@ TEST_CASE(
                             1.0);
 
   // Person 0 (host) is infected
-  tw.world.people[0].infection =
-      std::make_unique<Infection>(disease.get(), 0.0, &tw.world.people[0], 42);
+  tw.world.people[0].infection = std::make_unique<Infection>(
+      disease.get(), 0.0, &tw.world.people[0], 42, kNoTransmissionContext);
   tw.world.people[0].applicable_symptom_policy_mask = 1;
 
   CoordinatedEncounter enc;
@@ -2406,8 +2408,9 @@ TEST_CASE("7l. Eligibility asks the policy question and pins nobody") {
   pm.resolveAll(disease);
 
   Person& traveller = tw.world.people[1];
-  traveller.infection = std::make_unique<Infection>(
-      &disease, 0.0, &traveller, 42, nullptr, "household", 0);
+  traveller.infection = std::make_unique<Infection>(&disease, 0.0, &traveller,
+                                                    42, kNoTransmissionContext,
+                                                    nullptr, "household", 0);
   traveller.applicable_symptom_policy_mask = 1;
   constexpr int16_t kHoppedSchedule = 3;
   constexpr int16_t kReturnSchedule = 1;

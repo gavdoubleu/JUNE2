@@ -28,12 +28,11 @@ EventLogger::~EventLogger() {
 void EventLogger::logInfection(PersonId person_id, PersonId infector_id,
                                VenueId venue_id, double time,
                                uint8_t encounter_type_id,
-                               uint8_t infector_symptom_id,
-                               uint8_t transmission_mode_index,
-                               InfectionSource source) {
-  infections_.push_back({person_id, infector_id, venue_id, time,
-                         encounter_type_id, transmission_mode_index,
-                         infector_symptom_id, source});
+                               const TransmissionRecord& transmission) {
+  infections_.push_back(
+      {person_id, infector_id, venue_id, time, encounter_type_id,
+       transmission.transmission_mode_index, transmission.infector_symptom_id,
+       transmission.source});
 }
 
 void EventLogger::logSymptomChange(PersonId person_id, VenueId venue_id,

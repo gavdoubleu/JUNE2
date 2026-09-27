@@ -487,16 +487,17 @@ int InteractionManager::resolvePartialPresenceInfections(
     const uint64_t seed = mix_seed(base_seed_, c.person_id,
                                    static_cast<uint64_t>(current_time * 1000),
                                    static_cast<uint64_t>(c.venue_id));
+    const TransmissionRecord transmission{InfectionSource::Person,
+                                          c.infector_symptom_id,
+                                          c.transmission_mode_index};
     p->infection = std::make_unique<Infection>(
-        disease_, current_time, p, static_cast<unsigned int>(seed), &world_,
-        venue_type_name, c.venue_id, severity_factor, c.infector_symptom_id, "",
-        "", c.transmission_mode_index);
+        disease_, current_time, p, static_cast<unsigned int>(seed),
+        transmission, &world_, venue_type_name, c.venue_id, severity_factor);
 
     if (event_logger_ != nullptr)
-      event_logger_->logInfection(
-          c.person_id, c.infector_id, c.venue_id, current_time,
-          kDefaultEncounterTypeId, c.infector_symptom_id,
-          c.transmission_mode_index, InfectionSource::Person);
+      event_logger_->logInfection(c.person_id, c.infector_id, c.venue_id,
+                                  current_time, kDefaultEncounterTypeId,
+                                  transmission);
     if (active_infections != nullptr) active_infections->insert(c.person_id);
     applied++;
   }

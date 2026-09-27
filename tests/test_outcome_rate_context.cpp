@@ -6,6 +6,7 @@
 #include "doctest.h"
 #include "epidemiology/disease.h"
 #include "epidemiology/infection_seed.h"
+#include "epidemiology/transmission/infection_context.h"
 #include "loaders/disease_loader.h"
 
 using namespace june;
@@ -31,7 +32,9 @@ static SelectionCriterion contextCriterion(const std::string& fact,
 }
 
 // A plague-shaped disease whose outcome table is the given rows.
-static Disease buildDisease(std::vector<OutcomeRow> rows) {
+static Disease buildDisease(
+    std::vector<OutcomeRow> rows,
+    std::vector<TrajectoryDefinition> trajectories = {}) {
   SymptomTag recovered{.name = "recovered", .value = -3, .id = 0};
   SymptomTag pneumonic{.name = "primary_pneumonic", .value = 2, .id = 1};
 
@@ -44,8 +47,8 @@ static Disease buildDisease(std::vector<OutcomeRow> rows) {
 
   OutcomeRates rates;
   rates.rows = std::move(rows);
-  return Disease("Plague", {recovered, pneumonic}, DiseaseStageSettings{}, {},
-                 rates, transmission);
+  return Disease("Plague", {recovered, pneumonic}, DiseaseStageSettings{},
+                 trajectories, rates, transmission);
 }
 
 static OutcomeRow rowWith(SelectionCriterion criterion) {
@@ -116,4 +119,78 @@ TEST_CASE("the plague outcome table, filtered on mode and infector symptom, reso
   Disease disease =
       DiseaseLoader::loadFromYAML("configs/config_plague/disease_plague.yaml");
   CHECK_NOTHROW(disease.resolve(world));
+}
+
+TEST_CASE(
+    "an absent infector symptom fails both == and != rows; a row with no "
+    "criteria matches") {
+  WorldState world = buildOnePersonWorld();
+  Disease disease = buildDisease({});
+  InfectionContext context = buildInfectionContext(
+      TransmissionRecord{InfectionSource::Person, kNoSymptomId, 1}, disease);
+
+  SelectionCriterion symptom_is =
+      contextCriterion("infector_symptom", "recovered");
+  SelectionCriterion symptom_is_not = symptom_is;
+  symptom_is_not.operator_type = "!=";
+  const Person& person = world.people[0];
+  CHECK_FALSE(
+      filtering::matchesCriteria(person, &world, {symptom_is}, context));
+  CHECK_FALSE(
+      filtering::matchesCriteria(person, &world, {symptom_is_not}, context));
+  CHECK(filtering::matchesCriteria(person, &world, {}, context));
+}
+
+TEST_CASE("an absent transmission mode fails both == and != rows") {
+  WorldState world = buildOnePersonWorld();
+  Disease disease = buildDisease({});
+  InfectionContext context = buildInfectionContext(
+      TransmissionRecord{InfectionSource::Person, 1, kNoModeIndex}, disease);
+
+  SelectionCriterion mode_is =
+      contextCriterion("transmission_mode", "animal_bite");
+  SelectionCriterion mode_is_not = mode_is;
+  mode_is_not.operator_type = "!=";
+  const Person& person = world.people[0];
+  CHECK_FALSE(filtering::matchesCriteria(person, &world, {mode_is}, context));
+  CHECK_FALSE(
+      filtering::matchesCriteria(person, &world, {mode_is_not}, context));
+}
+
+// A one-stage trajectory, so the chosen trajectory is visible as its symptom.
+static TrajectoryDefinition trajectoryInto(const std::string& selection_key,
+                                           const std::string& symptom) {
+  TrajectoryDefinition trajectory;
+  trajectory.selection_key = selection_key;
+  TrajectoryStage stage;
+  stage.symptom_tag = symptom;
+  stage.completion_time.type = "constant";
+  stage.completion_time.params = {{"value", 1.0}};
+  trajectory.stages = {stage};
+  return trajectory;
+}
+
+TEST_CASE(
+    "an undeclared seed takes the default row, not the (recovered, first mode) "
+    "row") {
+  WorldState world = buildOnePersonWorld();
+  OutcomeRow recovered_bite_row;
+  recovered_bite_row.criteria = {
+      contextCriterion("infector_symptom", "recovered"),
+      contextCriterion("transmission_mode", "animal_bite")};
+  recovered_bite_row.probabilities = {{"recovered_bite", 1.0}};
+  OutcomeRow default_row;
+  default_row.probabilities = {{"default", 1.0}};
+  Disease disease =
+      buildDisease({recovered_bite_row, default_row},
+                   {trajectoryInto("recovered_bite", "recovered"),
+                    trajectoryInto("default", "primary_pneumonic")});
+
+  Infection infection(
+      &disease, 0.0, &world.people[0], 42,
+      TransmissionRecord{InfectionSource::Seed, kNoSymptomId, kNoModeIndex},
+      &world);
+  CHECK(disease.getSymptomName(
+            infection.getTrajectory().transitions.at(0).second) ==
+        "primary_pneumonic");
 }

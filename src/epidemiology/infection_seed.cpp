@@ -892,19 +892,19 @@ void InfectionSeeder::infectPerson(Person* person,
   auto* gu = world_.getGeoUnit(person->geo_unit_id);
   if (gu) severity_factor = gu->severity_factor;
 
+  // No infector and no transmission: both context facts are absent.
+  const TransmissionRecord transmission{InfectionSource::Seed, kNoSymptomId,
+                                        kNoModeIndex};
   person->infection = std::make_unique<Infection>(
       disease_, current_simulation_time_, person,
-      static_cast<unsigned int>(infection_seed), &world_,
+      static_cast<unsigned int>(infection_seed), transmission, &world_,
       "seed",  // venue type
-      INFECTION_SEED_VENUE_ID, severity_factor,
-      0,  // infector_symptom_id -- no infector for seeds
-      trajectory_key, start_symptom);
+      INFECTION_SEED_VENUE_ID, severity_factor, trajectory_key, start_symptom);
 
   if (event_logger_ != nullptr) {
     event_logger_->logInfection(
         person->id, kInvalidPersonId, INFECTION_SEED_VENUE_ID,
-        current_simulation_time_, kDefaultEncounterTypeId,
-        kNoSymptomId);  // no infector for seeds
+        current_simulation_time_, kDefaultEncounterTypeId, transmission);
   }
 }
 
