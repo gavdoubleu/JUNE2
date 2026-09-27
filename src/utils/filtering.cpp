@@ -193,43 +193,50 @@ std::vector<SelectionCriterion> parseCriterionFromKeyValue(
   return results;
 }
 
+// The context field `criterion` filters on, or null if it filters on a
+// Person property.
+static const std::string* contextFactFor(const SelectionCriterion& criterion,
+                                         const InfectionContext& ctx) {
+  if (criterion.property_path == "infector_symptom") {
+    return &ctx.infector_symptom;
+  }
+  if (criterion.property_path == "transmission_mode") {
+    return &ctx.transmission_mode;
+  }
+  if (criterion.property_path == "infection_source") {
+    return &ctx.infection_source;
+  }
+  return nullptr;
+}
+
+// An absent (empty) fact fails every criterion on it, `==` or `!=`, so only
+// rows that don't ask for that fact match.
+static bool contextFactMatches(const SelectionCriterion& criterion,
+                               const std::string& fact) {
+  if (fact.empty()) return false;
+  const std::string* required = std::get_if<std::string>(&criterion.value);
+  if (!required) return false;
+  bool equal = (fact == *required);
+  if (criterion.operator_type == "==") return equal;
+  if (criterion.operator_type == "!=") return !equal;
+  return true;
+}
+
 bool matchesCriteria(const Person& person, const WorldState* world,
                      const std::vector<SelectionCriterion>& criteria,
                      const InfectionContext& ctx) {
   for (const auto& c : criteria) {
-    if (c.property_path == "infector_symptom") {
-      // If no infector context is available, only empty-cell rows match
-      // (those produce no criterion). A criterion here means a specific
-      // symptom was required, so fail if we have no infector.
-      if (ctx.infector_symptom.empty()) return false;
-
-      // Compare infector_symptom string against criterion value
-      const std::string* required = std::get_if<std::string>(&c.value);
-      if (!required) return false;
-
-      bool eq = (ctx.infector_symptom == *required);
-      if (c.operator_type == "==" && !eq) return false;
-      if (c.operator_type == "!=" && eq) return false;
-    } else if (c.property_path == "transmission_mode") {
-      // If no transmission mode context is available, fail criteria
-      if (ctx.transmission_mode.empty()) return false;
-
-      const std::string* required = std::get_if<std::string>(&c.value);
-      if (!required) return false;
-
-      bool eq = (ctx.transmission_mode == *required);
-      if (c.operator_type == "==" && !eq) return false;
-      if (c.operator_type == "!=" && eq) return false;
-    } else {
-      if (!c.evaluate(person, world)) return false;
+    if (const std::string* fact = contextFactFor(c, ctx)) {
+      if (!contextFactMatches(c, *fact)) return false;
+    } else if (!c.evaluate(person, world)) {
+      return false;
     }
   }
   return true;
 }
 
 bool isInfectionContextCriterion(const SelectionCriterion& criterion) {
-  return criterion.property_path == "infector_symptom" ||
-         criterion.property_path == "transmission_mode";
+  return contextFactFor(criterion, InfectionContext{}) != nullptr;
 }
 
 std::vector<std::pair<int, std::string>> findFilterColumns(

@@ -194,3 +194,147 @@ TEST_CASE(
             infection.getTrajectory().transitions.at(0).second) ==
         "primary_pneumonic");
 }
+
+TEST_CASE("an infection_source == seed row matches a seed but not a fomite") {
+  WorldState world = buildOnePersonWorld();
+  Disease disease = buildDisease({});
+  InfectionContext seed_context = buildInfectionContext(
+      TransmissionRecord{InfectionSource::Seed, kNoSymptomId, kNoModeIndex},
+      disease);
+  InfectionContext fomite_context = buildInfectionContext(
+      TransmissionRecord{InfectionSource::Fomite, kNoSymptomId, 1}, disease);
+
+  SelectionCriterion source_is_seed =
+      contextCriterion("infection_source", "seed");
+  const Person& person = world.people[0];
+  CHECK(filtering::matchesCriteria(person, &world, {source_is_seed},
+                                   seed_context));
+  CHECK_FALSE(filtering::matchesCriteria(person, &world, {source_is_seed},
+                                         fomite_context));
+}
+
+TEST_CASE(
+    "an infection_source != seed row excludes seeds and matches Person and "
+    "Fomite infections") {
+  WorldState world = buildOnePersonWorld();
+  Disease disease = buildDisease({});
+  SelectionCriterion source_is_not_seed =
+      contextCriterion("infection_source", "seed");
+  source_is_not_seed.operator_type = "!=";
+  const Person& person = world.people[0];
+  auto matchesFrom = [&](InfectionSource source) {
+    InfectionContext context = buildInfectionContext(
+        TransmissionRecord{source, kNoSymptomId, kNoModeIndex}, disease);
+    return filtering::matchesCriteria(person, &world, {source_is_not_seed},
+                                      context);
+  };
+  CHECK_FALSE(matchesFrom(InfectionSource::Seed));
+  CHECK(matchesFrom(InfectionSource::Person));
+  CHECK(matchesFrom(InfectionSource::Fomite));
+}
+
+TEST_CASE(
+    "a row combining source, mode and age matches only when all three hold") {
+  WorldState world;
+  Person& younger = world.people.emplace_back();
+  younger.id = 0;
+  younger.age = 30;
+  Person& older = world.people.emplace_back();
+  older.id = 1;
+  older.age = 70;
+  world.buildIndices();
+
+  SelectionCriterion aged_sixty_or_over;
+  aged_sixty_or_over.property_path = "age";
+  aged_sixty_or_over.operator_type = ">=";
+  aged_sixty_or_over.value = 60;
+  OutcomeRow combined_row;
+  combined_row.criteria = {contextCriterion("infection_source", "seed"),
+                           contextCriterion("transmission_mode", "animal_bite"),
+                           aged_sixty_or_over};
+  combined_row.probabilities = {{"severe", 1.0}};
+  OutcomeRow default_row;
+  default_row.probabilities = {{"mild", 1.0}};
+  Disease disease = buildDisease({combined_row, default_row});
+  REQUIRE(disease.resolve(world).empty());
+
+  const uint8_t animal_bite = 0;
+  const uint8_t respiratory = 1;
+  auto takesCombinedRow = [&](const Person& person, InfectionSource source,
+                              uint8_t mode) {
+    InfectionContext context = buildInfectionContext(
+        TransmissionRecord{source, kNoSymptomId, mode}, disease);
+    return disease.getOutcomeRates().getRate(person, &world, "severe",
+                                             context) == 1.0;
+  };
+  CHECK(takesCombinedRow(world.people[1], InfectionSource::Seed, animal_bite));
+  CHECK_FALSE(
+      takesCombinedRow(world.people[0], InfectionSource::Seed, animal_bite));
+  CHECK_FALSE(
+      takesCombinedRow(world.people[1], InfectionSource::Person, animal_bite));
+  CHECK_FALSE(
+      takesCombinedRow(world.people[1], InfectionSource::Seed, respiratory));
+}
+
+TEST_CASE(
+    "a seed-only row above the default takes seeds; a Person infection falls "
+    "through to the default") {
+  WorldState world = buildOnePersonWorld();
+  OutcomeRow seed_row = rowWith(contextCriterion("infection_source", "seed"));
+  seed_row.probabilities = {{"severe", 1.0}};
+  OutcomeRow default_row;
+  default_row.probabilities = {{"mild", 1.0}};
+  Disease disease = buildDisease({seed_row, default_row});
+  REQUIRE(disease.resolve(world).empty());
+
+  auto severeRateFrom = [&](InfectionSource source) {
+    InfectionContext context = buildInfectionContext(
+        TransmissionRecord{source, kNoSymptomId, kNoModeIndex}, disease);
+    return disease.getOutcomeRates().getRate(world.people[0], &world, "severe",
+                                             context);
+  };
+  CHECK(severeRateFrom(InfectionSource::Seed) == 1.0);
+  CHECK(severeRateFrom(InfectionSource::Person) == 0.0);
+}
+
+TEST_CASE(
+    "an outcome row naming an unknown infection source is refused, naming the "
+    "row and value") {
+  WorldState world = buildOnePersonWorld();
+  OutcomeRow default_row;
+  default_row.probabilities = {{"mild", 1.0}};
+  Disease disease = buildDisease(
+      {default_row, rowWith(contextCriterion("infection_source", "sead"))});
+  std::string message;
+  try {
+    disease.resolve(world);
+  } catch (const std::runtime_error& error) {
+    message = error.what();
+  }
+  CHECK(message.find("row 1") != std::string::npos);
+  CHECK(message.find("sead") != std::string::npos);
+}
+
+TEST_CASE(
+    "each infection_source name matches only infections from that source") {
+  WorldState world = buildOnePersonWorld();
+  Disease disease = buildDisease({});
+  const std::vector<std::pair<std::string, InfectionSource>> sources = {
+      {"person", InfectionSource::Person},
+      {"fomite", InfectionSource::Fomite},
+      {"compartmental", InfectionSource::Compartmental},
+      {"seed", InfectionSource::Seed}};
+  for (const auto& [row_name, row_source] : sources) {
+    for (const auto& [context_name, context_source] : sources) {
+      CAPTURE(row_name);
+      CAPTURE(context_name);
+      InfectionContext context = buildInfectionContext(
+          TransmissionRecord{context_source, kNoSymptomId, kNoModeIndex},
+          disease);
+      CHECK(filtering::matchesCriteria(
+                world.people[0], &world,
+                {contextCriterion("infection_source", row_name)},
+                context) == (row_source == context_source));
+    }
+  }
+}

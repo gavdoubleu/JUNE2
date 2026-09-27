@@ -62,10 +62,11 @@ std::vector<std::string> OutcomeRates::resolve(
         "disease outcome rates row " + std::to_string(i);
     for (auto& c : rows[i].criteria) {
       if (filtering::isInfectionContextCriterion(c)) {
-        requireKnownContextValue(
-            c, c.property_path == "infector_symptom" ? symptom_names
-                                                      : mode_names,
-            row_label);
+        const std::vector<std::string>& known_names =
+            c.property_path == "infector_symptom"    ? symptom_names
+            : c.property_path == "transmission_mode" ? mode_names
+                                                     : infectionSourceNames();
+        requireKnownContextValue(c, known_names, row_label);
         continue;
       }
       c.allow_absent_geo_units = true;

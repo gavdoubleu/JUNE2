@@ -14,8 +14,8 @@ struct WorldState;
 ///
 /// Carries per-infection metadata that cannot be derived from the Person struct
 /// alone, specifically information about the transmission event that created
-/// the infection. Used when evaluating `filter.infector_symptom` and
-/// `filter.transmission_mode` CSV columns.
+/// the infection. Used when evaluating `filter.infector_symptom`,
+/// `filter.transmission_mode` and `filter.infection_source` CSV columns.
 struct InfectionContext {
   std::string
       infector_symptom;  ///< Symptom-tag name of the infector at the moment of
@@ -26,6 +26,9 @@ struct InfectionContext {
                                   ///< the infection (e.g. "animal_bite",
                                   ///< "respiratory"). Empty means absent
                                   ///< (e.g. an undeclared seed).
+  std::string infection_source;   ///< What infected the Person: "person",
+                                  ///< "fomite", "compartmental" or "seed".
+                                  ///< Empty only in a default-built context.
 };
 
 /// @namespace june::filtering
@@ -127,20 +130,20 @@ std::vector<SelectionCriterion> parseCriterionFromKeyValue(
 /// `person`.
 ///
 /// Criteria are evaluated conjunctively (AND). An empty criteria list matches
-/// all persons. Criteria with `property_path == "infector_symptom"` or
-/// `"transmission_mode"` are matched against the corresponding field of `ctx`
-/// rather than person attributes. An empty context field is an absent fact:
-/// any criterion on it, `==` or `!=`, fails, so only rows that don't ask for
-/// that fact match.
+/// all persons. Criteria with `property_path` `"infector_symptom"`,
+/// `"transmission_mode"` or `"infection_source"` are matched against the
+/// corresponding field of `ctx` rather than person attributes. An empty
+/// context field is an absent fact: any criterion on it, `==` or `!=`, fails,
+/// so only rows that don't ask for that fact match.
 ///
 /// Args:
 ///   person:   The person being evaluated.
 ///   world:    Pointer to WorldState, used for property lookups. May be null
 ///             if no world-dependent properties are needed.
 ///   criteria: The list of criteria to evaluate (typically from
-///   parseCriteriaFromRow). ctx:      Infection-event context (infector
-///   symptom, transmission mode).
-///             Defaults to empty strings (no context).
+///             parseCriteriaFromRow).
+///   ctx:      Infection-event context (infector symptom, transmission mode,
+///             infection source). Defaults to empty strings (no context).
 ///
 /// Returns:
 ///   True if all criteria pass; false if any criterion fails.
