@@ -72,9 +72,9 @@ bool InteractionManager::venueHasNoTransmissionPossible(
       !comp_uptake_modes.empty() && comp_model != nullptr &&
       comp_model->venueToLocalNodeIndex(static_cast<int>(actual_venue_id)) >= 0;
 
-  return !has_susceptible || (!has_infectious && total_lambda_fomite <= 0.0 &&
-                              !has_comp_uptake_potential &&
-                              !has_sibling_source);
+  return !has_susceptible ||
+         (!has_infectious && total_lambda_fomite <= 0.0 &&
+          !has_comp_uptake_potential && !has_sibling_source);
 }
 
 bool InteractionManager::venueHasSiblingSource(
