@@ -441,6 +441,8 @@ bool InteractionManager::venueGroupHasTransmissionSource(
       comp_model != nullptr &&
       comp_model->venueToLocalNodeIndex(static_cast<int>(venue_id)) >= 0;
   if (has_fomite || venue_has_comp_uptake) return true;
+  if (venueHasSiblingSource(venue, venue_id, isVirtualVenue(venue_id)))
+    return true;
 
   for (const auto& m : group_members_buffer_) {
     if (m.array_index < world_.people.size() &&

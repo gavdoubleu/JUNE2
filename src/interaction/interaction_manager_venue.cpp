@@ -76,9 +76,11 @@ int InteractionManager::processVenueTransmissions(
       num_fomite_modes, fomite_modes, n_sub_per_mode, current_time, delta_hours,
       encounter_type_id, venue_type, venue_type_id, visitor_data);
 
-  if (venueHasNoTransmissionPossible(num_bins_needed, comp_uptake_modes,
-                                     lambda_fomite_by_mode, actual_venue_id,
-                                     comp_model)) {
+  if (venueHasNoTransmissionPossible(
+          num_bins_needed, comp_uptake_modes, lambda_fomite_by_mode,
+          actual_venue_id, comp_model,
+          venueHasSiblingSource(venue, actual_venue_id,
+                                is_virtual_encounter))) {
     clearUsedBins(num_modes);
     return 0;
   }
