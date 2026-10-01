@@ -196,33 +196,8 @@ std::vector<SelectionCriterion> parseCriterionFromKeyValue(
 bool matchesCriteria(const Person& person, const WorldState* world,
                      const std::vector<SelectionCriterion>& criteria,
                      const InfectionContext& ctx) {
-  for (const auto& c : criteria) {
-    if (c.property_path == "infector_symptom") {
-      // If no infector context is available, only empty-cell rows match
-      // (those produce no criterion). A criterion here means a specific
-      // symptom was required, so fail if we have no infector.
-      if (ctx.infector_symptom.empty()) return false;
-
-      // Compare infector_symptom string against criterion value
-      const std::string* required = std::get_if<std::string>(&c.value);
-      if (!required) return false;
-
-      bool eq = (ctx.infector_symptom == *required);
-      if (c.operator_type == "==" && !eq) return false;
-      if (c.operator_type == "!=" && eq) return false;
-    } else if (c.property_path == "transmission_mode") {
-      // If no transmission mode context is available, fail criteria
-      if (ctx.transmission_mode.empty()) return false;
-
-      const std::string* required = std::get_if<std::string>(&c.value);
-      if (!required) return false;
-
-      bool eq = (ctx.transmission_mode == *required);
-      if (c.operator_type == "==" && !eq) return false;
-      if (c.operator_type == "!=" && eq) return false;
-    } else {
-      if (!c.evaluate(person, world)) return false;
-    }
+  for (const SelectionCriterion& criterion : criteria) {
+    if (!criterion.evaluate(person, world, nullptr, &ctx)) return false;
   }
   return true;
 }

@@ -19,6 +19,24 @@ namespace june {
 struct Person;
 struct WorldState;
 
+/// Context passed to SelectionCriterion::evaluate (via matchesCriteria) for
+/// infection-specific filter columns.
+///
+/// Carries per-infection metadata that cannot be derived from the Person struct
+/// alone, specifically information about the transmission event that created
+/// the infection. Used when evaluating `filter.infector_symptom` and
+/// `filter.transmission_mode` CSV columns.
+struct InfectionContext {
+  std::string
+      infector_symptom;  ///< Symptom-tag name of the infector at the moment of
+                         ///< transmission (e.g. "primary_pneumonic"). Empty
+                         ///< when there is no explicit infector (e.g. seeded
+                         ///< infections).
+  std::string transmission_mode;  ///< Name of the transmission mode that caused
+                                  ///< the infection (e.g. "animal_bite",
+                                  ///< "respiratory"). Empty for seeds.
+};
+
 // =============================================================================
 // Schedule Selection Criteria
 // =============================================================================
@@ -30,9 +48,11 @@ struct SelectionCriterion {
       operator_type;    // ">", "<", "==", "!=", ">=", "<=", "in", "contains"
   PropertyValue value;  // Can be int, double, string, or vector
 
-  // Evaluate this criterion against a person
+  // Evaluate this criterion against a person. `infection_context` answers
+  // infector_symptom and transmission_mode; without one, those match nobody.
   bool evaluate(const Person& person, const WorldState* world = nullptr,
-                const Person* partner = nullptr) const;
+                const Person* partner = nullptr,
+                const InfectionContext* infection_context = nullptr) const;
 
   // Resolve string values to codes for early interning
   void resolve(const WorldState& world);
@@ -80,6 +100,10 @@ struct SelectionCriterion {
     // geo_unit.<LEVEL>: the person's ancestor geographical unit at a named
     // level, compared by unit name. Path: "geo_unit.XLGU".
     GEO_ANCESTOR,
+    // Infection context, not the person: compared by string against
+    // InfectionContext. Paths: "infector_symptom", "transmission_mode".
+    INFECTOR_SYMPTOM,
+    TRANSMISSION_MODE,
   };
 
   // Ancestor-geography membership, one entry per geographical unit, built
@@ -101,6 +125,29 @@ struct SelectionCriterion {
   // Position of `id` in geo_ancestor_mask, or geo_ancestor_mask.size() when the
   // mask has no entry for it.
   size_t geoMaskSlot(GeoUnitId id) const;
+  // Classify property_path into cached_type and its name parts. Needs no
+  // world, so evaluate can use it when handed none.
+  void resolveSyntax() const;
+  mutable bool syntax_resolved = false;
+
+  enum class Operator : uint8_t {
+    UNSUPPORTED,
+    EQUAL,
+    NOT_EQUAL,
+    GREATER,
+    LESS,
+    GREATER_EQUAL,
+    LESS_EQUAL,
+    IN,
+    CONTAINS,
+  };
+  static Operator parseOperator(const std::string& operator_type);
+  mutable Operator cached_operator = Operator::UNSUPPORTED;
+  // operator_type as it was when cached_operator was parsed, so evaluate can
+  // assert the public field has not been changed since. Kept in release builds
+  // too, so the struct layout does not depend on NDEBUG.
+  mutable std::string resolved_operator_type;
+  mutable bool world_resolved = false;
   mutable PropertyType cached_type = PropertyType::UNKNOWN;
   mutable std::string cached_activity_name;  // (also reused for facet name)
   mutable std::string cached_sub_property;   // (also reused for facet field)
@@ -265,8 +312,7 @@ struct ScheduleType {
 
   void resolve(const WorldState& world) {
     for (auto& criterion : selection_criteria) {
-      criterion.resolveOrThrow(world,
-                               "schedule type '" + name + "' selection");
+      criterion.resolveOrThrow(world, "schedule type '" + name + "' selection");
     }
     // force_hybrid_mask is resolved in ScheduleConfig::resolveSlots (defined
     // in config.cpp where WorldState is complete).
