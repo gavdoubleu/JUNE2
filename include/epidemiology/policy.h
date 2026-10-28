@@ -740,8 +740,9 @@ class PolicyManager {
     }
   }
 
-  // Applicability is carried in a 32-bit mask per person, so a policy past the
-  // 32nd can never fire. Name the first such policy rather than drop it.
+  // Applicability is carried in a kMaxPoliciesPerKind-bit mask per person, so a
+  // policy past the cap can never fire. Name the first such policy rather than
+  // drop it.
   template <typename PolicyVector>
   static void rejectPoliciesBeyondMaskWidth(const PolicyVector& policies,
                                             const std::string& kind) {
