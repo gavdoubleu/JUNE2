@@ -712,14 +712,21 @@ class PolicyManager {
   TransmissionModifierTable transmission_modifier_table_;
   bool transmission_modifiers_initialized_ = false;
   size_t transmission_mode_count_ = 0;
-  uint64_t last_policy_window_bits_ = 0;
+  // Policies of each kind whose window holds the current time; a change marks
+  // a window edge.
+  struct PolicyWindowBits {
+    PolicyMask temporal;
+    PolicyMask symptom;
+    bool operator==(const PolicyWindowBits&) const = default;
+  };
+  PolicyWindowBits last_policy_window_bits_;
   std::unordered_map<PersonId, uint16_t> last_symptom_ids_;
 
   void resolveTransmissionEffects(const Disease& disease);
   // Look up the activities a voluntary trigger names and start its level at the
   // base. Needs the metrics resolved.
   void resolveResponses();
-  uint64_t policyWindowBits(double current_time) const;
+  PolicyWindowBits policyWindowBits(double current_time) const;
   void rebuildTransmissionModifiers(double current_time);
   void rebuildPersonTransmissionModifier(Person& person, double current_time);
   void rebuildVenueTransmissionModifier(Venue& venue, double current_time);

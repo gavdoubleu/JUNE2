@@ -295,3 +295,84 @@ TEST_CASE("transmission modifier windows and compliance rebuild identity") {
                              TransmissionEffectChannel::TargetSusceptibility) ==
       doctest::Approx(0.50));
 }
+
+TEST_CASE("window edge on a high temporal index rebuilds modifiers") {
+  Fixture f;
+  PolicyManager manager(f.world);
+  manager.setBaseSeed(19);
+
+  // Fillers apply to nobody, so the worker holds only the timed policy.
+  SelectionCriterion nobody;
+  nobody.property_path = "age";
+  nobody.operator_type = ">=";
+  nobody.value = 200;
+  constexpr uint16_t kTimedIndex = 69;
+  for (uint16_t index = 0; index < kTimedIndex; ++index) {
+    TemporalPolicy filler;
+    filler.name = "filler_" + std::to_string(index);
+    filler.applies_to.push_back(nobody);
+    manager.addTemporalPolicy(filler);
+  }
+  TemporalPolicy timed;
+  timed.name = "timed_high";
+  timed.window = ActiveWindow{2.0, 5.0};
+  timed.action.compliance_rate = 1.0;
+  manager.addTemporalPolicy(timed);
+  manager.addTransmissionEffect(
+      personEffect(kTimedIndex, "properties.role", "worker", 0.50));
+  manager.precomputePolicyApplicability(f.world.people);
+  manager.initializeTransmissionModifiers(f.disease, 1.0);
+
+  std::unordered_set<PersonId> no_active_infections;
+  manager.refreshTransmissionModifiers(2.0, no_active_infections);
+  CHECK(
+      manager.personModifier(f.world.people[0], 0,
+                             TransmissionEffectChannel::TargetSusceptibility) ==
+      doctest::Approx(0.50));
+  manager.refreshTransmissionModifiers(5.0, no_active_infections);
+  CHECK(
+      manager.personModifier(f.world.people[0], 0,
+                             TransmissionEffectChannel::TargetSusceptibility) ==
+      doctest::Approx(1.0));
+}
+
+TEST_CASE("temporal window edge at index 32 does not alias symptom windows") {
+  Fixture f;
+  PolicyManager manager(f.world);
+  manager.setBaseSeed(19);
+
+  SelectionCriterion nobody;
+  nobody.property_path = "age";
+  nobody.operator_type = ">=";
+  nobody.value = 200;
+  constexpr uint16_t kTimedIndex = 32;
+  for (uint16_t index = 0; index < kTimedIndex; ++index) {
+    TemporalPolicy filler;
+    filler.name = "filler_" + std::to_string(index);
+    filler.applies_to.push_back(nobody);
+    manager.addTemporalPolicy(filler);
+  }
+  // Temporal 32 opens at 2 as symptom 0 closes, so a packed fingerprint
+  // (temporal i, symptom i + 32) sees no change.
+  TemporalPolicy timed;
+  timed.name = "timed_32";
+  timed.window = ActiveWindow{2.0, 5.0};
+  timed.action.compliance_rate = 1.0;
+  manager.addTemporalPolicy(timed);
+  SymptomPolicy closing;
+  closing.name = "closing_symptom";
+  closing.window = ActiveWindow{0.0, 2.0};
+  closing.applies_to.push_back(nobody);
+  manager.addSymptomPolicy(closing);
+  manager.addTransmissionEffect(
+      personEffect(kTimedIndex, "properties.role", "worker", 0.50));
+  manager.precomputePolicyApplicability(f.world.people);
+  manager.initializeTransmissionModifiers(f.disease, 1.0);
+
+  std::unordered_set<PersonId> no_active_infections;
+  manager.refreshTransmissionModifiers(2.0, no_active_infections);
+  CHECK(
+      manager.personModifier(f.world.people[0], 0,
+                             TransmissionEffectChannel::TargetSusceptibility) ==
+      doctest::Approx(0.50));
+}

@@ -429,13 +429,15 @@ void PolicyManager::resolveTransmissionEffects(const Disease& disease) {
   }
 }
 
-uint64_t PolicyManager::policyWindowBits(double current_time) const {
-  uint64_t bits = 0;
+PolicyManager::PolicyWindowBits PolicyManager::policyWindowBits(
+    double current_time) const {
+  PolicyWindowBits bits;
   for (size_t i = 0; i < temporal_policies_.size(); ++i)
-    if (temporal_policies_[i].window.contains(current_time)) bits |= 1ULL << i;
+    if (temporal_policies_[i].window.contains(current_time))
+      bits.temporal.set(i);
   for (size_t i = 0; i < symptom_policies_.size(); ++i)
     if (symptom_policies_[i].window.contains(current_time))
-      bits |= 1ULL << (i + 32);
+      bits.symptom.set(i);
   return bits;
 }
 
