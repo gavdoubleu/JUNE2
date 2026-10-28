@@ -36,21 +36,21 @@ std::vector<T> readVec(H5::H5File& f, const std::string& n,
 
 // Read an N x kPolicyMaskWords U64 dataset written by writeMasks. Throws on
 // any other shape (e.g. a checkpoint from before 128-policy masks).
-std::vector<PolicyMask> readMasks(H5::H5File& f, const std::string& n) {
-  if (!H5Lexists(f.getId(), n.c_str(), H5P_DEFAULT)) return {};
-  H5::DataSet d = f.openDataSet(n);
-  H5::DataSpace space = d.getSpace();
+std::vector<PolicyMask> readMasks(H5::H5File& file, const std::string& name) {
+  if (!H5Lexists(file.getId(), name.c_str(), H5P_DEFAULT)) return {};
+  H5::DataSet dataset = file.openDataSet(name);
+  H5::DataSpace space = dataset.getSpace();
   hsize_t dim[2] = {0, 0};
   if (space.getSimpleExtentNdims() == 2) space.getSimpleExtentDims(dim);
   if (dim[1] != kPolicyMaskWords) {
-    throw std::runtime_error("checkpoint dataset '" + n + "' is not an N x " +
-                             std::to_string(kPolicyMaskWords) +
-                             " policy mask; checkpoint predates " +
-                             std::to_string(kMaxPoliciesPerKind) +
-                             "-policy masks");
+    throw std::runtime_error(
+        "checkpoint dataset '" + name + "' is not an N x " +
+        std::to_string(kPolicyMaskWords) +
+        " policy mask; checkpoint predates " +
+        std::to_string(kMaxPoliciesPerKind) + "-policy masks");
   }
   std::vector<uint64_t> words(dim[0] * kPolicyMaskWords);
-  if (dim[0]) d.read(words.data(), H5::PredType::NATIVE_UINT64);
+  if (dim[0]) dataset.read(words.data(), H5::PredType::NATIVE_UINT64);
   std::vector<PolicyMask> masks(dim[0]);
   for (hsize_t i = 0; i < dim[0]; ++i)
     for (size_t w = 0; w < kPolicyMaskWords; ++w)

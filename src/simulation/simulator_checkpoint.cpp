@@ -59,26 +59,26 @@ void writeVec(H5::H5File& f, const std::string& name,
 
 // Create + write one PolicyMask per row as an N x kPolicyMaskWords U64
 // dataset.
-void writeMasks(H5::H5File& f, const std::string& name,
+void writeMasks(H5::H5File& file, const std::string& name,
                 const std::vector<PolicyMask>& masks, int compression) {
   std::vector<uint64_t> words;
   words.reserve(masks.size() * kPolicyMaskWords);
   for (const PolicyMask& mask : masks)
     for (size_t w = 0; w < kPolicyMaskWords; ++w)
       words.push_back(policyMaskWord(mask, w));
-  const auto& t = H5::PredType::NATIVE_UINT64;
+  const auto& uint64_type = H5::PredType::NATIVE_UINT64;
   hsize_t dims[2] = {masks.size(), kPolicyMaskWords};
   H5::DataSpace space(2, dims);
   if (masks.empty()) {
-    f.createDataSet(name, t, space);
+    file.createDataSet(name, uint64_type, space);
     return;
   }
   H5::DSetCreatPropList plist;
   hsize_t chunk[2] = {std::min<hsize_t>(dims[0], 100000), kPolicyMaskWords};
   plist.setChunk(2, chunk);
   if (compression > 0) plist.setDeflate(compression);
-  H5::DataSet ds = f.createDataSet(name, t, space, plist);
-  ds.write(words.data(), t);
+  H5::DataSet dataset = file.createDataSet(name, uint64_type, space, plist);
+  dataset.write(words.data(), uint64_type);
 }
 
 void writeStrs(H5::H5File& f, const std::string& name,
