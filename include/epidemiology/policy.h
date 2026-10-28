@@ -493,6 +493,10 @@ class PolicyManager {
  public:
   // Width of PolicyMask (core/types.h).
   static constexpr size_t kMaxPoliciesPerKind = june::kMaxPoliciesPerKind;
+  // Temporal policy i keys its compliance draw on i + this offset, so no
+  // temporal key collides with a symptom policy's key (its index).
+  static constexpr uint32_t kTemporalComplianceIndexOffset =
+      static_cast<uint32_t>(kMaxPoliciesPerKind);
 
   PolicyManager(WorldState& world);
 

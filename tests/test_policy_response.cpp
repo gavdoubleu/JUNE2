@@ -134,7 +134,10 @@ const std::string kDeaths = "{metric: deaths, weight: 0.1}";
 
 // The draw a unit is held to, written out from the specification: a pure
 // function of the base seed, the unit key and the policy index. The temporal
-// policy at position i draws with index i + 100.
+// policy at position i draws with index i + kTemporalOffset.
+constexpr uint32_t kTemporalOffset =
+    PolicyManager::kTemporalComplianceIndexOffset;
+
 bool expectedAvoid(uint64_t key, uint32_t draw_index, double level) {
   SplitMix64 rng(mix_seed(kSeed, key, draw_index, 0xA701D4ULL));
   return level > uniform01(rng);
@@ -496,7 +499,7 @@ TEST_CASE(
     int avoiding = 0;
     for (int h = 0; h < shape.households; ++h) {
       const PersonId kid = shape.kid(h, 0);
-      const bool expected = expectedAvoid(kid, 100, level);
+      const bool expected = expectedAvoid(kid, kTemporalOffset, level);
       CHECK(r.avoids(kid, shape.classroomOf(h, 0), time) == expected);
       avoiding += expected;
     }
@@ -515,7 +518,8 @@ TEST_CASE("Response - a shared decision unit draws once per venue") {
   r.endDay(0, 4);
   const double level = 0.0 + 0.1 * 4.0;
   for (int h = 0; h < shape.households; ++h) {
-    const bool expected = expectedAvoid(static_cast<uint64_t>(h), 100, level);
+    const bool expected =
+        expectedAvoid(static_cast<uint64_t>(h), kTemporalOffset, level);
     for (int j = 0; j < shape.kids; ++j) {
       INFO("household " << h << " child " << j);
       CHECK(r.avoids(shape.kid(h, j), shape.classroomOf(h, j), 1.0) ==
@@ -583,7 +587,7 @@ TEST_CASE("Response - two policies draw independently") {
   const auto b = second.households(shape, 1.0);
   for (int h = 0; h < shape.households; ++h)
     CHECK(b[static_cast<size_t>(h)] ==
-          expectedAvoid(static_cast<uint64_t>(h), 101, 0.5));
+          expectedAvoid(static_cast<uint64_t>(h), kTemporalOffset + 1, 0.5));
 
   int both = 0;
   for (size_t i = 0; i < a.size(); ++i) both += a[i] && b[i];
@@ -609,7 +613,8 @@ TEST_CASE("Response - an exempt person and a non exempt one share a unit") {
 
   int avoiding_units = 0;
   for (int h = 0; h < shape.households; ++h) {
-    const bool unit_avoids = expectedAvoid(static_cast<uint64_t>(h), 100, 0.5);
+    const bool unit_avoids =
+        expectedAvoid(static_cast<uint64_t>(h), kTemporalOffset, 0.5);
     avoiding_units += unit_avoids;
     CHECK(r.avoids(shape.kid(h, 0), shape.classroomOf(h, 0), 1.0) ==
           unit_avoids);
@@ -700,7 +705,8 @@ TEST_CASE("Response - a death count at a venue keeps that venue's level") {
   for (int h = 0; h < shape.households; ++h) {
     const VenueId room = shape.classroomOf(h, 0);
     const bool expected =
-        room == first && expectedAvoid(static_cast<uint64_t>(h), 100, 0.5);
+        room == first &&
+        expectedAvoid(static_cast<uint64_t>(h), kTemporalOffset, 0.5);
     CHECK(r.avoids(shape.kid(h, 0), room, 21.0) == expected);
   }
 }

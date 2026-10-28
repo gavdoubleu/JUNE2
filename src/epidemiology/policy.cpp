@@ -452,7 +452,8 @@ void PolicyManager::rebuildPersonTransmissionModifier(Person& person,
                            person.active_temporal_policy_participation,
                            effect.policy_index, policy.action.compliance_rate,
                            person.id,
-                           static_cast<uint32_t>(effect.policy_index + 100)))
+                           static_cast<uint32_t>(effect.policy_index) +
+                               kTemporalComplianceIndexOffset))
         continue;
     } else {
       const auto& policy = symptom_policies_[effect.policy_index];
@@ -770,8 +771,9 @@ std::optional<PersonLocation> PolicyManager::getOverride(
     if (!isVoluntary(policy)) {
       bool has_made_decision = person.temporal_policy_decisions.test(i);
       if (!has_made_decision) {
-        if (checkCompliance(policy.action.compliance_rate, person.id,
-                            static_cast<uint32_t>(i + 100))) {
+        if (checkCompliance(
+                policy.action.compliance_rate, person.id,
+                static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
           person.active_temporal_policy_participation.set(i);
         }
         person.temporal_policy_decisions.set(i);
@@ -786,10 +788,10 @@ std::optional<PersonLocation> PolicyManager::getOverride(
     // Where the person is scheduled, not where a freeze would pin them: a
     // traveller in transit is pinned at their last overnight venue while
     // occupying none.
-    if (!actionApplies(policy.action, person, scheduled_activity_index,
-                       slotVenueType, partner, slotTrigger(policy),
-                       slot_venue_type.venueId(),
-                       static_cast<uint32_t>(i + 100))) {
+    if (!actionApplies(
+            policy.action, person, scheduled_activity_index, slotVenueType,
+            partner, slotTrigger(policy), slot_venue_type.venueId(),
+            static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
       continue;
     }
 
@@ -857,16 +859,18 @@ bool PolicyManager::suppressesParticipation(
     if (!policy.window.contains(current_time)) continue;
 
     if (!isVoluntary(policy) &&
-        !isParticipating(person.temporal_policy_decisions,
-                         person.active_temporal_policy_participation, i,
-                         policy.action.compliance_rate, person.id,
-                         static_cast<uint32_t>(i + 100))) {
+        !isParticipating(
+            person.temporal_policy_decisions,
+            person.active_temporal_policy_participation, i,
+            policy.action.compliance_rate, person.id,
+            static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
       continue;
     }
 
-    if (actionApplies(policy.action, person, activity_index, slotVenueType,
-                      partner, slotTrigger(policy), slot_venue_type.venueId(),
-                      static_cast<uint32_t>(i + 100))) {
+    if (actionApplies(
+            policy.action, person, activity_index, slotVenueType, partner,
+            slotTrigger(policy), slot_venue_type.venueId(),
+            static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
       return true;
     }
   }
