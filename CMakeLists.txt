@@ -132,6 +132,7 @@ set(JUNE_CORE_SOURCES
     src/epidemiology/seeding/seed_window.cpp
     src/epidemiology/fomite/fomite_sub_bins.cpp
     src/epidemiology/emission/emission.cpp
+    src/epidemiology/applicable_policies/applicable_policy_sets.cpp
     src/epidemiology/transmission/infection_context.cpp
     src/epidemiology/transmission/infector_symptom_lookup.cpp
     src/epidemiology/transmission/partial_presence_sources.cpp
@@ -301,6 +302,7 @@ if(BUILD_TESTING)
       test_activity_manager
 
       test_transmission_modifiers
+      test_applicable_policy_sets
       test_on_the_fly_venue_allocator
       test_schedule_csv
       test_day_types
