@@ -151,8 +151,8 @@ struct Responding {
       : world(std::move(w)), pm(world) {
     pm.setBaseSeed(kSeed);
     for (Person& p : world.people) {
-      p.applicable_temporal_policy_mask = ~0u;
-      p.applicable_symptom_policy_mask = ~0u;
+      p.applicable_temporal_policy_mask.set();
+      p.applicable_symptom_policy_mask.set();
     }
     REQUIRE(loadPolicyText(pm, file_text) == "");
     pm.observedMetrics().resolve(world, disease);

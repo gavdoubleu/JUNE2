@@ -491,8 +491,8 @@ struct FrozenPersonState {
 
 class PolicyManager {
  public:
-  // Width of Person::applicable_symptom_policy_mask / _temporal_policy_mask.
-  static constexpr size_t kMaxPoliciesPerKind = 32;
+  // Width of PolicyMask (core/types.h).
+  static constexpr size_t kMaxPoliciesPerKind = june::kMaxPoliciesPerKind;
 
   PolicyManager(WorldState& world);
 
@@ -764,11 +764,12 @@ class PolicyManager {
   // it returns exactly what getOverride would latch. Reachable only if a query
   // beats ActivityManager to a Person in a slot, which the timeslot ordering
   // (activity assignment, then encounters, then follows) does not do.
-  bool isParticipating(uint32_t decisions_mask, uint32_t participation_mask,
-                       size_t policy_bit, double compliance_rate,
-                       PersonId person_id, uint32_t compliance_index) const {
-    if (decisions_mask & (1u << policy_bit)) {
-      return participation_mask & (1u << policy_bit);
+  bool isParticipating(const PolicyMask& decisions_mask,
+                       const PolicyMask& participation_mask, size_t policy_bit,
+                       double compliance_rate, PersonId person_id,
+                       uint32_t compliance_index) const {
+    if (decisions_mask.test(policy_bit)) {
+      return participation_mask.test(policy_bit);
     }
     return checkCompliance(compliance_rate, person_id, compliance_index);
   }

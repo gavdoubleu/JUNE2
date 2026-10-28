@@ -34,6 +34,30 @@ std::vector<T> readVec(H5::H5File& f, const std::string& n,
   return v;
 }
 
+// Read an N x kPolicyMaskWords U64 dataset written by writeMasks. Throws on
+// any other shape (e.g. a checkpoint from before 128-policy masks).
+std::vector<PolicyMask> readMasks(H5::H5File& f, const std::string& n) {
+  if (!H5Lexists(f.getId(), n.c_str(), H5P_DEFAULT)) return {};
+  H5::DataSet d = f.openDataSet(n);
+  H5::DataSpace space = d.getSpace();
+  hsize_t dim[2] = {0, 0};
+  if (space.getSimpleExtentNdims() == 2) space.getSimpleExtentDims(dim);
+  if (dim[1] != kPolicyMaskWords) {
+    throw std::runtime_error("checkpoint dataset '" + n + "' is not an N x " +
+                             std::to_string(kPolicyMaskWords) +
+                             " policy mask; checkpoint predates " +
+                             std::to_string(kMaxPoliciesPerKind) +
+                             "-policy masks");
+  }
+  std::vector<uint64_t> words(dim[0] * kPolicyMaskWords);
+  if (dim[0]) d.read(words.data(), H5::PredType::NATIVE_UINT64);
+  std::vector<PolicyMask> masks(dim[0]);
+  for (hsize_t i = 0; i < dim[0]; ++i)
+    for (size_t w = 0; w < kPolicyMaskWords; ++w)
+      setPolicyMaskWord(masks[i], w, words[i * kPolicyMaskWords + w]);
+  return masks;
+}
+
 std::vector<std::string> readStrs(H5::H5File& f, const std::string& n) {
   if (!H5Lexists(f.getId(), n.c_str(), H5P_DEFAULT)) return {};
   H5::DataSet d = f.openDataSet(n);
@@ -115,7 +139,6 @@ void overlayShardManagerState(
 // this rank applied.
 size_t overlayShardPopulation(H5::H5File& f, WorldState& world) {
   const auto I32 = H5::PredType::NATIVE_INT32;
-  const auto U32 = H5::PredType::NATIVE_UINT32;
   const auto U8 = H5::PredType::NATIVE_UINT8;
   const auto F64 = H5::PredType::NATIVE_DOUBLE;
   auto ids = readVec<int32_t>(f, "/population/ids", I32);
@@ -126,17 +149,12 @@ size_t overlayShardPopulation(H5::H5File& f, WorldState& world) {
       readVec<double>(f, "/population/immunity_natural_waning_rate", F64);
   auto dead = readVec<uint8_t>(f, "/population/is_dead", U8);
   auto dt = readVec<double>(f, "/population/death_time", F64);
-  auto m_as =
-      readVec<uint32_t>(f, "/population/applicable_symptom_policy_mask", U32);
-  auto m_at =
-      readVec<uint32_t>(f, "/population/applicable_temporal_policy_mask", U32);
-  auto m_ps = readVec<uint32_t>(
-      f, "/population/active_symptom_policy_participation", U32);
-  auto m_pt = readVec<uint32_t>(
-      f, "/population/active_temporal_policy_participation", U32);
-  auto m_ds = readVec<uint32_t>(f, "/population/symptom_policy_decisions", U32);
-  auto m_dt =
-      readVec<uint32_t>(f, "/population/temporal_policy_decisions", U32);
+  auto m_as = readMasks(f, "/population/applicable_symptom_policy_mask");
+  auto m_at = readMasks(f, "/population/applicable_temporal_policy_mask");
+  auto m_ps = readMasks(f, "/population/active_symptom_policy_participation");
+  auto m_pt = readMasks(f, "/population/active_temporal_policy_participation");
+  auto m_ds = readMasks(f, "/population/symptom_policy_decisions");
+  auto m_dt = readMasks(f, "/population/temporal_policy_decisions");
   auto hop = readVec<int32_t>(f, "/population/hopped_schedule_id", I32);
   auto ret = readVec<int32_t>(f, "/population/return_schedule_id", I32);
   auto tsl = readVec<int32_t>(f, "/population/temp_slot_progress", I32);

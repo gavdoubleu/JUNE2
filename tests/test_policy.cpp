@@ -971,7 +971,7 @@ TEST_CASE("Symptom policy - a closing window is not symptom progression") {
   // The follow-up is registered first so that it is evaluated before the
   // policy that hands to it, and its own compliance rate is zero: the only
   // thing that can leave it participating is the inheritance.
-  constexpr uint32_t kAftercareBit = 1u << 0;
+  constexpr size_t kAftercareBit = 0;
 
   auto addPolicies = [](WorldState& world, Disease& disease,
                         PolicyManager& policy_manager) -> Person* {
@@ -1008,7 +1008,7 @@ TEST_CASE("Symptom policy - a closing window is not symptom progression") {
     policy_manager.getOverride(person, kLeisure, kPubVenue, 0,
                                SlotVenueType::known(kPubVenueType), 3.0, 0);
 
-    CHECK((person.active_symptom_policy_participation & kAftercareBit) != 0);
+    CHECK(person.active_symptom_policy_participation.test(kAftercareBit));
   }
 
   SUBCASE("the window closing does not") {
@@ -1026,7 +1026,7 @@ TEST_CASE("Symptom policy - a closing window is not symptom progression") {
     policy_manager.getOverride(person, kLeisure, kPubVenue, 0,
                                SlotVenueType::known(kPubVenueType), 10.0, 0);
 
-    CHECK((person.active_symptom_policy_participation & kAftercareBit) == 0);
+    CHECK(!person.active_symptom_policy_participation.test(kAftercareBit));
   }
 }
 
@@ -1364,16 +1364,17 @@ TEST_CASE("Death releases the freeze") {
 }
 
 // =============================================================================
-// Policy count cap. The applicability masks are uint32_t, so a 33rd policy can
-// never fire — it must fail loud at resolve time rather than load silently.
+// Policy count cap. A PolicyMask holds kMaxPoliciesPerKind bits, so a policy
+// past the cap can never fire — it must fail loud at resolve time rather than
+// load silently.
 // =============================================================================
 
-TEST_CASE("A 33rd symptom policy is rejected by name") {
+TEST_CASE("A symptom policy past the cap is rejected by name") {
   WorldState world = buildVenueGateWorld();
   Disease disease = buildTwoStageDisease();
   PolicyManager policy_manager(world);
 
-  for (int i = 0; i < 33; ++i) {
+  for (size_t i = 0; i <= kMaxPoliciesPerKind; ++i) {
     SymptomPolicy policy = makeFreezePolicy();
     policy.name = "symptom_policy_" + std::to_string(i);
     policy_manager.addSymptomPolicy(policy);
@@ -1382,19 +1383,20 @@ TEST_CASE("A 33rd symptom policy is rejected by name") {
   std::string message;
   try {
     policy_manager.resolveAll(disease);
-    FAIL("resolveAll accepted 33 symptom policies");
+    FAIL("resolveAll accepted more symptom policies than the cap");
   } catch (const std::runtime_error& error) {
     message = error.what();
   }
-  CHECK(message.find("symptom_policy_32") != std::string::npos);
+  CHECK(message.find("symptom_policy_" + std::to_string(kMaxPoliciesPerKind)) !=
+        std::string::npos);
 }
 
-TEST_CASE("A 33rd temporal policy is rejected by name") {
+TEST_CASE("A temporal policy past the cap is rejected by name") {
   WorldState world = buildVenueGateWorld();
   Disease disease = buildTwoStageDisease();
   PolicyManager policy_manager(world);
 
-  for (int i = 0; i < 33; ++i) {
+  for (size_t i = 0; i <= kMaxPoliciesPerKind; ++i) {
     TemporalPolicy policy = makeClosurePolicy({"leisure"}, {"pub"});
     policy.name = "temporal_policy_" + std::to_string(i);
     policy_manager.addTemporalPolicy(policy);
@@ -1403,19 +1405,20 @@ TEST_CASE("A 33rd temporal policy is rejected by name") {
   std::string message;
   try {
     policy_manager.resolveAll(disease);
-    FAIL("resolveAll accepted 33 temporal policies");
+    FAIL("resolveAll accepted more temporal policies than the cap");
   } catch (const std::runtime_error& error) {
     message = error.what();
   }
-  CHECK(message.find("temporal_policy_32") != std::string::npos);
+  CHECK(message.find("temporal_policy_" +
+                     std::to_string(kMaxPoliciesPerKind)) != std::string::npos);
 }
 
-TEST_CASE("32 policies of each kind resolve and all can fire") {
+TEST_CASE("The cap of policies of each kind resolve and all can fire") {
   WorldState world = buildVenueGateWorld();
   Disease disease = buildTwoStageDisease();
   PolicyManager policy_manager(world);
 
-  for (int i = 0; i < 32; ++i) {
+  for (size_t i = 0; i < kMaxPoliciesPerKind; ++i) {
     SymptomPolicy symptom_policy = makeFreezePolicy();
     symptom_policy.name = "symptom_policy_" + std::to_string(i);
     policy_manager.addSymptomPolicy(symptom_policy);
@@ -1427,8 +1430,21 @@ TEST_CASE("32 policies of each kind resolve and all can fire") {
 
   CHECK_NOTHROW(policy_manager.resolveAll(disease));
 
-  // The last of the 32 still reaches the top bit of the mask.
+  // The last policy still reaches the top bit of the mask.
   policy_manager.precomputePolicyApplicability(world.people);
-  CHECK(world.people[0].applicable_symptom_policy_mask == 0xFFFFFFFFu);
-  CHECK(world.people[0].applicable_temporal_policy_mask == 0xFFFFFFFFu);
+  CHECK(world.people[0].applicable_symptom_policy_mask.all());
+  CHECK(world.people[0].applicable_temporal_policy_mask.all());
+}
+
+TEST_CASE("A PolicyMask survives the split into checkpoint words") {
+  PolicyMask original;
+  original.set(0).set(63).set(64).set(100).set(kMaxPoliciesPerKind - 1);
+
+  PolicyMask restored;
+  restored.set();  // Every bit must be overwritten, not merged.
+  for (size_t w = 0; w < kPolicyMaskWords; ++w)
+    setPolicyMaskWord(restored, w, policyMaskWord(original, w));
+
+  CHECK(restored == original);
+  CHECK(policyMaskWord(original, 0) == ((1ULL << 63) | 1ULL));
 }

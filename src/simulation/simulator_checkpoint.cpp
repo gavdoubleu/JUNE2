@@ -57,6 +57,30 @@ void writeVec(H5::H5File& f, const std::string& name,
   ds.write(data.data(), t);
 }
 
+// Create + write one PolicyMask per row as an N x kPolicyMaskWords U64
+// dataset.
+void writeMasks(H5::H5File& f, const std::string& name,
+                const std::vector<PolicyMask>& masks, int compression) {
+  std::vector<uint64_t> words;
+  words.reserve(masks.size() * kPolicyMaskWords);
+  for (const PolicyMask& mask : masks)
+    for (size_t w = 0; w < kPolicyMaskWords; ++w)
+      words.push_back(policyMaskWord(mask, w));
+  const auto& t = H5::PredType::NATIVE_UINT64;
+  hsize_t dims[2] = {masks.size(), kPolicyMaskWords};
+  H5::DataSpace space(2, dims);
+  if (masks.empty()) {
+    f.createDataSet(name, t, space);
+    return;
+  }
+  H5::DSetCreatPropList plist;
+  hsize_t chunk[2] = {std::min<hsize_t>(dims[0], 100000), kPolicyMaskWords};
+  plist.setChunk(2, chunk);
+  if (compression > 0) plist.setDeflate(compression);
+  H5::DataSet ds = f.createDataSet(name, t, space, plist);
+  ds.write(words.data(), t);
+}
+
 void writeStrs(H5::H5File& f, const std::string& name,
                const std::vector<std::string>& v) {
   H5::StrType st(H5::PredType::C_S1, H5T_VARIABLE);
@@ -99,7 +123,7 @@ void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
   std::vector<int32_t> ids, geo, hop, ret, tslot, hop_rep;
   std::vector<double> imm_l, imm_a, imm_w, death_t;
   std::vector<uint8_t> dead;
-  std::vector<uint32_t> m_as, m_at, m_ps, m_pt, m_ds, m_dt;
+  std::vector<PolicyMask> m_as, m_at, m_ps, m_pt, m_ds, m_dt;
   ids.reserve(ord.size());
   for (uint32_t idx : ord) {
     const Person& p = people[idx];
@@ -131,7 +155,6 @@ void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
     i = j;
   }
   const auto I32 = H5::PredType::NATIVE_INT32;
-  const auto U32 = H5::PredType::NATIVE_UINT32;
   const auto U8 = H5::PredType::NATIVE_UINT8;
   const auto F64 = H5::PredType::NATIVE_DOUBLE;
   writeVec(f, "/population/ids", ids, I32, comp);
@@ -145,14 +168,12 @@ void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
   writeVec(f, "/population/immunity_natural_waning_rate", imm_w, F64, comp);
   writeVec(f, "/population/is_dead", dead, U8, comp);
   writeVec(f, "/population/death_time", death_t, F64, comp);
-  writeVec(f, "/population/applicable_symptom_policy_mask", m_as, U32, comp);
-  writeVec(f, "/population/applicable_temporal_policy_mask", m_at, U32, comp);
-  writeVec(f, "/population/active_symptom_policy_participation", m_ps, U32,
-           comp);
-  writeVec(f, "/population/active_temporal_policy_participation", m_pt, U32,
-           comp);
-  writeVec(f, "/population/symptom_policy_decisions", m_ds, U32, comp);
-  writeVec(f, "/population/temporal_policy_decisions", m_dt, U32, comp);
+  writeMasks(f, "/population/applicable_symptom_policy_mask", m_as, comp);
+  writeMasks(f, "/population/applicable_temporal_policy_mask", m_at, comp);
+  writeMasks(f, "/population/active_symptom_policy_participation", m_ps, comp);
+  writeMasks(f, "/population/active_temporal_policy_participation", m_pt, comp);
+  writeMasks(f, "/population/symptom_policy_decisions", m_ds, comp);
+  writeMasks(f, "/population/temporal_policy_decisions", m_dt, comp);
   writeVec(f, "/population/hopped_schedule_id", hop, I32, comp);
   writeVec(f, "/population/return_schedule_id", ret, I32, comp);
   writeVec(f, "/population/temp_slot_progress", tslot, I32, comp);

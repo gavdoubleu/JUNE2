@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bitset>
 #include <cmath>
 #include <cstdint>
 #include <deque>
@@ -270,6 +271,25 @@ struct ScheduleHop {
 // =============================================================================
 enum class Sex : uint8_t { MALE = 0, FEMALE = 1, UNKNOWN = 2 };
 
+// Policies of one kind (symptom or temporal) a run may hold. Bit i of a
+// PolicyMask is policy i of that kind.
+inline constexpr size_t kMaxPoliciesPerKind = 128;
+using PolicyMask = std::bitset<kMaxPoliciesPerKind>;
+
+// A PolicyMask as 64-bit words, least significant first (checkpoint layout).
+inline constexpr size_t kPolicyMaskWords = kMaxPoliciesPerKind / 64;
+static_assert(kMaxPoliciesPerKind % 64 == 0);
+
+inline uint64_t policyMaskWord(const PolicyMask& mask, size_t word_index) {
+  return ((mask >> (64 * word_index)) & PolicyMask(~0ULL)).to_ullong();
+}
+
+inline void setPolicyMaskWord(PolicyMask& mask, size_t word_index,
+                              uint64_t word) {
+  mask &= ~(PolicyMask(~0ULL) << (64 * word_index));
+  mask |= PolicyMask(word) << (64 * word_index);
+}
+
 struct Person {
   PersonId id;
   float age;
@@ -284,23 +304,23 @@ struct Person {
   const ScheduleType* cached_schedule_type_ = nullptr;
 
   // Cache which policies can apply to this person (based on selection criteria)
-  uint32_t applicable_symptom_policy_mask = 0;
-  uint32_t applicable_temporal_policy_mask = 0;
+  PolicyMask applicable_symptom_policy_mask;
+  PolicyMask applicable_temporal_policy_mask;
 
   // Track which policies the person is currently complying/participating in
   // (sticky compliance)
-  uint32_t active_symptom_policy_participation = 0;
-  uint32_t active_temporal_policy_participation = 0;
+  PolicyMask active_symptom_policy_participation;
+  PolicyMask active_temporal_policy_participation;
 
   // Track whether a decision (compliance roll) has already been made for a
   // policy This allows both Participation and Refusal to be "sticky"
-  uint32_t symptom_policy_decisions = 0;
-  uint32_t temporal_policy_decisions = 0;
+  PolicyMask symptom_policy_decisions;
+  PolicyMask temporal_policy_decisions;
 
   // Reset symptom-based policy state (e.g., on recovery)
   void resetPolicyState() {
-    active_symptom_policy_participation = 0;
-    symptom_policy_decisions = 0;
+    active_symptom_policy_participation.reset();
+    symptom_policy_decisions.reset();
   }
 
   // Dynamic properties (ethnicity, comorbidities, work_mode, etc.)
