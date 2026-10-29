@@ -305,6 +305,7 @@ if(BUILD_TESTING)
 
       test_transmission_modifiers
       test_applicable_policy_sets
+      test_applicable_policy_walk
       test_policy_mask_io
       test_checkpoint_manifest
       test_on_the_fly_venue_allocator

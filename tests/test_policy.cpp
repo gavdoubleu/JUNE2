@@ -111,11 +111,11 @@ std::optional<PersonLocation> runOverride(PolicyManager& policy_manager,
 TEST_CASE("Venue gate - restrict-to fires only at listed venue types") {
   WorldState world = buildVenueGateWorld();
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
 
   TemporalPolicy close_pubs = makeClosurePolicy({"leisure"}, {"pub"});
   close_pubs.resolve(world);
   policy_manager.addTemporalPolicy(close_pubs);
+  applyTemporalPolicyZero(policy_manager, world);
 
   Person& person = world.people[0];
 
@@ -147,12 +147,12 @@ TEST_CASE("Venue gate - restrict-to fires only at listed venue types") {
 TEST_CASE("Venue gate - ANDs with the activity mask") {
   WorldState world = buildVenueGateWorld();
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
 
   SUBCASE("named activity: venue matches but activity does not") {
     TemporalPolicy close_pubs = makeClosurePolicy({"leisure"}, {"pub"});
     close_pubs.resolve(world);
     policy_manager.addTemporalPolicy(close_pubs);
+    applyTemporalPolicyZero(policy_manager, world);
 
     CHECK_FALSE(runOverride(policy_manager, world.people[0], kPrimaryActivity,
                             kPubVenue)
@@ -163,6 +163,7 @@ TEST_CASE("Venue gate - ANDs with the activity mask") {
     TemporalPolicy close_pubs = makeClosurePolicy({"*"}, {"pub"});
     close_pubs.resolve(world);
     policy_manager.addTemporalPolicy(close_pubs);
+    applyTemporalPolicyZero(policy_manager, world);
 
     Person& person = world.people[0];
     CHECK(runOverride(policy_manager, person, kPrimaryActivity, kPubVenue)
@@ -178,11 +179,11 @@ TEST_CASE("Venue gate - multi-role venue type separates the three roles") {
   // staff working.
   WorldState world = buildVenueGateWorld(3);
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
 
   TemporalPolicy ban_visits = makeClosurePolicy({"leisure"}, {"care_home"});
   ban_visits.resolve(world);
   policy_manager.addTemporalPolicy(ban_visits);
+  applyTemporalPolicyZero(policy_manager, world);
 
   Person& visitor = world.people[0];
   Person& worker = world.people[1];
@@ -200,11 +201,11 @@ TEST_CASE("Venue gate - multi-role venue type separates the three roles") {
 TEST_CASE("Venue gate - absent means unchanged behaviour") {
   WorldState world = buildVenueGateWorld();
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
 
   TemporalPolicy close_leisure = makeClosurePolicy({"leisure"}, {});
   close_leisure.resolve(world);
   policy_manager.addTemporalPolicy(close_leisure);
+  applyTemporalPolicyZero(policy_manager, world);
 
   Person& person = world.people[0];
   CHECK(runOverride(policy_manager, person, kLeisure, kPubVenue).has_value());
@@ -240,13 +241,13 @@ TEST_CASE("Venue gate - validation throws from resolve") {
 TEST_CASE("Venue gate - exempt-from is the inverse of restrict-to") {
   WorldState world = buildVenueGateWorld();
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
 
   // Close all leisure except the pub.
   TemporalPolicy close_all_but_pubs =
       makeClosurePolicy({"leisure"}, {"pub"}, VenueGateDirection::ExemptFrom);
   close_all_but_pubs.resolve(world);
   policy_manager.addTemporalPolicy(close_all_but_pubs);
+  applyTemporalPolicyZero(policy_manager, world);
 
   Person& person = world.people[0];
 
@@ -313,8 +314,8 @@ TEST_CASE("Venue gate - a swallowed resolve failure poisons the gate") {
         std::runtime_error);
 
     PolicyManager policy_manager(world);
-    applyTemporalPolicyZero(policy_manager, world);
     policy_manager.addTemporalPolicy(policy);
+    applyTemporalPolicyZero(policy_manager, world);
     CHECK_THROWS_AS(
         runOverride(policy_manager, world.people[0], kLeisure, kPubVenue),
         std::runtime_error);
@@ -397,11 +398,11 @@ TEST_CASE("Venue gate - the pin does not stand in for the slot venue type") {
 
   SUBCASE("restrict-to does not fire on the pinned venue type") {
     PolicyManager policy_manager(world);
-    applyTemporalPolicyZero(policy_manager, world);
     TemporalPolicy close_households =
         makeClosurePolicy({"leisure"}, {"household"});
     close_households.resolve(world);
     policy_manager.addTemporalPolicy(close_households);
+    applyTemporalPolicyZero(policy_manager, world);
 
     // Pinned at the household, occupying nothing.
     CHECK_FALSE(runOverride(policy_manager, world.people[0], kLeisure,
@@ -415,11 +416,11 @@ TEST_CASE("Venue gate - the pin does not stand in for the slot venue type") {
 
   SUBCASE("exempt-from does not fire either") {
     PolicyManager policy_manager(world);
-    applyTemporalPolicyZero(policy_manager, world);
     TemporalPolicy close_all_but_households = makeClosurePolicy(
         {"leisure"}, {"household"}, VenueGateDirection::ExemptFrom);
     close_all_but_households.resolve(world);
     policy_manager.addTemporalPolicy(close_all_but_households);
+    applyTemporalPolicyZero(policy_manager, world);
 
     CHECK_FALSE(runOverride(policy_manager, world.people[0], kLeisure,
                             kHouseholdVenue, SlotVenueType::absent())
@@ -433,11 +434,11 @@ TEST_CASE("Venue gate - an ungated policy never pays for the lookup") {
   // throws, every ungated production run now hard-fails on a cross-rank venue.
   WorldState world = buildVenueGateWorld();
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
 
   TemporalPolicy close_leisure = makeClosurePolicy({"leisure"}, {});
   close_leisure.resolve(world);
   policy_manager.addTemporalPolicy(close_leisure);
+  applyTemporalPolicyZero(policy_manager, world);
 
   CHECK(
       runOverride(policy_manager, world.people[0], kLeisure, 9999).has_value());
@@ -455,19 +456,19 @@ TEST_CASE("Venue gate - Sticky Compliance is unaffected by the gate") {
 
   WorldState gated_world = buildVenueGateWorld(kNumPeople);
   PolicyManager gated_manager(gated_world);
-  applyTemporalPolicyZero(gated_manager, gated_world);
   TemporalPolicy close_pubs = makeClosurePolicy({"leisure"}, {"pub"});
   close_pubs.action.compliance_rate = 0.5;
   close_pubs.resolve(gated_world);
   gated_manager.addTemporalPolicy(close_pubs);
+  applyTemporalPolicyZero(gated_manager, gated_world);
 
   WorldState ungated_world = buildVenueGateWorld(kNumPeople);
   PolicyManager ungated_manager(ungated_world);
-  applyTemporalPolicyZero(ungated_manager, ungated_world);
   TemporalPolicy close_leisure = makeClosurePolicy({"leisure"}, {});
   close_leisure.action.compliance_rate = 0.5;
   close_leisure.resolve(ungated_world);
   ungated_manager.addTemporalPolicy(close_leisure);
+  applyTemporalPolicyZero(ungated_manager, ungated_world);
 
   int compliers = 0;
   for (int i = 0; i < kNumPeople; ++i) {
@@ -502,7 +503,6 @@ TEST_CASE("Venue gate - gate and exemption are independent conjuncts") {
   // Key worker is proxied by age: people are aged 20 + index.
   WorldState world = buildVenueGateWorld(2);
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
 
   TemporalPolicy close_schools =
       makeClosurePolicy({"primary_activity"}, {"classroom"});
@@ -517,6 +517,7 @@ TEST_CASE("Venue gate - gate and exemption are independent conjuncts") {
   close_schools.action.exemptions.push_back(key_worker_exemption);
   close_schools.resolve(world);
   policy_manager.addTemporalPolicy(close_schools);
+  applyTemporalPolicyZero(policy_manager, world);
 
   Person& non_key_worker = world.people[0];  // age 20
   Person& key_worker = world.people[1];      // age 21
@@ -800,12 +801,12 @@ TEST_CASE("Query and override agree on the venue gate") {
   // by both, and this is what catches them drifting apart.
   WorldState world = buildVenueGateWorld();
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
 
   SUBCASE("restrict-to") {
     TemporalPolicy close_pubs = makeClosurePolicy({"leisure"}, {"pub"});
     close_pubs.resolve(world);
     policy_manager.addTemporalPolicy(close_pubs);
+    applyTemporalPolicyZero(policy_manager, world);
     Person& person = world.people[0];
 
     CHECK(querySuppressed(policy_manager, person, kLeisure, kPubVenue));
@@ -829,6 +830,7 @@ TEST_CASE("Query and override agree on the venue gate") {
         makeClosurePolicy({"leisure"}, {"pub"}, VenueGateDirection::ExemptFrom);
     close_all_but_pubs.resolve(world);
     policy_manager.addTemporalPolicy(close_all_but_pubs);
+    applyTemporalPolicyZero(policy_manager, world);
     Person& person = world.people[0];
 
     CHECK_FALSE(querySuppressed(policy_manager, person, kLeisure, kPubVenue));
@@ -849,6 +851,7 @@ TEST_CASE("Query and override agree on the venue gate") {
     TemporalPolicy close_leisure = makeClosurePolicy({"leisure"}, {});
     close_leisure.resolve(world);
     policy_manager.addTemporalPolicy(close_leisure);
+    applyTemporalPolicyZero(policy_manager, world);
     Person& person = world.people[0];
 
     CHECK(querySuppressed(policy_manager, person, kLeisure, 9999));
@@ -892,11 +895,11 @@ TEST_CASE("ActiveWindow - declaring nothing is in force for the whole run") {
 TEST_CASE("Temporal policy - the end bound is the first slot NOT in force") {
   WorldState world = buildVenueGateWorld();
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
   TemporalPolicy close_leisure = makeClosurePolicy({"leisure"}, {});
   close_leisure.window = ActiveWindow{5.0, 10.0};
   close_leisure.resolve(world);
   policy_manager.addTemporalPolicy(close_leisure);
+  applyTemporalPolicyZero(policy_manager, world);
   Person& person = world.people[0];
 
   auto fires_at = [&](double time) {
@@ -1142,7 +1145,6 @@ ActiveWindow loadTemporalWindow(const std::string& date_keys,
 
   WorldState world = buildVenueGateWorld();
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
   PolicyLoader::loadPolicies(policy_manager, path.string(),
                              simulation_start_date);
 
@@ -1165,7 +1167,6 @@ ActiveWindow loadSymptomWindow(const std::string& date_keys,
 
   WorldState world = buildVenueGateWorld();
   PolicyManager policy_manager(world);
-  applyTemporalPolicyZero(policy_manager, world);
   PolicyLoader::loadPolicies(policy_manager, path.string(),
                              simulation_start_date);
 

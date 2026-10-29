@@ -10,6 +10,7 @@
 
 #include "core/world_state.h"
 #include "doctest.h"
+#include "epidemiology/applicable_policies/applicable_policy_walk.h"
 #include "epidemiology/disease.h"
 #include "epidemiology/epidemiology.h"
 #include "epidemiology/policy.h"
@@ -135,8 +136,7 @@ const std::string kDeaths = "{metric: deaths, weight: 0.1}";
 // The draw a unit is held to, written out from the specification: a pure
 // function of the base seed, the unit key and the policy index. The temporal
 // policy at position i draws with index i + kTemporalOffset.
-constexpr uint32_t kTemporalOffset =
-    PolicyManager::kTemporalComplianceIndexOffset;
+constexpr uint32_t kTemporalOffset = kTemporalComplianceIndexOffset;
 
 bool expectedAvoid(uint64_t key, uint32_t draw_index, double level) {
   SplitMix64 rng(mix_seed(kSeed, key, draw_index, 0xA701D4ULL));

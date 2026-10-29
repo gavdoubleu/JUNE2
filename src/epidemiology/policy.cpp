@@ -4,6 +4,7 @@
 #include <cmath>
 #include <random>
 
+#include "epidemiology/applicable_policies/applicable_policy_walk.h"
 #include "epidemiology/disease.h"
 #include "utils/deterministic_rng.h"
 #include "utils/filtering.h"
@@ -447,32 +448,30 @@ void PolicyManager::rebuildPersonTransmissionModifier(Person& person,
   for (const auto& effect : transmission_effects_) {
     if (effect.scope != TransmissionEffectScope::Person) continue;
     if (effect.policy_kind == TransmissionPolicyKind::Temporal) {
-      const auto& policy = temporal_policies_[effect.policy_index];
-      const uint8_t position = applicable_policy_sets_.position(
-          person.applicable_policy_set_id, PolicyKind::Temporal,
-          effect.policy_index);
-      if (!policy.window.contains(current_time) ||
-          position == ApplicablePolicySets::kAbsent ||
+      const auto applicable = walkApplicablePolicies(applicable_policy_sets_,
+                                                     person, temporal_policies_)
+                                  .find(effect.policy_index);
+      if (!applicable || !applicable->policy().window.contains(current_time) ||
           !isParticipating(person.temporal_policy_decisions,
                            person.active_temporal_policy_participation,
-                           position, policy.action.compliance_rate, person.id,
-                           static_cast<uint32_t>(effect.policy_index) +
-                               kTemporalComplianceIndexOffset))
+                           applicable->position(),
+                           applicable->policy().action.compliance_rate,
+                           person.id, applicable->complianceKey()))
         continue;
     } else {
-      const auto& policy = symptom_policies_[effect.policy_index];
-      const uint8_t position = applicable_policy_sets_.position(
-          person.applicable_policy_set_id, PolicyKind::Symptom,
-          effect.policy_index);
-      if (!policy.window.contains(current_time) ||
-          position == ApplicablePolicySets::kAbsent || !person.infection ||
-          !policy.triggeredBy(
+      const auto applicable = walkApplicablePolicies(applicable_policy_sets_,
+                                                     person, symptom_policies_)
+                                  .find(effect.policy_index);
+      if (!applicable || !applicable->policy().window.contains(current_time) ||
+          !person.infection ||
+          !applicable->policy().triggeredBy(
               person.infection->getTrajectory().getCurrentSymptomId(
                   current_time)) ||
           !isParticipating(person.symptom_policy_decisions,
-                           person.active_symptom_policy_participation, position,
-                           policy.action.compliance_rate, person.id,
-                           static_cast<uint32_t>(effect.policy_index)))
+                           person.active_symptom_policy_participation,
+                           applicable->position(),
+                           applicable->policy().action.compliance_rate,
+                           person.id, applicable->complianceKey()))
         continue;
     }
     if (!filtering::matchesCriteria(person, &world_, effect.criteria)) continue;
@@ -625,14 +624,11 @@ std::optional<PersonLocation> PolicyManager::getOverride(
     uint16_t current_symptom_id =
         person.infection->getTrajectory().getCurrentSymptomId(current_time);
 
-    const auto symptom_indices = applicable_policy_sets_.indices(
-        person.applicable_policy_set_id, PolicyKind::Symptom);
-    for (size_t position = 0; position < symptom_indices.size(); ++position) {
-      const size_t i = symptom_indices[position];
-      if (i >= symptom_policies_.size()) break;
-      const uint32_t position_bit = 1u << position;
-
-      const auto& policy = symptom_policies_[i];
+    for (const auto& applicable : walkApplicablePolicies(
+             applicable_policy_sets_, person, symptom_policies_)) {
+      const size_t i = applicable.index();
+      const uint32_t position_bit = 1u << applicable.position();
+      const auto& policy = applicable.policy();
 
       // Out of window: the policy is not in force, so it holds nobody. A
       // calendar edge is a change of government instruction, not a change in
@@ -693,7 +689,7 @@ std::optional<PersonLocation> PolicyManager::getOverride(
         bool has_made_decision = person.symptom_policy_decisions & position_bit;
         if (!has_made_decision) {
           if (checkCompliance(policy.action.compliance_rate, person.id,
-                              static_cast<uint32_t>(i))) {
+                              applicable.complianceKey())) {
             person.active_symptom_policy_participation |= position_bit;
           }
           person.symptom_policy_decisions |= position_bit;
@@ -706,7 +702,8 @@ std::optional<PersonLocation> PolicyManager::getOverride(
 
       if (!actionApplies(policy.action, person, scheduled_activity_index,
                          slotVenueType, partner, slotTrigger(policy),
-                         slot_venue_type.venueId(), static_cast<uint32_t>(i))) {
+                         slot_venue_type.venueId(),
+                         applicable.complianceKey())) {
         continue;
       }
 
@@ -767,14 +764,10 @@ std::optional<PersonLocation> PolicyManager::getOverride(
   }
 
   // Priority 2: temporal policies (lockdowns, etc.)
-  const auto temporal_indices = applicable_policy_sets_.indices(
-      person.applicable_policy_set_id, PolicyKind::Temporal);
-  for (size_t position = 0; position < temporal_indices.size(); ++position) {
-    const size_t i = temporal_indices[position];
-    if (i >= temporal_policies_.size()) break;
-    const uint32_t position_bit = 1u << position;
-
-    const auto& policy = temporal_policies_[i];
+  for (const auto& applicable : walkApplicablePolicies(
+           applicable_policy_sets_, person, temporal_policies_)) {
+    const uint32_t position_bit = 1u << applicable.position();
+    const auto& policy = applicable.policy();
 
     bool is_active = policy.window.contains(current_time);
 
@@ -787,9 +780,8 @@ std::optional<PersonLocation> PolicyManager::getOverride(
     if (!isVoluntary(policy)) {
       bool has_made_decision = person.temporal_policy_decisions & position_bit;
       if (!has_made_decision) {
-        if (checkCompliance(
-                policy.action.compliance_rate, person.id,
-                static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
+        if (checkCompliance(policy.action.compliance_rate, person.id,
+                            applicable.complianceKey())) {
           person.active_temporal_policy_participation |= position_bit;
         }
         person.temporal_policy_decisions |= position_bit;
@@ -804,10 +796,9 @@ std::optional<PersonLocation> PolicyManager::getOverride(
     // Where the person is scheduled, not where a freeze would pin them: a
     // traveller in transit is pinned at their last overnight venue while
     // occupying none.
-    if (!actionApplies(
-            policy.action, person, scheduled_activity_index, slotVenueType,
-            partner, slotTrigger(policy), slot_venue_type.venueId(),
-            static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
+    if (!actionApplies(policy.action, person, scheduled_activity_index,
+                       slotVenueType, partner, slotTrigger(policy),
+                       slot_venue_type.venueId(), applicable.complianceKey())) {
       continue;
     }
 
@@ -840,55 +831,45 @@ bool PolicyManager::suppressesParticipation(
     uint16_t current_symptom_id =
         person.infection->getTrajectory().getCurrentSymptomId(current_time);
 
-    const auto symptom_indices = applicable_policy_sets_.indices(
-        person.applicable_policy_set_id, PolicyKind::Symptom);
-    for (size_t position = 0; position < symptom_indices.size(); ++position) {
-      const size_t i = symptom_indices[position];
-      if (i >= symptom_policies_.size()) break;
-
-      const auto& policy = symptom_policies_[i];
+    for (const auto& applicable : walkApplicablePolicies(
+             applicable_policy_sets_, person, symptom_policies_)) {
+      const auto& policy = applicable.policy();
       if (!policy.window.contains(current_time)) continue;
       if (!policy.triggeredBy(current_symptom_id)) continue;
 
       if (!isVoluntary(policy) &&
           !isParticipating(person.symptom_policy_decisions,
-                           person.active_symptom_policy_participation, position,
-                           policy.action.compliance_rate, person.id,
-                           static_cast<uint32_t>(i))) {
+                           person.active_symptom_policy_participation,
+                           applicable.position(), policy.action.compliance_rate,
+                           person.id, applicable.complianceKey())) {
         continue;
       }
 
       if (actionApplies(policy.action, person, activity_index, slotVenueType,
                         partner, slotTrigger(policy), slot_venue_type.venueId(),
-                        static_cast<uint32_t>(i))) {
+                        applicable.complianceKey())) {
         return true;
       }
     }
   }
 
   // Priority 2: temporal policies (lockdowns, etc.)
-  const auto temporal_indices = applicable_policy_sets_.indices(
-      person.applicable_policy_set_id, PolicyKind::Temporal);
-  for (size_t position = 0; position < temporal_indices.size(); ++position) {
-    const size_t i = temporal_indices[position];
-    if (i >= temporal_policies_.size()) break;
-
-    const auto& policy = temporal_policies_[i];
+  for (const auto& applicable : walkApplicablePolicies(
+           applicable_policy_sets_, person, temporal_policies_)) {
+    const auto& policy = applicable.policy();
     if (!policy.window.contains(current_time)) continue;
 
     if (!isVoluntary(policy) &&
-        !isParticipating(
-            person.temporal_policy_decisions,
-            person.active_temporal_policy_participation, position,
-            policy.action.compliance_rate, person.id,
-            static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
+        !isParticipating(person.temporal_policy_decisions,
+                         person.active_temporal_policy_participation,
+                         applicable.position(), policy.action.compliance_rate,
+                         person.id, applicable.complianceKey())) {
       continue;
     }
 
-    if (actionApplies(
-            policy.action, person, activity_index, slotVenueType, partner,
-            slotTrigger(policy), slot_venue_type.venueId(),
-            static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
+    if (actionApplies(policy.action, person, activity_index, slotVenueType,
+                      partner, slotTrigger(policy), slot_venue_type.venueId(),
+                      applicable.complianceKey())) {
       return true;
     }
   }
@@ -925,6 +906,18 @@ void PolicyManager::precomputePolicyApplicability(std::vector<Person>& people) {
 void PolicyManager::setApplicablePolicies(Person& person,
                                           const PolicyMask& symptom_mask,
                                           const PolicyMask& temporal_mask) {
+  // The walks index policies by every position in the set unchecked, so an
+  // index past the loaded policies is refused here.
+  const auto refuseUnloaded = [&](const PolicyMask& mask, size_t policy_count,
+                                  const char* kind) {
+    if ((mask >> policy_count).none()) return;
+    throw std::runtime_error("person " + std::to_string(person.id) + ": " +
+                             kind + " policy mask names a policy past the " +
+                             std::to_string(policy_count) + " loaded");
+  };
+  refuseUnloaded(symptom_mask, symptom_policies_.size(), "symptom");
+  refuseUnloaded(temporal_mask, temporal_policies_.size(), "temporal");
+
   // Decision state is held by set position, so carry it across the change of
   // set by global index, dropping policies that no longer apply.
   const bool has_policy_state =
