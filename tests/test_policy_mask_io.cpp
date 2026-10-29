@@ -75,3 +75,21 @@ TEST_CASE("Masks survive a write and read through a checkpoint file") {
 
   CHECK(readMasks(file, kMaskDataset, masks.size()) == masks);
 }
+
+TEST_CASE("Reading an absent mask dataset throws, even for an empty population") {
+  { H5::H5File file(maskFilePath().string(), H5F_ACC_TRUNC); }
+  H5::H5File file(maskFilePath().string(), H5F_ACC_RDONLY);
+
+  for (const size_t expected_rows : {size_t{4}, size_t{0}}) {
+    CAPTURE(expected_rows);
+    std::string message;
+    try {
+      readMasks(file, kMaskDataset, expected_rows);
+      FAIL("readMasks accepted an absent dataset");
+    } catch (const std::runtime_error& error) {
+      message = error.what();
+    }
+    CHECK(message.find(kMaskDataset) != std::string::npos);
+    CHECK(message.find("is missing") != std::string::npos);
+  }
+}

@@ -30,20 +30,19 @@ void writeMasks(H5::H5File& file, const std::string& name,
 
 std::vector<PolicyMask> readMasks(H5::H5File& file, const std::string& name,
                                   size_t expected_rows) {
-  hsize_t dim[2] = {0, kPolicyMaskWords};
-  H5::DataSet dataset;
-  const bool exists = H5Lexists(file.getId(), name.c_str(), H5P_DEFAULT) > 0;
-  if (exists) {
-    dataset = file.openDataSet(name);
-    H5::DataSpace space = dataset.getSpace();
-    dim[1] = 0;
-    if (space.getSimpleExtentNdims() == 2) space.getSimpleExtentDims(dim);
-    if (dim[1] != kPolicyMaskWords) {
-      throw std::runtime_error(
-          "checkpoint dataset '" + name + "' is not an N x " +
-          std::to_string(kPolicyMaskWords) +
-          " policy mask (corrupt checkpoint)");
-    }
+  if (H5Lexists(file.getId(), name.c_str(), H5P_DEFAULT) <= 0) {
+    throw std::runtime_error("checkpoint dataset '" + name +
+                             "' is missing (corrupt or partially written "
+                             "checkpoint)");
+  }
+  H5::DataSet dataset = file.openDataSet(name);
+  H5::DataSpace space = dataset.getSpace();
+  hsize_t dim[2] = {0, 0};
+  if (space.getSimpleExtentNdims() == 2) space.getSimpleExtentDims(dim);
+  if (dim[1] != kPolicyMaskWords) {
+    throw std::runtime_error(
+        "checkpoint dataset '" + name + "' is not an N x " +
+        std::to_string(kPolicyMaskWords) + " policy mask (corrupt checkpoint)");
   }
   if (dim[0] != expected_rows) {
     throw std::runtime_error("checkpoint dataset '" + name + "' holds " +
