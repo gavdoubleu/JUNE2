@@ -20,8 +20,11 @@ class PolicyManager;
 // translate.
 class StickyCompliance {
  public:
-  // Forget every decision of one kind (e.g. symptom ones on recovery).
+  // Forget every decision of one kind (e.g. symptom ones on recovery). Stores
+  // only when something is held: getOverride clears every uninfected Person
+  // each slot, and must not dirty their cache lines for nothing.
   void clear(PolicyKind kind) {
+    if ((decided_[slot(kind)] | participating_[slot(kind)]) == 0) return;
     decided_[slot(kind)] = 0;
     participating_[slot(kind)] = 0;
   }
