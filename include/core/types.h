@@ -303,9 +303,10 @@ struct Person {
   // +Cache schedule type pointer
   const ScheduleType* cached_schedule_type_ = nullptr;
 
-  // Cache which policies can apply to this person (based on selection criteria)
-  PolicyMask applicable_symptom_policy_mask;
-  PolicyMask applicable_temporal_policy_mask;
+  // Which policies can apply to this person (based on selection criteria), as
+  // an id into PolicyManager's per-rank applicable-policy set table.
+  // Rank-local.
+  uint32_t applicable_policy_set_id = 0;
 
   // Track which policies the person is currently complying/participating in
   // (sticky compliance)

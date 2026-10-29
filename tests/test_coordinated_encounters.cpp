@@ -1728,7 +1728,7 @@ TEST_CASE(
       disease.get(), 0.0, &tw.world.people[1], 42, kNoTransmissionContext);
 
   // Set policy applicability: Person 1 is applicable to policy 0
-  tw.world.people[1].applicable_symptom_policy_mask = 1;  // bit 0 = policy 0
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Symptom, 1);
 
   // Create a finalized encounter
   CoordinatedEncounter enc;
@@ -1790,7 +1790,7 @@ TEST_CASE(
   // Person 0 (host) is infected
   tw.world.people[0].infection = std::make_unique<Infection>(
       disease.get(), 0.0, &tw.world.people[0], 42, kNoTransmissionContext);
-  tw.world.people[0].applicable_symptom_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Symptom, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 200;
@@ -1838,8 +1838,8 @@ TEST_CASE("7c. Policy — Lockdown blocks all encounter participants") {
   addLockdownPolicy(pm, tw.world, 0.0, 10.0, 1.0);
 
   // Both people are applicable to temporal policy 0
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 300;
@@ -1888,8 +1888,8 @@ TEST_CASE("7d. Policy — Lockdown with exemption allows exempted participant") 
   PolicyManager pm(tw.world);
   addLockdownPolicy(pm, tw.world, 0.0, 10.0, 1.0, {exemption});
 
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 400;
@@ -1931,8 +1931,8 @@ TEST_CASE(
   PolicyManager pm(tw.world);
   addLockdownPolicy(pm, tw.world, 0.0, 10.0, 0.0 /* 0% compliance */);
 
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 500;
@@ -1979,8 +1979,8 @@ TEST_CASE("7f. Policy — Lockdown on one partner cancels 2-person encounter") {
   addLockdownPolicy(pm, tw.world, 0.0, 10.0, 1.0);
 
   // Only Person 0 is subject to lockdown
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 0;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 0);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 600;
@@ -2023,9 +2023,9 @@ TEST_CASE(
   addLockdownPolicy(pm, tw.world, 0.0, 10.0, 1.0);
 
   // Only Person 2 is subject to lockdown
-  tw.world.people[0].applicable_temporal_policy_mask = 0;
-  tw.world.people[1].applicable_temporal_policy_mask = 0;
-  tw.world.people[2].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 0);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 0);
+  pm.setApplicablePolicies(tw.world.people[2], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 700;
@@ -2075,8 +2075,8 @@ TEST_CASE(
   addLockdownPolicy(pm, tw.world, 0.0, 10.0, 1.0);
 
   // Only Person 0 is subject to lockdown
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 0;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 0);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 800;
@@ -2165,8 +2165,8 @@ TEST_CASE("7g. Venue gate — encounter at a gated pub is cancelled") {
   auto disease =
       addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0, 10.0);
 
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 700;
@@ -2204,8 +2204,8 @@ TEST_CASE("7h. Venue gate — same policy, encounter at an ungated venue fires")
   auto disease =
       addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0, 10.0);
 
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 701;
@@ -2240,8 +2240,8 @@ TEST_CASE("7i. Venue gate — activity-only policy blocks as it always has") {
   PolicyManager pm(tw.world);
   auto disease = addVenueGatedPolicy(pm, tw.world, {"leisure"}, {}, 0.0, 10.0);
 
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 702;
@@ -2290,8 +2290,8 @@ TEST_CASE(
   auto disease =
       addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0, 10.0);
 
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 703;
@@ -2327,8 +2327,8 @@ TEST_CASE("7k. Venue gate — a physical encounter gates on its own venue type")
   auto disease =
       addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0, 10.0);
 
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 704;
@@ -2381,7 +2381,7 @@ TEST_CASE("7l. Eligibility asks the policy question and pins nobody") {
   traveller.infection = std::make_unique<Infection>(&disease, 0.0, &traveller,
                                                     42, kNoTransmissionContext,
                                                     nullptr, "household", 0);
-  traveller.applicable_symptom_policy_mask = 1;
+  pm.setApplicablePolicies(traveller, PolicyKind::Symptom, 1);
   constexpr int16_t kHoppedSchedule = 3;
   constexpr int16_t kReturnSchedule = 1;
   traveller.schedule_hop = ScheduleHop::begin(kHoppedSchedule, kReturnSchedule);
@@ -2425,8 +2425,8 @@ TEST_CASE("7m. Eligibility latches no compliance decision") {
 
   PolicyManager pm(tw.world);
   addLockdownPolicy(pm, tw.world, 0.0, 10.0, 0.5);
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 706;
@@ -3449,8 +3449,8 @@ TEST_CASE("9c. Eligibility reads the instance, not the lookup tables") {
   PolicyManager pm(tw.world);
   auto disease =
       addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0, 10.0);
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   const uint8_t unregistered_encounter_type = 7;
 
@@ -3493,8 +3493,8 @@ TEST_CASE("9d. A virtual encounter carrying an unresolvable type never gates") {
   PolicyManager pm(tw.world);
   auto disease =
       addVenueGatedPolicy(pm, tw.world, {"leisure"}, {"pub"}, 0.0, 10.0);
-  tw.world.people[0].applicable_temporal_policy_mask = 1;
-  tw.world.people[1].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(tw.world.people[0], PolicyKind::Temporal, 1);
+  pm.setApplicablePolicies(tw.world.people[1], PolicyKind::Temporal, 1);
 
   CoordinatedEncounter enc;
   enc.encounter_id = 901;

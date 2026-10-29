@@ -735,7 +735,7 @@ TEST_CASE("back-scan pins the venue forward path assigned under per-day-type "
   world.people[0].infection = std::make_unique<Infection>(
       &disease, 0.0, &world.people[0], 42, kNoTransmissionContext, nullptr,
       "guest_a", 0);
-  world.people[0].applicable_symptom_policy_mask = 1;
+  pm.setApplicablePolicies(world.people[0], PolicyKind::Symptom, 1);
 
   // --- Day 1 (dtB): policy now active. Transit slot resolves no_venue, the
   //     freeze fires and pins the person at the back-scanned overnight venue.

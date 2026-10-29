@@ -13,6 +13,7 @@
 #include "core/config.h"
 #include "core/types.h"
 #include "core/world_state.h"
+#include "epidemiology/applicable_policies/applicable_policy_sets.h"
 #include "epidemiology/observed_metrics.h"
 #include "epidemiology/policy_trigger.h"
 #include "epidemiology/transmission_modifiers.h"
@@ -661,8 +662,29 @@ class PolicyManager {
   size_t getTemporalPolicyCount() const { return temporal_policies_.size(); }
 
   // Precompute which policies can apply to each person (based on selection
-  // criteria) This caches the results in person.applicable_*_policy_mask
+  // criteria) This caches the results as person.applicable_policy_set_id
   void precomputePolicyApplicability(std::vector<Person>& people);
+
+  // Set the policies whose criteria a Person meets, as global-index masks.
+  // Throws, naming the Person, if either kind exceeds
+  // kMaxApplicablePoliciesPerKind. Precompute and restore go through here.
+  void setApplicablePolicies(Person& person, const PolicyMask& symptom_mask,
+                             const PolicyMask& temporal_mask);
+  // Replace one kind's applicable policies, keeping the other kind's.
+  void setApplicablePolicies(Person& person, PolicyKind kind,
+                             const PolicyMask& mask);
+  bool isApplicable(const Person& person, PolicyKind kind,
+                    size_t global_index) const {
+    return applicable_policy_sets_.position(person.applicable_policy_set_id,
+                                            kind, global_index) !=
+           ApplicablePolicySets::kAbsent;
+  }
+  // A Person's applicable policies of one kind as a global-index mask
+  // (checkpoint layout).
+  PolicyMask applicableMask(const Person& person, PolicyKind kind) const {
+    return applicable_policy_sets_.globalMask(person.applicable_policy_set_id,
+                                              kind);
+  }
 
   // Resolve all policy criteria and intern activities/symptoms
   void resolveAll(const Disease& disease) {
@@ -708,6 +730,7 @@ class PolicyManager {
   std::vector<SymptomPolicy> symptom_policies_;
   std::vector<TemporalPolicy> temporal_policies_;
   std::vector<PolicyTransmissionEffect> transmission_effects_;
+  ApplicablePolicySets applicable_policy_sets_;
   ObservedMetrics observed_metrics_;
   TransmissionModifierTable transmission_modifier_table_;
   bool transmission_modifiers_initialized_ = false;

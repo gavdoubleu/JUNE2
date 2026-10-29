@@ -116,7 +116,8 @@ TEST_CASE("Trigger - venue closures do not depend on rank count") {
   pm.observedMetrics().resolve(world, disease);
   pm.requireTriggerMetrics();
   pm.observedMetrics().buildVenueParents(world);
-  for (Person& p : world.people) p.applicable_temporal_policy_mask = 1;
+  for (Person& p : world.people)
+    pm.setApplicablePolicies(p, PolicyKind::Temporal, 1);
   pm.resolveAll(disease);
 
   // Who is infected on each day. The staff member registered to the school
@@ -191,7 +192,8 @@ TEST_CASE("Response - levels and verdicts do not depend on rank count") {
   pm.observedMetrics().resolve(world, disease);
   pm.requireTriggerMetrics();
   pm.observedMetrics().buildVenueParents(world);
-  for (Person& p : world.people) p.applicable_temporal_policy_mask = 1;
+  for (Person& p : world.people)
+    pm.setApplicablePolicies(p, PolicyKind::Temporal, 1);
   pm.resolveAll(disease);
 
   // Class A has two cases (pupil A and the person in both classes), class B

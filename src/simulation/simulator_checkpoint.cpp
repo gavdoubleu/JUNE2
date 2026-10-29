@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "simulation/checkpoint_masks/policy_mask_io.h"
 #include "simulation/simulator.h"
 
 #ifdef USE_MPI
@@ -57,30 +58,6 @@ void writeVec(H5::H5File& f, const std::string& name,
   ds.write(data.data(), t);
 }
 
-// Create + write one PolicyMask per row as an N x kPolicyMaskWords U64
-// dataset.
-void writeMasks(H5::H5File& file, const std::string& name,
-                const std::vector<PolicyMask>& masks, int compression) {
-  std::vector<uint64_t> words;
-  words.reserve(masks.size() * kPolicyMaskWords);
-  for (const PolicyMask& mask : masks)
-    for (size_t w = 0; w < kPolicyMaskWords; ++w)
-      words.push_back(policyMaskWord(mask, w));
-  const auto& uint64_type = H5::PredType::NATIVE_UINT64;
-  hsize_t dims[2] = {masks.size(), kPolicyMaskWords};
-  H5::DataSpace space(2, dims);
-  if (masks.empty()) {
-    file.createDataSet(name, uint64_type, space);
-    return;
-  }
-  H5::DSetCreatPropList plist;
-  hsize_t chunk[2] = {std::min<hsize_t>(dims[0], 100000), kPolicyMaskWords};
-  plist.setChunk(2, chunk);
-  if (compression > 0) plist.setDeflate(compression);
-  H5::DataSet dataset = file.createDataSet(name, uint64_type, space, plist);
-  dataset.write(words.data(), uint64_type);
-}
-
 void writeStrs(H5::H5File& f, const std::string& name,
                const std::vector<std::string>& v) {
   H5::StrType st(H5::PredType::C_S1, H5T_VARIABLE);
@@ -118,8 +95,11 @@ std::vector<uint32_t> buildOwnedPersonOrder(const std::vector<Person>& people) {
 // the embedded partition_index over contiguous geo_unit runs (so restore can
 // selectively read by geo without a full population scan). Rows follow `ord`
 // (sorted by geo_unit_id, person_id) so the run-based index aligns.
+// Applicable-policy set ids are rank-local, so the applicable policies are
+// written as global-index masks; with no PolicyManager they are empty.
 void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
-                          const std::vector<Person>& people, int comp) {
+                          const std::vector<Person>& people,
+                          const PolicyManager* policy_manager, int comp) {
   std::vector<int32_t> ids, geo, hop, ret, tslot, hop_rep;
   std::vector<double> imm_l, imm_a, imm_w, death_t;
   std::vector<uint8_t> dead;
@@ -134,8 +114,12 @@ void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
     imm_w.push_back(p.immunity.natural_waning_rate);
     dead.push_back(p.is_dead ? 1 : 0);
     death_t.push_back(p.death_time);
-    m_as.push_back(p.applicable_symptom_policy_mask);
-    m_at.push_back(p.applicable_temporal_policy_mask);
+    m_as.push_back(policy_manager
+                       ? policy_manager->applicableMask(p, PolicyKind::Symptom)
+                       : PolicyMask{});
+    m_at.push_back(policy_manager
+                       ? policy_manager->applicableMask(p, PolicyKind::Temporal)
+                       : PolicyMask{});
     m_ps.push_back(p.active_symptom_policy_participation);
     m_pt.push_back(p.active_temporal_policy_participation);
     m_ds.push_back(p.symptom_policy_decisions);
@@ -565,7 +549,7 @@ void Simulator::writeCheckpointRankShard(const fs::path& tmp, int rank,
   f.createGroup("/vaccine");
   f.createGroup("/venue_fomite");
 
-  writeShardPopulation(f, ord, world_.people, comp);
+  writeShardPopulation(f, ord, world_.people, policy_manager_.get(), comp);
   writeShardInfection(f, ord, world_.people, comp);
   writeShardVaccine(f, ord, world_.people, comp);
   writeShardFomite(f, world_.venues, comp);

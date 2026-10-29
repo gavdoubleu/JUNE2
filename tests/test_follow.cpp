@@ -568,8 +568,6 @@ WorldState buildGateWorld() {
     world.activity_venues.push_back({venue, /*subset=*/0});
     world.activity_meta.push_back(meta);
   }
-  // Normally set by precomputePolicyApplicability.
-  follower.applicable_temporal_policy_mask = 1;
 
   world.buildIndices();
   return world;
@@ -592,6 +590,9 @@ void addClosurePolicy(PolicyManager& policy_manager, WorldState& world,
   policy.action.compliance_rate = 1.0;
   policy.resolve(world);
   policy_manager.addTemporalPolicy(policy);
+  // Normally set by precomputePolicyApplicability.
+  policy_manager.setApplicablePolicies(world.people[0], PolicyKind::Temporal,
+                                       1);
 }
 
 }  // namespace
@@ -699,7 +700,7 @@ TEST_CASE("the mirror gate pins nobody at the host's venue") {
   follower.infection = std::make_unique<Infection>(&disease, 0.0, &follower, 42,
                                                    kNoTransmissionContext,
                                                    nullptr, "household", 0);
-  follower.applicable_symptom_policy_mask = 1;
+  policy_manager.setApplicablePolicies(follower, PolicyKind::Symptom, 1);
   constexpr int16_t kHoppedSchedule = 3;
   constexpr int16_t kReturnSchedule = 1;
   follower.schedule_hop = ScheduleHop::begin(kHoppedSchedule, kReturnSchedule);

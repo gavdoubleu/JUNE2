@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "simulation/checkpoint_masks/policy_mask_io.h"
 #include "simulation/simulator.h"
 
 namespace june {
@@ -32,30 +33,6 @@ std::vector<T> readVec(H5::H5File& f, const std::string& n,
   std::vector<T> v(dim[0]);
   if (dim[0]) d.read(v.data(), t);
   return v;
-}
-
-// Read an N x kPolicyMaskWords U64 dataset written by writeMasks. Throws on
-// any other shape (e.g. a checkpoint from before 128-policy masks).
-std::vector<PolicyMask> readMasks(H5::H5File& file, const std::string& name) {
-  if (!H5Lexists(file.getId(), name.c_str(), H5P_DEFAULT)) return {};
-  H5::DataSet dataset = file.openDataSet(name);
-  H5::DataSpace space = dataset.getSpace();
-  hsize_t dim[2] = {0, 0};
-  if (space.getSimpleExtentNdims() == 2) space.getSimpleExtentDims(dim);
-  if (dim[1] != kPolicyMaskWords) {
-    throw std::runtime_error(
-        "checkpoint dataset '" + name + "' is not an N x " +
-        std::to_string(kPolicyMaskWords) +
-        " policy mask; checkpoint predates " +
-        std::to_string(kMaxPoliciesPerKind) + "-policy masks");
-  }
-  std::vector<uint64_t> words(dim[0] * kPolicyMaskWords);
-  if (dim[0]) dataset.read(words.data(), H5::PredType::NATIVE_UINT64);
-  std::vector<PolicyMask> masks(dim[0]);
-  for (hsize_t i = 0; i < dim[0]; ++i)
-    for (size_t w = 0; w < kPolicyMaskWords; ++w)
-      setPolicyMaskWord(masks[i], w, words[i * kPolicyMaskWords + w]);
-  return masks;
 }
 
 std::vector<std::string> readStrs(H5::H5File& f, const std::string& n) {
@@ -136,8 +113,10 @@ void overlayShardManagerState(
 // rank. Each owned person gets every field assigned and any default-
 // constructed infection / vaccine_trajectory cleared (those get reinstated by
 // the per-shard infection / vaccine overlays). Returns the number of records
-// this rank applied.
-size_t overlayShardPopulation(H5::H5File& f, WorldState& world) {
+// this rank applied. Applicable policies are interned into policy_manager's
+// set table; with no PolicyManager they must be empty.
+size_t overlayShardPopulation(H5::H5File& f, WorldState& world,
+                              PolicyManager* policy_manager) {
   const auto I32 = H5::PredType::NATIVE_INT32;
   const auto U8 = H5::PredType::NATIVE_UINT8;
   const auto F64 = H5::PredType::NATIVE_DOUBLE;
@@ -149,12 +128,16 @@ size_t overlayShardPopulation(H5::H5File& f, WorldState& world) {
       readVec<double>(f, "/population/immunity_natural_waning_rate", F64);
   auto dead = readVec<uint8_t>(f, "/population/is_dead", U8);
   auto dt = readVec<double>(f, "/population/death_time", F64);
-  auto m_as = readMasks(f, "/population/applicable_symptom_policy_mask");
-  auto m_at = readMasks(f, "/population/applicable_temporal_policy_mask");
-  auto m_ps = readMasks(f, "/population/active_symptom_policy_participation");
-  auto m_pt = readMasks(f, "/population/active_temporal_policy_participation");
-  auto m_ds = readMasks(f, "/population/symptom_policy_decisions");
-  auto m_dt = readMasks(f, "/population/temporal_policy_decisions");
+  auto m_as =
+      readMasks(f, "/population/applicable_symptom_policy_mask", ids.size());
+  auto m_at =
+      readMasks(f, "/population/applicable_temporal_policy_mask", ids.size());
+  auto m_ps = readMasks(f, "/population/active_symptom_policy_participation",
+                        ids.size());
+  auto m_pt = readMasks(f, "/population/active_temporal_policy_participation",
+                        ids.size());
+  auto m_ds = readMasks(f, "/population/symptom_policy_decisions", ids.size());
+  auto m_dt = readMasks(f, "/population/temporal_policy_decisions", ids.size());
   auto hop = readVec<int32_t>(f, "/population/hopped_schedule_id", I32);
   auto ret = readVec<int32_t>(f, "/population/return_schedule_id", I32);
   auto tsl = readVec<int32_t>(f, "/population/temp_slot_progress", I32);
@@ -169,8 +152,13 @@ size_t overlayShardPopulation(H5::H5File& f, WorldState& world) {
     p->immunity.natural_waning_rate = imm_w[i];
     p->is_dead = dead[i] != 0;
     p->death_time = dt[i];
-    p->applicable_symptom_policy_mask = m_as[i];
-    p->applicable_temporal_policy_mask = m_at[i];
+    if (policy_manager) {
+      policy_manager->setApplicablePolicies(*p, m_as[i], m_at[i]);
+    } else if (m_as[i].any() || m_at[i].any()) {
+      throw std::runtime_error(
+          "checkpoint holds applicable policies but the run has no policy "
+          "manager");
+    }
     p->active_symptom_policy_participation = m_ps[i];
     p->active_temporal_policy_participation = m_pt[i];
     p->symptom_policy_decisions = m_ds[i];
@@ -512,7 +500,7 @@ void Simulator::restoreFromCheckpoint(const std::string& checkpoint_dir) {
     fs::path sf = cp / ("delta_rank" + std::to_string(s) + ".h5");
     if (!fs::exists(sf)) continue;
     H5::H5File f(sf.string(), H5F_ACC_RDONLY);
-    n_people += overlayShardPopulation(f, world_);
+    n_people += overlayShardPopulation(f, world_, policy_manager_.get());
     n_inf += overlayShardInfection(f, world_, disease_.get());
     n_vax += overlayShardVaccine(f, world_, config_.vaccination);
     n_fom += overlayShardFomite(f, world_);

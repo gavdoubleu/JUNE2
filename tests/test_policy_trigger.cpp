@@ -45,7 +45,6 @@ WorldState buildWorld() {
     world.activity_meta.push_back(
         {kResidence, static_cast<uint32_t>(world.activity_venues.size()), 1});
     world.activity_venues.push_back({kHome, 0});
-    person.applicable_temporal_policy_mask = 1;
   }
   return world;
 }
@@ -104,6 +103,7 @@ struct TriggeredWorld {
     pm.observedMetrics().resolve(world, disease);
     pm.requireTriggerMetrics();
     pm.resolveAll(disease);
+    applyTemporalPolicyZero(pm, world);
   }
 
   void endDay(int day, int deaths) {
@@ -529,7 +529,7 @@ struct VenueTriggered {
     pm.observedMetrics().resolve(world, disease);
     pm.requireTriggerMetrics();
     pm.observedMetrics().buildVenueParents(world);
-    for (Person& p : world.people) p.applicable_temporal_policy_mask = 1;
+    applyTemporalPolicyZero(pm, world);
     pm.resolveAll(disease);
   }
 

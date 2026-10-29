@@ -153,15 +153,12 @@ struct Responding {
   Responding(WorldState w, const std::string& file_text)
       : world(std::move(w)), pm(world) {
     pm.setBaseSeed(kSeed);
-    for (Person& p : world.people) {
-      p.applicable_temporal_policy_mask.set();
-      p.applicable_symptom_policy_mask.set();
-    }
     REQUIRE(loadPolicyText(pm, file_text) == "");
     pm.observedMetrics().resolve(world, disease);
     pm.requireTriggerMetrics();
     pm.observedMetrics().buildVenueParents(world);
     pm.resolveAll(disease);
+    applyEveryPolicy(pm, world);
   }
 
   void endDay(int day, int world_deaths = 0, std::vector<PersonId> present = {},

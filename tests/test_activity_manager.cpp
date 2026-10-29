@@ -267,7 +267,7 @@ TEST_CASE("ActivityManager - PolicyManager Override") {
   pm.addTemporalPolicy(lockdown);
 
   // Give person applicable mask
-  world.people[0].applicable_temporal_policy_mask = 1;
+  pm.setApplicablePolicies(world.people[0], PolicyKind::Temporal, 1);
 
   manager.setPolicyManager(&pm);
   manager.setCurrentTime(5.0);  // Lockdown is active

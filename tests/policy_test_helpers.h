@@ -29,6 +29,24 @@ inline bool has(const std::string& text, const std::string& part) {
   return text.find(part) != std::string::npos;
 }
 
+// Temporal policy 0 applies to every Person in `world`. Normally set by
+// precomputePolicyApplicability.
+inline void applyTemporalPolicyZero(PolicyManager& pm, WorldState& world) {
+  for (Person& person : world.people)
+    pm.setApplicablePolicies(person, PolicyKind::Temporal, 1);
+}
+
+// Every policy `pm` holds applies to every Person in `world`. Normally set by
+// precomputePolicyApplicability.
+inline void applyEveryPolicy(PolicyManager& pm, WorldState& world) {
+  PolicyMask symptom_mask;
+  PolicyMask temporal_mask;
+  for (size_t i = 0; i < pm.getSymptomPolicyCount(); ++i) symptom_mask.set(i);
+  for (size_t i = 0; i < pm.getTemporalPolicyCount(); ++i) temporal_mask.set(i);
+  for (Person& person : world.people)
+    pm.setApplicablePolicies(person, symptom_mask, temporal_mask);
+}
+
 // healthy(0) -> mild(1) -> dead(2), with the days each stage lasts. Only here
 // so the metrics can resolve.
 inline Disease makeMildDeadDisease(const std::string& name, double mild_days,
