@@ -149,7 +149,8 @@ class ApplicablePolicy {
 
 // The Applicable Policies of one kind for one Person, in ascending global
 // index. Every index the set holds must address `policies`;
-// PolicyManager::setApplicablePolicies refuses any that does not.
+// PolicyManager::setApplicablePolicies refuses any that does not, and
+// loaded policies are never removed.
 template <typename Policy, typename PersonT>
 class ApplicablePolicyWalk {
  public:

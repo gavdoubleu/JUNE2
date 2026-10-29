@@ -645,13 +645,6 @@ class PolicyManager {
   }
 
   // Clear all policies
-  void clear() {
-    symptom_policies_.clear();
-    temporal_policies_.clear();
-    transmission_effects_.clear();
-    transmission_modifiers_initialized_ = false;
-  }
-
   // Statistics
   size_t getSymptomPolicyCount() const { return symptom_policies_.size(); }
   size_t getTemporalPolicyCount() const { return temporal_policies_.size(); }
