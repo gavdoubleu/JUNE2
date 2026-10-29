@@ -10,9 +10,6 @@
 
 namespace june {
 
-enum class PolicyKind : uint8_t { Symptom, Temporal };
-inline constexpr size_t kPolicyKindCount = 2;
-
 // Per-Person decision and participation masks are uint32_t indexed by set
 // position, so one set holds at most this many policies of each kind.
 inline constexpr size_t kMaxApplicablePoliciesPerKind = 32;

@@ -686,16 +686,13 @@ class PolicyManager {
   PolicyMask decidedPolicies(const Person& person, PolicyKind kind) const {
     return applicable_policy_sets_.expand(
         person.applicable_policy_set_id, kind,
-        kind == PolicyKind::Symptom ? person.symptom_policy_decisions
-                                    : person.temporal_policy_decisions);
+        person.sticky_compliance.decided_[StickyCompliance::slot(kind)]);
   }
   PolicyMask participatingPolicies(const Person& person,
                                    PolicyKind kind) const {
     return applicable_policy_sets_.expand(
         person.applicable_policy_set_id, kind,
-        kind == PolicyKind::Symptom
-            ? person.active_symptom_policy_participation
-            : person.active_temporal_policy_participation);
+        person.sticky_compliance.participating_[StickyCompliance::slot(kind)]);
   }
   // Set one kind's decided / participating policies from global-index masks.
   // Call after setApplicablePolicies. Throws, naming the Person, on a policy
@@ -798,32 +795,6 @@ class PolicyManager {
         " policies exceeds the limit of " +
         std::to_string(kMaxPoliciesPerKind) + "; '" +
         policies[kMaxPoliciesPerKind].name + "' would never take effect");
-  }
-
-  // Helper: Apply compliance rate (returns true if person complies).
-  // Const because it is a pure draw: SplitMix64 over (base_seed_, person_id,
-  // policy_index), no stored RNG state, so the same triple always answers the
-  // same way. That is what lets suppressesParticipation reach a verdict for an
-  // undecided Person without latching the decision.
-  bool checkCompliance(double compliance_rate, PersonId person_id,
-                       uint32_t policy_index) const;
-
-  // Is this Person taking part in the policy at set position `position`,
-  // without latching the
-  // answer? getOverride commits the sticky-compliance decision the first time
-  // it asks; this reads a decision already made, and falls back to redrawing
-  // it when none has been. The redraw is safe because checkCompliance is pure:
-  // it returns exactly what getOverride would latch. Reachable only if a query
-  // beats ActivityManager to a Person in a slot, which the timeslot ordering
-  // (activity assignment, then encounters, then follows) does not do.
-  bool isParticipating(uint32_t decisions_mask, uint32_t participation_mask,
-                       size_t position, double compliance_rate,
-                       PersonId person_id, uint32_t compliance_index) const {
-    const uint32_t position_bit = 1u << position;
-    if (decisions_mask & position_bit) {
-      return participation_mask & position_bit;
-    }
-    return checkCompliance(compliance_rate, person_id, compliance_index);
   }
 
   // The part of a policy decision that is a pure question: does this action

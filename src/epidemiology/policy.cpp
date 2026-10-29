@@ -42,11 +42,6 @@ class LazySlotVenueTypeResolver {
 // Tag for the avoidance draw, so it never repeats a compliance draw.
 constexpr uint64_t kAvoidanceDrawTag = 0xA701D4ULL;
 
-template <typename Policy>
-bool isVoluntary(const Policy& policy) {
-  return policy.trigger && policy.trigger->voluntary();
-}
-
 // The trigger a slot has to ask about, or null: a policy that closes venues one
 // at a time, or a voluntary one.
 template <typename Policy>
@@ -445,33 +440,29 @@ PolicyManager::PolicyWindowBits PolicyManager::policyWindowBits(
 void PolicyManager::rebuildPersonTransmissionModifier(Person& person,
                                                       double current_time) {
   auto values = transmission_modifier_table_.get(0);
+  // complies(), not participates(): an effect on a voluntary policy still
+  // takes only the share of its applicable Persons its compliance rate draws.
   for (const auto& effect : transmission_effects_) {
     if (effect.scope != TransmissionEffectScope::Person) continue;
     if (effect.policy_kind == TransmissionPolicyKind::Temporal) {
-      const auto applicable = walkApplicablePolicies(applicable_policy_sets_,
-                                                     person, temporal_policies_)
-                                  .find(effect.policy_index);
+      const auto applicable =
+          walkApplicablePolicies(applicable_policy_sets_, person,
+                                 temporal_policies_, base_seed_)
+              .find(effect.policy_index);
       if (!applicable || !applicable->policy().window.contains(current_time) ||
-          !isParticipating(person.temporal_policy_decisions,
-                           person.active_temporal_policy_participation,
-                           applicable->position(),
-                           applicable->policy().action.compliance_rate,
-                           person.id, applicable->complianceKey()))
+          !applicable->complies())
         continue;
     } else {
-      const auto applicable = walkApplicablePolicies(applicable_policy_sets_,
-                                                     person, symptom_policies_)
-                                  .find(effect.policy_index);
+      const auto applicable =
+          walkApplicablePolicies(applicable_policy_sets_, person,
+                                 symptom_policies_, base_seed_)
+              .find(effect.policy_index);
       if (!applicable || !applicable->policy().window.contains(current_time) ||
           !person.infection ||
           !applicable->policy().triggeredBy(
               person.infection->getTrajectory().getCurrentSymptomId(
                   current_time)) ||
-          !isParticipating(person.symptom_policy_decisions,
-                           person.active_symptom_policy_participation,
-                           applicable->position(),
-                           applicable->policy().action.compliance_rate,
-                           person.id, applicable->complianceKey()))
+          !applicable->complies())
         continue;
     }
     if (!filtering::matchesCriteria(person, &world_, effect.criteria)) continue;
@@ -572,12 +563,6 @@ void PolicyManager::refreshTransmissionModifiers(
   }
 }
 
-bool PolicyManager::checkCompliance(double compliance_rate, PersonId person_id,
-                                    uint32_t policy_index) const {
-  SplitMix64 rng(mix_seed(base_seed_, person_id, policy_index, 0xC0E1A9ULL));
-  return uniform01(rng) < compliance_rate;
-}
-
 std::optional<PersonLocation> PolicyManager::getReplacementLocation(
     const Person& person, const std::string& replacement_activity,
     int16_t replacement_activity_index) {
@@ -625,9 +610,8 @@ std::optional<PersonLocation> PolicyManager::getOverride(
         person.infection->getTrajectory().getCurrentSymptomId(current_time);
 
     for (const auto& applicable : walkApplicablePolicies(
-             applicable_policy_sets_, person, symptom_policies_)) {
+             applicable_policy_sets_, person, symptom_policies_, base_seed_)) {
       const size_t i = applicable.index();
-      const uint32_t position_bit = 1u << applicable.position();
       const auto& policy = applicable.policy();
 
       // Out of window: the policy is not in force, so it holds nobody. A
@@ -635,8 +619,7 @@ std::optional<PersonLocation> PolicyManager::getOverride(
       // the person, so no follow-up policy inherits the decision.
       if (!policy.window.contains(current_time)) {
         releaseFreeze(person, i);
-        person.active_symptom_policy_participation &= ~position_bit;
-        person.symptom_policy_decisions &= ~position_bit;
+        applicable.clear();
         continue;
       }
 
@@ -645,60 +628,18 @@ std::optional<PersonLocation> PolicyManager::getOverride(
       // STICKY COMPLIANCE: if not triggered, clear participation/decision and
       // continue (with follow-up policy inheritance check)
       if (!is_triggered) {
-        // A follow-up outside the Person's applicable set never fires for
-        // them, so there is nothing to inherit.
-        const uint8_t follow_up_position =
-            policy.follow_up_policy_index >= 0
-                ? applicable_policy_sets_.position(
-                      person.applicable_policy_set_id, PolicyKind::Symptom,
-                      static_cast<size_t>(policy.follow_up_policy_index))
-                : ApplicablePolicySets::kAbsent;
-        if (follow_up_position != ApplicablePolicySets::kAbsent) {
-          const uint32_t follow_up_bit = 1u << follow_up_position;
-          bool decision_made = person.symptom_policy_decisions & position_bit;
-          bool participating =
-              person.active_symptom_policy_participation & position_bit;
-
-          if (decision_made) {
-            bool should_inherit = false;
-            if (participating && policy.inherit_compliance) {
-              person.active_symptom_policy_participation |= follow_up_bit;
-              should_inherit = true;
-            }
-            if (!participating && policy.inherit_refusal) {
-              should_inherit = true;
-            }
-
-            if (should_inherit) {
-              person.symptom_policy_decisions |= follow_up_bit;
-            }
-          }
-        }
+        if (policy.follow_up_policy_index >= 0)
+          applicable.inheritTo(
+              static_cast<size_t>(policy.follow_up_policy_index),
+              policy.inherit_compliance, policy.inherit_refusal);
 
         // Restore paused hop state if this policy was responsible for freezing
         releaseFreeze(person, i);
-
-        person.active_symptom_policy_participation &= ~position_bit;
-        person.symptom_policy_decisions &= ~position_bit;
+        applicable.clear();
         continue;
       }
 
-      // A voluntary policy keeps no latched decision: whether the person
-      // avoids is derived from the draw and the level every time it is asked.
-      if (!isVoluntary(policy)) {
-        bool has_made_decision = person.symptom_policy_decisions & position_bit;
-        if (!has_made_decision) {
-          if (checkCompliance(policy.action.compliance_rate, person.id,
-                              applicable.complianceKey())) {
-            person.active_symptom_policy_participation |= position_bit;
-          }
-          person.symptom_policy_decisions |= position_bit;
-        }
-
-        bool is_participating =
-            person.active_symptom_policy_participation & position_bit;
-        if (!is_participating) continue;
-      }
+      if (!applicable.latch()) continue;
 
       if (!actionApplies(policy.action, person, scheduled_activity_index,
                          slotVenueType, partner, slotTrigger(policy),
@@ -758,40 +699,22 @@ std::optional<PersonLocation> PolicyManager::getOverride(
                                     policy.action.replacement_activity_index);
     }
   } else {
-    if (person.symptom_policy_decisions != 0) {
-      person.resetPolicyState();
-    }
+    person.sticky_compliance.clear(PolicyKind::Symptom);
   }
 
   // Priority 2: temporal policies (lockdowns, etc.)
   for (const auto& applicable : walkApplicablePolicies(
-           applicable_policy_sets_, person, temporal_policies_)) {
-    const uint32_t position_bit = 1u << applicable.position();
+           applicable_policy_sets_, person, temporal_policies_, base_seed_)) {
     const auto& policy = applicable.policy();
 
     bool is_active = policy.window.contains(current_time);
 
     if (!is_active) {
-      person.active_temporal_policy_participation &= ~position_bit;
-      person.temporal_policy_decisions &= ~position_bit;
+      applicable.clear();
       continue;
     }
 
-    if (!isVoluntary(policy)) {
-      bool has_made_decision = person.temporal_policy_decisions & position_bit;
-      if (!has_made_decision) {
-        if (checkCompliance(policy.action.compliance_rate, person.id,
-                            applicable.complianceKey())) {
-          person.active_temporal_policy_participation |= position_bit;
-        }
-        person.temporal_policy_decisions |= position_bit;
-      }
-
-      bool is_participating =
-          person.active_temporal_policy_participation & position_bit;
-
-      if (!is_participating) continue;
-    }
+    if (!applicable.latch()) continue;
 
     // Where the person is scheduled, not where a freeze would pin them: a
     // traveller in transit is pinned at their last overnight venue while
@@ -832,18 +755,12 @@ bool PolicyManager::suppressesParticipation(
         person.infection->getTrajectory().getCurrentSymptomId(current_time);
 
     for (const auto& applicable : walkApplicablePolicies(
-             applicable_policy_sets_, person, symptom_policies_)) {
+             applicable_policy_sets_, person, symptom_policies_, base_seed_)) {
       const auto& policy = applicable.policy();
       if (!policy.window.contains(current_time)) continue;
       if (!policy.triggeredBy(current_symptom_id)) continue;
 
-      if (!isVoluntary(policy) &&
-          !isParticipating(person.symptom_policy_decisions,
-                           person.active_symptom_policy_participation,
-                           applicable.position(), policy.action.compliance_rate,
-                           person.id, applicable.complianceKey())) {
-        continue;
-      }
+      if (!applicable.participates()) continue;
 
       if (actionApplies(policy.action, person, activity_index, slotVenueType,
                         partner, slotTrigger(policy), slot_venue_type.venueId(),
@@ -855,17 +772,11 @@ bool PolicyManager::suppressesParticipation(
 
   // Priority 2: temporal policies (lockdowns, etc.)
   for (const auto& applicable : walkApplicablePolicies(
-           applicable_policy_sets_, person, temporal_policies_)) {
+           applicable_policy_sets_, person, temporal_policies_, base_seed_)) {
     const auto& policy = applicable.policy();
     if (!policy.window.contains(current_time)) continue;
 
-    if (!isVoluntary(policy) &&
-        !isParticipating(person.temporal_policy_decisions,
-                         person.active_temporal_policy_participation,
-                         applicable.position(), policy.action.compliance_rate,
-                         person.id, applicable.complianceKey())) {
-      continue;
-    }
+    if (!applicable.participates()) continue;
 
     if (actionApplies(policy.action, person, activity_index, slotVenueType,
                       partner, slotTrigger(policy), slot_venue_type.venueId(),
@@ -920,11 +831,7 @@ void PolicyManager::setApplicablePolicies(Person& person,
 
   // Decision state is held by set position, so carry it across the change of
   // set by global index, dropping policies that no longer apply.
-  const bool has_policy_state =
-      person.symptom_policy_decisions != 0 ||
-      person.temporal_policy_decisions != 0 ||
-      person.active_symptom_policy_participation != 0 ||
-      person.active_temporal_policy_participation != 0;
+  const bool has_policy_state = !person.sticky_compliance.empty();
   PolicyMask decided[kPolicyKindCount];
   PolicyMask participating[kPolicyKindCount];
   const PolicyMask* applicable[kPolicyKindCount] = {&symptom_mask,
@@ -964,17 +871,12 @@ void PolicyManager::setPolicyState(Person& person, PolicyKind kind,
                                    const PolicyMask& participating_mask) {
   const uint32_t set_id = person.applicable_policy_set_id;
   try {
-    const uint32_t decided =
+    StickyCompliance& sticky = person.sticky_compliance;
+    const size_t slot = StickyCompliance::slot(kind);
+    sticky.decided_[slot] =
         applicable_policy_sets_.compact(set_id, kind, decided_mask);
-    const uint32_t participating =
+    sticky.participating_[slot] =
         applicable_policy_sets_.compact(set_id, kind, participating_mask);
-    if (kind == PolicyKind::Symptom) {
-      person.symptom_policy_decisions = decided;
-      person.active_symptom_policy_participation = participating;
-    } else {
-      person.temporal_policy_decisions = decided;
-      person.active_temporal_policy_participation = participating;
-    }
   } catch (const std::runtime_error& error) {
     throw std::runtime_error("person " + std::to_string(person.id) + ": " +
                              error.what());

@@ -9,6 +9,7 @@
 #include <variant>
 #include <vector>
 
+#include "core/sticky_compliance.h"
 #include "epidemiology/emission/emission_record.h"
 #include "epidemiology/transmission/transmission_record.h"
 #include "epidemiology/vaccine.h"
@@ -308,26 +309,9 @@ struct Person {
   // Rank-local.
   uint32_t applicable_policy_set_id = 0;
 
-  // The four masks below are indexed by position within the Person's
-  // applicable policy set (bit k = the set's k-th policy of that kind), not by
-  // global policy index. Read and write them by global index through
-  // PolicyManager.
-
-  // Track which policies the person is currently complying/participating in
-  // (sticky compliance)
-  uint32_t active_symptom_policy_participation = 0;
-  uint32_t active_temporal_policy_participation = 0;
-
-  // Track whether a decision (compliance roll) has already been made for a
-  // policy This allows both Participation and Refusal to be "sticky"
-  uint32_t symptom_policy_decisions = 0;
-  uint32_t temporal_policy_decisions = 0;
-
-  // Reset symptom-based policy state (e.g., on recovery)
-  void resetPolicyState() {
-    active_symptom_policy_participation = 0;
-    symptom_policy_decisions = 0;
-  }
+  // Decided / participating policies, by position in the applicable set.
+  // Read and write through the Applicable Policy walk or PolicyManager.
+  StickyCompliance sticky_compliance;
 
   // Dynamic properties (ethnicity, comorbidities, work_mode, etc.)
   // Index into WorldState::person_properties flat table
