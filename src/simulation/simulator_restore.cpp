@@ -115,9 +115,9 @@ void overlayShardManagerState(
 // constructed infection / vaccine_trajectory cleared (those get reinstated by
 // the per-shard infection / vaccine overlays). Returns the number of records
 // this rank applied. Applicable policies are interned into policy_manager's
-// set table; with no PolicyManager they must be empty.
+// set table.
 size_t overlayShardPopulation(H5::H5File& f, WorldState& world,
-                              PolicyManager* policy_manager) {
+                              PolicyManager& policy_manager) {
   const auto I32 = H5::PredType::NATIVE_INT32;
   const auto U8 = H5::PredType::NATIVE_UINT8;
   const auto F64 = H5::PredType::NATIVE_DOUBLE;
@@ -153,16 +153,9 @@ size_t overlayShardPopulation(H5::H5File& f, WorldState& world,
     p->immunity.natural_waning_rate = imm_w[i];
     p->is_dead = dead[i] != 0;
     p->death_time = dt[i];
-    if (policy_manager) {
-      policy_manager->setApplicablePolicies(*p, m_as[i], m_at[i]);
-      policy_manager->setPolicyState(*p, PolicyKind::Symptom, m_ds[i], m_ps[i]);
-      policy_manager->setPolicyState(*p, PolicyKind::Temporal, m_dt[i],
-                                     m_pt[i]);
-    } else if (m_as[i].any() || m_at[i].any() || m_ps[i].any() ||
-               m_pt[i].any() || m_ds[i].any() || m_dt[i].any()) {
-      throw std::runtime_error(
-          "checkpoint holds policy state but the run has no policy manager");
-    }
+    policy_manager.setApplicablePolicies(*p, m_as[i], m_at[i]);
+    policy_manager.setPolicyState(*p, PolicyKind::Symptom, m_ds[i], m_ps[i]);
+    policy_manager.setPolicyState(*p, PolicyKind::Temporal, m_dt[i], m_pt[i]);
     p->schedule_hop.hopped_schedule_id = static_cast<int16_t>(hop[i]);
     p->schedule_hop.return_schedule_id = static_cast<int16_t>(ret[i]);
     p->schedule_hop.temp_slot_progress = static_cast<int16_t>(tsl[i]);
@@ -428,12 +421,10 @@ void Simulator::restoreFromCheckpoint(const std::string& checkpoint_dir) {
 
   // A cumulative counter cannot be rebuilt, so a checkpoint that does not
   // hold exactly the active metrics is refused rather than restarted at zero.
-  if (policy_manager_) {
-    policy_manager_->observedMetrics().restoreSnapshot(readStoredMetrics(cp));
-    policy_manager_->restoreTriggerStates(readStoredTriggers(cp));
-    // The levels are derived from the metric counts just put back.
-    policy_manager_->rebuildResponseLevels();
-  }
+  policy_manager_->observedMetrics().restoreSnapshot(readStoredMetrics(cp));
+  policy_manager_->restoreTriggerStates(readStoredTriggers(cp));
+  // The levels are derived from the metric counts just put back.
+  policy_manager_->rebuildResponseLevels();
 
   // frozen_states_ + lpt + follows are per-rank: accumulated from the shards.
   // Follows accumulate one entry per rule, matched to its shard by name.
@@ -456,7 +447,7 @@ void Simulator::restoreFromCheckpoint(const std::string& checkpoint_dir) {
     fs::path sf = cp / ("delta_rank" + std::to_string(s) + ".h5");
     if (!fs::exists(sf)) continue;
     H5::H5File f(sf.string(), H5F_ACC_RDONLY);
-    n_people += overlayShardPopulation(f, world_, policy_manager_.get());
+    n_people += overlayShardPopulation(f, world_, *policy_manager_);
     n_inf += overlayShardInfection(f, world_, disease_.get());
     n_vax += overlayShardVaccine(f, world_, config_.vaccination);
     n_fom += overlayShardFomite(f, world_);
@@ -478,7 +469,7 @@ void Simulator::restoreFromCheckpoint(const std::string& checkpoint_dir) {
 
   // ---- rebuild derived caches; set resume point ----
   if (epidemiology_) epidemiology_->restoreAfterCheckpoint(lpt_map);
-  if (policy_manager_ && disease_)
+  if (disease_)
     policy_manager_->initializeTransmissionModifiers(*disease_,
                                                      current_simulation_time_);
   resume_from_day_ = completed_day + 1;

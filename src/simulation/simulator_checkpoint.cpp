@@ -97,11 +97,10 @@ std::vector<uint32_t> buildOwnedPersonOrder(const std::vector<Person>& people) {
 // selectively read by geo without a full population scan). Rows follow `ord`
 // (sorted by geo_unit_id, person_id) so the run-based index aligns.
 // Applicable-policy set ids are rank-local, so the applicable, decided and
-// participating policies are written as global-index masks; with no
-// PolicyManager they are empty.
+// participating policies are written as global-index masks.
 void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
                           const std::vector<Person>& people,
-                          const PolicyManager* policy_manager, int comp) {
+                          const PolicyManager& policy_manager, int comp) {
   std::vector<int32_t> ids, geo, hop, ret, tslot, hop_rep;
   std::vector<double> imm_l, imm_a, imm_w, death_t;
   std::vector<uint8_t> dead;
@@ -116,24 +115,14 @@ void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
     imm_w.push_back(p.immunity.natural_waning_rate);
     dead.push_back(p.is_dead ? 1 : 0);
     death_t.push_back(p.death_time);
-    m_as.push_back(policy_manager
-                       ? policy_manager->applicableMask(p, PolicyKind::Symptom)
-                       : PolicyMask{});
-    m_at.push_back(policy_manager
-                       ? policy_manager->applicableMask(p, PolicyKind::Temporal)
-                       : PolicyMask{});
-    m_ps.push_back(policy_manager ? policy_manager->participatingPolicies(
-                                        p, PolicyKind::Symptom)
-                                  : PolicyMask{});
-    m_pt.push_back(policy_manager ? policy_manager->participatingPolicies(
-                                        p, PolicyKind::Temporal)
-                                  : PolicyMask{});
-    m_ds.push_back(policy_manager
-                       ? policy_manager->decidedPolicies(p, PolicyKind::Symptom)
-                       : PolicyMask{});
-    m_dt.push_back(policy_manager ? policy_manager->decidedPolicies(
-                                        p, PolicyKind::Temporal)
-                                  : PolicyMask{});
+    m_as.push_back(policy_manager.applicableMask(p, PolicyKind::Symptom));
+    m_at.push_back(policy_manager.applicableMask(p, PolicyKind::Temporal));
+    m_ps.push_back(
+        policy_manager.participatingPolicies(p, PolicyKind::Symptom));
+    m_pt.push_back(
+        policy_manager.participatingPolicies(p, PolicyKind::Temporal));
+    m_ds.push_back(policy_manager.decidedPolicies(p, PolicyKind::Symptom));
+    m_dt.push_back(policy_manager.decidedPolicies(p, PolicyKind::Temporal));
     hop.push_back(p.schedule_hop.hopped_schedule_id);
     ret.push_back(p.schedule_hop.return_schedule_id);
     tslot.push_back(p.schedule_hop.temp_slot_progress);
@@ -298,18 +287,16 @@ void writeShardEpidemiology(H5::H5File& f, Epidemiology* epi, int comp) {
 // Gather + write the policy manager's frozen_states_ under
 // /policy_frozen_states. Per-rank, global-id-keyed manager state: lives in the
 // shard, not state.h5.
-void writeShardFrozenStates(H5::H5File& f, PolicyManager* pm, int comp) {
+void writeShardFrozenStates(H5::H5File& f, const PolicyManager& pm, int comp) {
   std::vector<int32_t> fz_pid, fz_hop, fz_ret, fz_venue, fz_subset;
   std::vector<uint8_t> fz_pol;
-  if (pm) {
-    for (const auto& [pid, st] : pm->getFrozenStates()) {
-      fz_pid.push_back(pid);
-      fz_pol.push_back(st.triggering_policy_index);
-      fz_hop.push_back(st.paused_hopped_schedule_id);
-      fz_ret.push_back(st.paused_return_schedule_id);
-      fz_venue.push_back(st.pin_venue_id);
-      fz_subset.push_back(st.pin_subset_index);
-    }
+  for (const auto& [pid, st] : pm.getFrozenStates()) {
+    fz_pid.push_back(pid);
+    fz_pol.push_back(st.triggering_policy_index);
+    fz_hop.push_back(st.paused_hopped_schedule_id);
+    fz_ret.push_back(st.paused_return_schedule_id);
+    fz_venue.push_back(st.pin_venue_id);
+    fz_subset.push_back(st.pin_subset_index);
   }
   const auto I32 = H5::PredType::NATIVE_INT32;
   const auto U8 = H5::PredType::NATIVE_UINT8;
@@ -534,13 +521,13 @@ void Simulator::writeCheckpointRankShard(const fs::path& tmp, int rank,
   f.createGroup("/vaccine");
   f.createGroup("/venue_fomite");
 
-  writeShardPopulation(f, ord, world_.people, policy_manager_.get(), comp);
+  writeShardPopulation(f, ord, world_.people, *policy_manager_, comp);
   writeShardInfection(f, ord, world_.people, comp);
   writeShardVaccine(f, ord, world_.people, comp);
   writeShardFomite(f, world_.venues, comp);
 
   writeShardEpidemiology(f, epidemiology_.get(), comp);
-  writeShardFrozenStates(f, policy_manager_.get(), comp);
+  writeShardFrozenStates(f, *policy_manager_, comp);
   // Only stochastic bindings need saving. A criteria binding is derived from a
   // deterministic rule with no randomness, so it rebuilds itself on the first
   // slot after a resume and writing it would be redundant. Each stochastic rule
@@ -602,62 +589,58 @@ void Simulator::writeCheckpointStateFile(const fs::path& tmp, int completed_day,
   // count of a current one, which a voluntary response reads on the first day
   // after a resume. A trigger row is (trigger, unit, closed, anchor day, anchor
   // value).
-  if (policy_manager_) {
-    const auto metrics = policy_manager_->observedMetrics().snapshot();
-    if (!metrics.empty()) {
-      f.createGroup("/observed_metrics");
-      std::vector<std::string> names;
-      std::vector<int64_t> values;
-      std::vector<int64_t> scopes;
-      std::vector<int64_t> unit_rows;
-      for (const auto& m : metrics) {
-        for (const auto& [unit, total] : m.units)
-          unit_rows.insert(unit_rows.end(),
-                           {static_cast<int64_t>(names.size()), unit, total});
-        names.push_back(m.name);
-        values.push_back(m.value);
-        scopes.push_back(static_cast<int64_t>(m.scope));
-      }
-      writeStrs(f, "/observed_metrics/names", names);
-      writeVec(f, "/observed_metrics/values", values,
-               H5::PredType::NATIVE_INT64, 0);
-      writeVec(f, "/observed_metrics/scopes", scopes,
-               H5::PredType::NATIVE_INT64, 0);
-      writeVec(f, "/observed_metrics/unit_rows", unit_rows,
-               H5::PredType::NATIVE_INT64, 0);
+  const auto metrics = policy_manager_->observedMetrics().snapshot();
+  if (!metrics.empty()) {
+    f.createGroup("/observed_metrics");
+    std::vector<std::string> names;
+    std::vector<int64_t> values;
+    std::vector<int64_t> scopes;
+    std::vector<int64_t> unit_rows;
+    for (const auto& m : metrics) {
+      for (const auto& [unit, total] : m.units)
+        unit_rows.insert(unit_rows.end(),
+                         {static_cast<int64_t>(names.size()), unit, total});
+      names.push_back(m.name);
+      values.push_back(m.value);
+      scopes.push_back(static_cast<int64_t>(m.scope));
     }
-    // Three numbers per trigger for a world scope state: closed, anchor day,
-    // anchor value.
-    const auto triggers = policy_manager_->triggerStates();
-    if (!triggers.empty()) {
-      f.createGroup("/policy_triggers");
-      std::vector<std::string> keys;
-      std::vector<int64_t> state;
-      std::vector<int64_t> scopes;
-      std::vector<int64_t> voluntary;
-      std::vector<int64_t> unit_rows;
-      for (const auto& t : triggers) {
-        const int64_t index = static_cast<int64_t>(keys.size());
-        for (const auto& [unit, cell] : t.units)
-          unit_rows.insert(unit_rows.end(),
-                           {index, unit, cell.closed ? 1 : 0, cell.anchor_day,
-                            cell.anchor_value});
-        keys.push_back(t.key);
-        state.insert(state.end(), {t.cell.closed ? 1 : 0, t.cell.anchor_day,
-                                   t.cell.anchor_value});
-        scopes.push_back(static_cast<int64_t>(t.scope));
-        voluntary.push_back(t.voluntary ? 1 : 0);
-      }
-      writeStrs(f, "/policy_triggers/keys", keys);
-      writeVec(f, "/policy_triggers/state", state, H5::PredType::NATIVE_INT64,
-               0);
-      writeVec(f, "/policy_triggers/scopes", scopes, H5::PredType::NATIVE_INT64,
-               0);
-      writeVec(f, "/policy_triggers/voluntary", voluntary,
-               H5::PredType::NATIVE_INT64, 0);
-      writeVec(f, "/policy_triggers/unit_rows", unit_rows,
-               H5::PredType::NATIVE_INT64, 0);
+    writeStrs(f, "/observed_metrics/names", names);
+    writeVec(f, "/observed_metrics/values", values, H5::PredType::NATIVE_INT64,
+             0);
+    writeVec(f, "/observed_metrics/scopes", scopes, H5::PredType::NATIVE_INT64,
+             0);
+    writeVec(f, "/observed_metrics/unit_rows", unit_rows,
+             H5::PredType::NATIVE_INT64, 0);
+  }
+  // Three numbers per trigger for a world scope state: closed, anchor day,
+  // anchor value.
+  const auto triggers = policy_manager_->triggerStates();
+  if (!triggers.empty()) {
+    f.createGroup("/policy_triggers");
+    std::vector<std::string> keys;
+    std::vector<int64_t> state;
+    std::vector<int64_t> scopes;
+    std::vector<int64_t> voluntary;
+    std::vector<int64_t> unit_rows;
+    for (const auto& t : triggers) {
+      const int64_t index = static_cast<int64_t>(keys.size());
+      for (const auto& [unit, cell] : t.units)
+        unit_rows.insert(unit_rows.end(), {index, unit, cell.closed ? 1 : 0,
+                                           cell.anchor_day, cell.anchor_value});
+      keys.push_back(t.key);
+      state.insert(state.end(), {t.cell.closed ? 1 : 0, t.cell.anchor_day,
+                                 t.cell.anchor_value});
+      scopes.push_back(static_cast<int64_t>(t.scope));
+      voluntary.push_back(t.voluntary ? 1 : 0);
     }
+    writeStrs(f, "/policy_triggers/keys", keys);
+    writeVec(f, "/policy_triggers/state", state, H5::PredType::NATIVE_INT64, 0);
+    writeVec(f, "/policy_triggers/scopes", scopes, H5::PredType::NATIVE_INT64,
+             0);
+    writeVec(f, "/policy_triggers/voluntary", voluntary,
+             H5::PredType::NATIVE_INT64, 0);
+    writeVec(f, "/policy_triggers/unit_rows", unit_rows,
+             H5::PredType::NATIVE_INT64, 0);
   }
   f.close();
 }
