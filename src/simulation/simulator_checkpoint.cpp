@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "simulation/checkpoint_manifest/checkpoint_manifest.h"
 #include "simulation/checkpoint_masks/policy_mask_io.h"
 #include "simulation/simulator.h"
 
@@ -472,31 +473,6 @@ void writeShardIndex(const fs::path& tmp, int nranks) {
   }
   e << YAML::EndSeq << YAML::EndMap;
   std::ofstream(tmp / "shard_index.yaml") << e.c_str() << "\n";
-}
-
-// manifest.yaml is written LAST in the checkpoint dir; its presence is the
-// atomic commit marker for a complete checkpoint (see restoreFromCheckpoint).
-// world_path / world_sha256 are populated in P4 (restore validation);
-// intentionally empty here rather than a misleading placeholder.
-void writeManifest(const fs::path& tmp, int completed_day,
-                   const std::string& date_iso, int nranks,
-                   double current_simulation_time, unsigned int random_seed) {
-  YAML::Emitter m;
-  m << YAML::BeginMap;
-  m << YAML::Key << "format_version" << YAML::Value << 2;
-  m << YAML::Key << "completed_day" << YAML::Value << completed_day;
-  m << YAML::Key << "date" << YAML::Value << date_iso;
-  m << YAML::Key << "current_simulation_time" << YAML::Value
-    << current_simulation_time;
-  m << YAML::Key << "num_ranks" << YAML::Value << nranks;
-  m << YAML::Key << "effective_random_seed" << YAML::Value
-    << static_cast<unsigned long long>(random_seed);
-  m << YAML::Key << "world_path" << YAML::Value << "";
-  m << YAML::Key << "world_sha256" << YAML::Value << "";
-  m << YAML::Key << "shard_index" << YAML::Value << "shard_index.yaml";
-  m << YAML::Key << "state_file" << YAML::Value << "state.h5";
-  m << YAML::EndMap;
-  std::ofstream(tmp / "manifest.yaml") << m.c_str() << "\n";
 }
 
 }  // namespace

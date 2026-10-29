@@ -42,8 +42,7 @@ std::vector<PolicyMask> readMasks(H5::H5File& file, const std::string& name,
       throw std::runtime_error(
           "checkpoint dataset '" + name + "' is not an N x " +
           std::to_string(kPolicyMaskWords) +
-          " policy mask; checkpoint predates " +
-          std::to_string(kMaxPoliciesPerKind) + "-policy masks");
+          " policy mask (corrupt checkpoint)");
     }
   }
   if (dim[0] != expected_rows) {

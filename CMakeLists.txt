@@ -169,6 +169,7 @@ set(JUNE_CORE_SOURCES
     src/loaders/catchment_rule_loader.cpp
     src/simulation/simulator.cpp
     src/simulation/encounters/eligibility.cpp
+    src/simulation/checkpoint_manifest/checkpoint_manifest.cpp
     src/simulation/checkpoint_masks/policy_mask_io.cpp
     src/simulation/simulator_checkpoint.cpp
     src/simulation/simulator_encounters.cpp
@@ -305,6 +306,7 @@ if(BUILD_TESTING)
       test_transmission_modifiers
       test_applicable_policy_sets
       test_policy_mask_io
+      test_checkpoint_manifest
       test_on_the_fly_venue_allocator
       test_schedule_csv
       test_day_types

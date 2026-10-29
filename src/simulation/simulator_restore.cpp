@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "simulation/checkpoint_manifest/checkpoint_manifest.h"
 #include "simulation/checkpoint_masks/policy_mask_io.h"
 #include "simulation/simulator.h"
 
@@ -92,8 +93,8 @@ void overlayShardManagerState(
 
   // Follows: keep a relationship if THIS rank owns the follower, and a
   // tried-host if it owns the host. Each stochastic rule has its own named
-  // subgroup; a criteria rule wrote none and rebuilds itself. Guarded so
-  // checkpoints predating the follow feature still restore.
+  // subgroup; a criteria rule wrote none and rebuilds itself. A run with no
+  // follow rule writes no group at all.
   if (H5Lexists(f.getId(), "/follow", H5P_DEFAULT) > 0) {
     for (size_t ri = 0; ri < follow_names.size(); ++ri) {
       const std::string g = "/follow/" + follow_names[ri];
@@ -308,37 +309,6 @@ void overlayShardCalendarEvents(H5::H5File& f, WorldState& world,
       snap.active_event[static_cast<PersonId>(pids[i])] = eids[i];
 }
 
-// Open the checkpoint's manifest.yaml, enforce that the checkpoint's seed
-// matches the configured seed (no silent override), and return the
-// completed_day to resume from. The caller has already canonicalised cp.
-// format_version comes back through the out parameter; one outside the range
-// this build reads throws.
-int readAndValidateManifest(const fs::path& cp, unsigned int config_seed,
-                            int& format_version) {
-  if (!fs::exists(cp / "manifest.yaml"))
-    throw std::runtime_error(
-        "restoreFromCheckpoint: no manifest.yaml (incomplete/invalid "
-        "checkpoint): " +
-        cp.string());
-  YAML::Node man = YAML::LoadFile((cp / "manifest.yaml").string());
-  format_version = man["format_version"].as<int>();
-  if (format_version < 1 || format_version > 2) {
-    throw std::runtime_error(
-        "restoreFromCheckpoint: unsupported checkpoint format_version " +
-        std::to_string(format_version) +
-        " (this build reads 1 to 2): " + cp.string());
-  }
-  int completed_day = man["completed_day"].as<int>();
-  unsigned int cp_seed = man["effective_random_seed"].as<unsigned int>();
-  if (cp_seed != config_seed) {
-    throw std::runtime_error(
-        "restoreFromCheckpoint: effective_random_seed mismatch (checkpoint=" +
-        std::to_string(cp_seed) + ", config=" + std::to_string(config_seed) +
-        "). Resume with the checkpoint's seed (no silent override).");
-  }
-  return completed_day;
-}
-
 // Observed metric totals stored in state.h5, name order. Absent group means
 // the checkpoint was written with no active metric. The rows of the unit table
 // are (metric index, unit, value).
@@ -451,31 +421,18 @@ void Simulator::restoreCheckpointStateFile(const fs::path& cp) {
 void Simulator::restoreFromCheckpoint(const std::string& checkpoint_dir) {
   const int rank = getRank();
   fs::path cp = fs::canonical(checkpoint_dir);  // resolves 'latest' symlink
-  int format_version = 0;
-  int completed_day = readAndValidateManifest(
-      cp, config_.simulation.random_seed, format_version);
+  int completed_day =
+      readAndValidateManifest(cp, config_.simulation.random_seed);
 
   restoreCheckpointStateFile(cp);
 
   // A cumulative counter cannot be rebuilt, so a checkpoint that does not
   // hold exactly the active metrics is refused rather than restarted at zero.
-  // Every triggered Policy reads an active metric, so format 1, which holds
-  // none, only resumes a run with no triggers either.
   if (policy_manager_) {
-    auto& metrics = policy_manager_->observedMetrics();
-    if (format_version == 1) {
-      if (metrics.anyActive()) {
-        throw std::runtime_error(
-            "restoreFromCheckpoint: checkpoint is format_version 1 and holds "
-            "no observed metric totals, but this run has active metrics. "
-            "Resume with no triggered Policy, or restart from day 0.");
-      }
-    } else {
-      metrics.restoreSnapshot(readStoredMetrics(cp));
-      policy_manager_->restoreTriggerStates(readStoredTriggers(cp));
-      // The levels are derived from the metric counts just put back.
-      policy_manager_->rebuildResponseLevels();
-    }
+    policy_manager_->observedMetrics().restoreSnapshot(readStoredMetrics(cp));
+    policy_manager_->restoreTriggerStates(readStoredTriggers(cp));
+    // The levels are derived from the metric counts just put back.
+    policy_manager_->rebuildResponseLevels();
   }
 
   // frozen_states_ + lpt + follows are per-rank: accumulated from the shards.
