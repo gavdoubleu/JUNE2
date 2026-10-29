@@ -802,8 +802,8 @@ TEST_CASE(
   voluntary.endDay(0, 5);
   voluntary.households(shape, 1.0);
   for (const Person& p : voluntary.world.people) {
-    CHECK(p.temporal_policy_decisions == 0);
-    CHECK(p.active_temporal_policy_participation == 0);
+    CHECK(voluntary.pm.decidedPolicies(p, PolicyKind::Temporal).none());
+    CHECK(voluntary.pm.participatingPolicies(p, PolicyKind::Temporal).none());
   }
 
   Responding plain(
@@ -815,8 +815,9 @@ TEST_CASE(
   plain.households(shape, 1.0);
   for (int h = 0; h < shape.households; ++h) {
     const Person& p = plain.world.people[static_cast<size_t>(shape.kid(h, 0))];
-    CHECK(p.temporal_policy_decisions == 1);
-    CHECK(p.active_temporal_policy_participation == 1);
+    CHECK(plain.pm.decidedPolicies(p, PolicyKind::Temporal) == PolicyMask{0b1});
+    CHECK(plain.pm.participatingPolicies(p, PolicyKind::Temporal) ==
+          PolicyMask{0b1});
   }
 }
 
@@ -832,8 +833,9 @@ TEST_CASE("Response - encounters and follows are told the same verdict") {
     const VenueId room = shape.classroomOf(h, 0);
     // Asked first: the question must not decide anything for the schedule.
     const bool asked = r.suppressed(kid, room, kClassroomType, 1.0);
-    CHECK(r.world.people[static_cast<size_t>(kid)].temporal_policy_decisions ==
-          0);
+    CHECK(r.pm.decidedPolicies(r.world.people[static_cast<size_t>(kid)],
+                               PolicyKind::Temporal)
+              .none());
     CHECK(asked == r.avoids(kid, room, 1.0));
     avoiding += asked;
   }
@@ -898,7 +900,8 @@ TEST_CASE("Response - symptomatic people stay home more as deaths rise") {
   }
   CHECK(previous == shape.households / 2);  // level 1: every sick pupil
   // No decision was latched on the way.
-  for (const Person& p : r.world.people) CHECK(p.symptom_policy_decisions == 0);
+  for (const Person& p : r.world.people)
+    CHECK(r.pm.decidedPolicies(p, PolicyKind::Symptom).none());
 }
 
 // ---------------------------------------------------------------------------

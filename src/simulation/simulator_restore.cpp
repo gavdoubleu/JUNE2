@@ -154,15 +154,14 @@ size_t overlayShardPopulation(H5::H5File& f, WorldState& world,
     p->death_time = dt[i];
     if (policy_manager) {
       policy_manager->setApplicablePolicies(*p, m_as[i], m_at[i]);
-    } else if (m_as[i].any() || m_at[i].any()) {
+      policy_manager->setPolicyState(*p, PolicyKind::Symptom, m_ds[i], m_ps[i]);
+      policy_manager->setPolicyState(*p, PolicyKind::Temporal, m_dt[i],
+                                     m_pt[i]);
+    } else if (m_as[i].any() || m_at[i].any() || m_ps[i].any() ||
+               m_pt[i].any() || m_ds[i].any() || m_dt[i].any()) {
       throw std::runtime_error(
-          "checkpoint holds applicable policies but the run has no policy "
-          "manager");
+          "checkpoint holds policy state but the run has no policy manager");
     }
-    p->active_symptom_policy_participation = m_ps[i];
-    p->active_temporal_policy_participation = m_pt[i];
-    p->symptom_policy_decisions = m_ds[i];
-    p->temporal_policy_decisions = m_dt[i];
     p->schedule_hop.hopped_schedule_id = static_cast<int16_t>(hop[i]);
     p->schedule_hop.return_schedule_id = static_cast<int16_t>(ret[i]);
     p->schedule_hop.temp_slot_progress = static_cast<int16_t>(tsl[i]);

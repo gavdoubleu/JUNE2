@@ -448,27 +448,30 @@ void PolicyManager::rebuildPersonTransmissionModifier(Person& person,
     if (effect.scope != TransmissionEffectScope::Person) continue;
     if (effect.policy_kind == TransmissionPolicyKind::Temporal) {
       const auto& policy = temporal_policies_[effect.policy_index];
+      const uint8_t position = applicable_policy_sets_.position(
+          person.applicable_policy_set_id, PolicyKind::Temporal,
+          effect.policy_index);
       if (!policy.window.contains(current_time) ||
-          !isApplicable(person, PolicyKind::Temporal, effect.policy_index) ||
+          position == ApplicablePolicySets::kAbsent ||
           !isParticipating(person.temporal_policy_decisions,
                            person.active_temporal_policy_participation,
-                           effect.policy_index, policy.action.compliance_rate,
-                           person.id,
+                           position, policy.action.compliance_rate, person.id,
                            static_cast<uint32_t>(effect.policy_index) +
                                kTemporalComplianceIndexOffset))
         continue;
     } else {
       const auto& policy = symptom_policies_[effect.policy_index];
+      const uint8_t position = applicable_policy_sets_.position(
+          person.applicable_policy_set_id, PolicyKind::Symptom,
+          effect.policy_index);
       if (!policy.window.contains(current_time) ||
-          !isApplicable(person, PolicyKind::Symptom, effect.policy_index) ||
-          !person.infection ||
+          position == ApplicablePolicySets::kAbsent || !person.infection ||
           !policy.triggeredBy(
               person.infection->getTrajectory().getCurrentSymptomId(
                   current_time)) ||
           !isParticipating(person.symptom_policy_decisions,
-                           person.active_symptom_policy_participation,
-                           effect.policy_index, policy.action.compliance_rate,
-                           person.id,
+                           person.active_symptom_policy_participation, position,
+                           policy.action.compliance_rate, person.id,
                            static_cast<uint32_t>(effect.policy_index)))
         continue;
     }
@@ -622,9 +625,12 @@ std::optional<PersonLocation> PolicyManager::getOverride(
     uint16_t current_symptom_id =
         person.infection->getTrajectory().getCurrentSymptomId(current_time);
 
-    for (const size_t i : applicable_policy_sets_.indices(
-             person.applicable_policy_set_id, PolicyKind::Symptom)) {
+    const auto symptom_indices = applicable_policy_sets_.indices(
+        person.applicable_policy_set_id, PolicyKind::Symptom);
+    for (size_t position = 0; position < symptom_indices.size(); ++position) {
+      const size_t i = symptom_indices[position];
       if (i >= symptom_policies_.size()) break;
+      const uint32_t position_bit = 1u << position;
 
       const auto& policy = symptom_policies_[i];
 
@@ -633,8 +639,8 @@ std::optional<PersonLocation> PolicyManager::getOverride(
       // the person, so no follow-up policy inherits the decision.
       if (!policy.window.contains(current_time)) {
         releaseFreeze(person, i);
-        person.active_symptom_policy_participation.reset(i);
-        person.symptom_policy_decisions.reset(i);
+        person.active_symptom_policy_participation &= ~position_bit;
+        person.symptom_policy_decisions &= ~position_bit;
         continue;
       }
 
@@ -643,16 +649,24 @@ std::optional<PersonLocation> PolicyManager::getOverride(
       // STICKY COMPLIANCE: if not triggered, clear participation/decision and
       // continue (with follow-up policy inheritance check)
       if (!is_triggered) {
-        if (policy.follow_up_policy_index >= 0) {
-          bool decision_made = person.symptom_policy_decisions.test(i);
+        // A follow-up outside the Person's applicable set never fires for
+        // them, so there is nothing to inherit.
+        const uint8_t follow_up_position =
+            policy.follow_up_policy_index >= 0
+                ? applicable_policy_sets_.position(
+                      person.applicable_policy_set_id, PolicyKind::Symptom,
+                      static_cast<size_t>(policy.follow_up_policy_index))
+                : ApplicablePolicySets::kAbsent;
+        if (follow_up_position != ApplicablePolicySets::kAbsent) {
+          const uint32_t follow_up_bit = 1u << follow_up_position;
+          bool decision_made = person.symptom_policy_decisions & position_bit;
           bool participating =
-              person.active_symptom_policy_participation.test(i);
+              person.active_symptom_policy_participation & position_bit;
 
           if (decision_made) {
             bool should_inherit = false;
             if (participating && policy.inherit_compliance) {
-              person.active_symptom_policy_participation.set(
-                  policy.follow_up_policy_index);
+              person.active_symptom_policy_participation |= follow_up_bit;
               should_inherit = true;
             }
             if (!participating && policy.inherit_refusal) {
@@ -660,8 +674,7 @@ std::optional<PersonLocation> PolicyManager::getOverride(
             }
 
             if (should_inherit) {
-              person.symptom_policy_decisions.set(
-                  policy.follow_up_policy_index);
+              person.symptom_policy_decisions |= follow_up_bit;
             }
           }
         }
@@ -669,25 +682,25 @@ std::optional<PersonLocation> PolicyManager::getOverride(
         // Restore paused hop state if this policy was responsible for freezing
         releaseFreeze(person, i);
 
-        person.active_symptom_policy_participation.reset(i);
-        person.symptom_policy_decisions.reset(i);
+        person.active_symptom_policy_participation &= ~position_bit;
+        person.symptom_policy_decisions &= ~position_bit;
         continue;
       }
 
       // A voluntary policy keeps no latched decision: whether the person
       // avoids is derived from the draw and the level every time it is asked.
       if (!isVoluntary(policy)) {
-        bool has_made_decision = person.symptom_policy_decisions.test(i);
+        bool has_made_decision = person.symptom_policy_decisions & position_bit;
         if (!has_made_decision) {
           if (checkCompliance(policy.action.compliance_rate, person.id,
                               static_cast<uint32_t>(i))) {
-            person.active_symptom_policy_participation.set(i);
+            person.active_symptom_policy_participation |= position_bit;
           }
-          person.symptom_policy_decisions.set(i);
+          person.symptom_policy_decisions |= position_bit;
         }
 
         bool is_participating =
-            person.active_symptom_policy_participation.test(i);
+            person.active_symptom_policy_participation & position_bit;
         if (!is_participating) continue;
       }
 
@@ -748,39 +761,42 @@ std::optional<PersonLocation> PolicyManager::getOverride(
                                     policy.action.replacement_activity_index);
     }
   } else {
-    if (person.symptom_policy_decisions.any()) {
+    if (person.symptom_policy_decisions != 0) {
       person.resetPolicyState();
     }
   }
 
   // Priority 2: temporal policies (lockdowns, etc.)
-  for (const size_t i : applicable_policy_sets_.indices(
-           person.applicable_policy_set_id, PolicyKind::Temporal)) {
+  const auto temporal_indices = applicable_policy_sets_.indices(
+      person.applicable_policy_set_id, PolicyKind::Temporal);
+  for (size_t position = 0; position < temporal_indices.size(); ++position) {
+    const size_t i = temporal_indices[position];
     if (i >= temporal_policies_.size()) break;
+    const uint32_t position_bit = 1u << position;
 
     const auto& policy = temporal_policies_[i];
 
     bool is_active = policy.window.contains(current_time);
 
     if (!is_active) {
-      person.active_temporal_policy_participation.reset(i);
-      person.temporal_policy_decisions.reset(i);
+      person.active_temporal_policy_participation &= ~position_bit;
+      person.temporal_policy_decisions &= ~position_bit;
       continue;
     }
 
     if (!isVoluntary(policy)) {
-      bool has_made_decision = person.temporal_policy_decisions.test(i);
+      bool has_made_decision = person.temporal_policy_decisions & position_bit;
       if (!has_made_decision) {
         if (checkCompliance(
                 policy.action.compliance_rate, person.id,
                 static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
-          person.active_temporal_policy_participation.set(i);
+          person.active_temporal_policy_participation |= position_bit;
         }
-        person.temporal_policy_decisions.set(i);
+        person.temporal_policy_decisions |= position_bit;
       }
 
       bool is_participating =
-          person.active_temporal_policy_participation.test(i);
+          person.active_temporal_policy_participation & position_bit;
 
       if (!is_participating) continue;
     }
@@ -824,8 +840,10 @@ bool PolicyManager::suppressesParticipation(
     uint16_t current_symptom_id =
         person.infection->getTrajectory().getCurrentSymptomId(current_time);
 
-    for (const size_t i : applicable_policy_sets_.indices(
-             person.applicable_policy_set_id, PolicyKind::Symptom)) {
+    const auto symptom_indices = applicable_policy_sets_.indices(
+        person.applicable_policy_set_id, PolicyKind::Symptom);
+    for (size_t position = 0; position < symptom_indices.size(); ++position) {
+      const size_t i = symptom_indices[position];
       if (i >= symptom_policies_.size()) break;
 
       const auto& policy = symptom_policies_[i];
@@ -834,7 +852,7 @@ bool PolicyManager::suppressesParticipation(
 
       if (!isVoluntary(policy) &&
           !isParticipating(person.symptom_policy_decisions,
-                           person.active_symptom_policy_participation, i,
+                           person.active_symptom_policy_participation, position,
                            policy.action.compliance_rate, person.id,
                            static_cast<uint32_t>(i))) {
         continue;
@@ -849,8 +867,10 @@ bool PolicyManager::suppressesParticipation(
   }
 
   // Priority 2: temporal policies (lockdowns, etc.)
-  for (const size_t i : applicable_policy_sets_.indices(
-           person.applicable_policy_set_id, PolicyKind::Temporal)) {
+  const auto temporal_indices = applicable_policy_sets_.indices(
+      person.applicable_policy_set_id, PolicyKind::Temporal);
+  for (size_t position = 0; position < temporal_indices.size(); ++position) {
+    const size_t i = temporal_indices[position];
     if (i >= temporal_policies_.size()) break;
 
     const auto& policy = temporal_policies_[i];
@@ -859,7 +879,7 @@ bool PolicyManager::suppressesParticipation(
     if (!isVoluntary(policy) &&
         !isParticipating(
             person.temporal_policy_decisions,
-            person.active_temporal_policy_participation, i,
+            person.active_temporal_policy_participation, position,
             policy.action.compliance_rate, person.id,
             static_cast<uint32_t>(i) + kTemporalComplianceIndexOffset)) {
       continue;
@@ -905,6 +925,25 @@ void PolicyManager::precomputePolicyApplicability(std::vector<Person>& people) {
 void PolicyManager::setApplicablePolicies(Person& person,
                                           const PolicyMask& symptom_mask,
                                           const PolicyMask& temporal_mask) {
+  // Decision state is held by set position, so carry it across the change of
+  // set by global index, dropping policies that no longer apply.
+  const bool has_policy_state =
+      person.symptom_policy_decisions != 0 ||
+      person.temporal_policy_decisions != 0 ||
+      person.active_symptom_policy_participation != 0 ||
+      person.active_temporal_policy_participation != 0;
+  PolicyMask decided[kPolicyKindCount];
+  PolicyMask participating[kPolicyKindCount];
+  const PolicyMask* applicable[kPolicyKindCount] = {&symptom_mask,
+                                                    &temporal_mask};
+  constexpr PolicyKind kinds[kPolicyKindCount] = {PolicyKind::Symptom,
+                                                  PolicyKind::Temporal};
+  if (has_policy_state)
+    for (size_t kind = 0; kind < kPolicyKindCount; ++kind) {
+      decided[kind] = decidedPolicies(person, kinds[kind]) & *applicable[kind];
+      participating[kind] =
+          participatingPolicies(person, kinds[kind]) & *applicable[kind];
+    }
   try {
     person.applicable_policy_set_id =
         applicable_policy_sets_.intern(symptom_mask, temporal_mask);
@@ -912,6 +951,9 @@ void PolicyManager::setApplicablePolicies(Person& person,
     throw std::runtime_error("person " + std::to_string(person.id) + ": " +
                              error.what());
   }
+  if (has_policy_state)
+    for (size_t kind = 0; kind < kPolicyKindCount; ++kind)
+      setPolicyState(person, kinds[kind], decided[kind], participating[kind]);
 }
 
 void PolicyManager::setApplicablePolicies(Person& person, PolicyKind kind,
@@ -922,6 +964,28 @@ void PolicyManager::setApplicablePolicies(Person& person, PolicyKind kind,
   else
     setApplicablePolicies(person, applicableMask(person, PolicyKind::Symptom),
                           mask);
+}
+
+void PolicyManager::setPolicyState(Person& person, PolicyKind kind,
+                                   const PolicyMask& decided_mask,
+                                   const PolicyMask& participating_mask) {
+  const uint32_t set_id = person.applicable_policy_set_id;
+  try {
+    const uint32_t decided =
+        applicable_policy_sets_.compact(set_id, kind, decided_mask);
+    const uint32_t participating =
+        applicable_policy_sets_.compact(set_id, kind, participating_mask);
+    if (kind == PolicyKind::Symptom) {
+      person.symptom_policy_decisions = decided;
+      person.active_symptom_policy_participation = participating;
+    } else {
+      person.temporal_policy_decisions = decided;
+      person.active_temporal_policy_participation = participating;
+    }
+  } catch (const std::runtime_error& error) {
+    throw std::runtime_error("person " + std::to_string(person.id) + ": " +
+                             error.what());
+  }
 }
 
 }  // namespace june

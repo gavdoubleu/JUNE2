@@ -308,20 +308,25 @@ struct Person {
   // Rank-local.
   uint32_t applicable_policy_set_id = 0;
 
+  // The four masks below are indexed by position within the Person's
+  // applicable policy set (bit k = the set's k-th policy of that kind), not by
+  // global policy index. Read and write them by global index through
+  // PolicyManager.
+
   // Track which policies the person is currently complying/participating in
   // (sticky compliance)
-  PolicyMask active_symptom_policy_participation;
-  PolicyMask active_temporal_policy_participation;
+  uint32_t active_symptom_policy_participation = 0;
+  uint32_t active_temporal_policy_participation = 0;
 
   // Track whether a decision (compliance roll) has already been made for a
   // policy This allows both Participation and Refusal to be "sticky"
-  PolicyMask symptom_policy_decisions;
-  PolicyMask temporal_policy_decisions;
+  uint32_t symptom_policy_decisions = 0;
+  uint32_t temporal_policy_decisions = 0;
 
   // Reset symptom-based policy state (e.g., on recovery)
   void resetPolicyState() {
-    active_symptom_policy_participation.reset();
-    symptom_policy_decisions.reset();
+    active_symptom_policy_participation = 0;
+    symptom_policy_decisions = 0;
   }
 
   // Dynamic properties (ethnicity, comorbidities, work_mode, etc.)
@@ -392,6 +397,9 @@ struct Person {
   uint32_t encounter_meta_start = 0;
   uint16_t encounter_meta_count = 0;
 };
+
+// Person is held per head of population; guard its size against regressions.
+static_assert(sizeof(Person) == 160, "Person size changed");
 
 // =============================================================================
 // Subset - A group of people/roles within a venue (e.g., kids or teachers in a

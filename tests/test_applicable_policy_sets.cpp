@@ -75,3 +75,42 @@ TEST_CASE("a set holds at most 32 policies of each kind") {
                        doctest::Contains("33 symptom policies"),
                        std::runtime_error);
 }
+
+TEST_CASE("position masks expand to global masks and compact back") {
+  ApplicablePolicySets sets;
+  const auto set_id = sets.intern(maskOf({2}), maskOf({0, 63, 64, 127}));
+  // Positions 1 and 3 of {0, 63, 64, 127}.
+  const uint32_t position_mask = 0b1010;
+  const auto global_mask =
+      sets.expand(set_id, PolicyKind::Temporal, position_mask);
+  CHECK(global_mask == maskOf({63, 127}));
+  CHECK(sets.compact(set_id, PolicyKind::Temporal, global_mask) ==
+        position_mask);
+  CHECK(sets.compact(set_id, PolicyKind::Symptom, maskOf({2})) == 1u);
+  CHECK(sets.expand(ApplicablePolicySets::kEmptySet, PolicyKind::Symptom, 0)
+            .none());
+  CHECK(sets.compact(ApplicablePolicySets::kEmptySet, PolicyKind::Symptom,
+                     PolicyMask{}) == 0u);
+}
+
+TEST_CASE("compacting a global mask throws on a policy outside the set") {
+  ApplicablePolicySets sets;
+  const auto set_id = sets.intern(maskOf({2}), maskOf({0, 64}));
+  CHECK_THROWS_WITH_AS(
+      sets.compact(set_id, PolicyKind::Temporal, maskOf({0, 65})),
+      doctest::Contains("temporal policy 65"), std::runtime_error);
+  CHECK_THROWS_WITH_AS(sets.compact(ApplicablePolicySets::kEmptySet,
+                                    PolicyKind::Symptom, maskOf({2})),
+                       doctest::Contains("symptom policy 2"),
+                       std::runtime_error);
+
+  PolicyMask thirty_two;
+  for (size_t index = 0; index < 32; ++index) thirty_two.set(index * 4);
+  const auto full_set_id = sets.intern(thirty_two, PolicyMask{});
+  PolicyMask thirty_three = thirty_two;
+  thirty_three.set(1);
+  CHECK(sets.compact(full_set_id, PolicyKind::Symptom, thirty_two) ==
+        0xFFFFFFFFu);
+  CHECK_THROWS_AS(sets.compact(full_set_id, PolicyKind::Symptom, thirty_three),
+                  std::runtime_error);
+}

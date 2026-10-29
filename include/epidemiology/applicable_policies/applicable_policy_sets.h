@@ -48,6 +48,13 @@ class ApplicablePolicySets {
   // The set's policies of one kind as a global-index mask (checkpoint layout).
   PolicyMask globalMask(uint32_t set_id, PolicyKind kind) const;
 
+  // Position mask (bit k = indices()[k]) to global-index mask.
+  PolicyMask expand(uint32_t set_id, PolicyKind kind,
+                    uint32_t position_mask) const;
+  // Global-index mask to position mask. Throws on a policy outside the set.
+  uint32_t compact(uint32_t set_id, PolicyKind kind,
+                   const PolicyMask& global_mask) const;
+
  private:
   struct Entry {
     std::vector<uint8_t> indices[kPolicyKindCount];

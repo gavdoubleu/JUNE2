@@ -59,4 +59,30 @@ PolicyMask ApplicablePolicySets::globalMask(uint32_t set_id,
   return mask;
 }
 
+PolicyMask ApplicablePolicySets::expand(uint32_t set_id, PolicyKind kind,
+                                        uint32_t position_mask) const {
+  const auto global_indices = indices(set_id, kind);
+  PolicyMask mask;
+  for (size_t position = 0; position < global_indices.size(); ++position)
+    if (position_mask & (1u << position)) mask.set(global_indices[position]);
+  return mask;
+}
+
+uint32_t ApplicablePolicySets::compact(uint32_t set_id, PolicyKind kind,
+                                       const PolicyMask& global_mask) const {
+  uint32_t position_mask = 0;
+  for (size_t global_index = 0; global_index < kMaxPoliciesPerKind;
+       ++global_index) {
+    if (!global_mask.test(global_index)) continue;
+    const uint8_t position = this->position(set_id, kind, global_index);
+    if (position == kAbsent)
+      throw std::runtime_error(
+          std::string(kind == PolicyKind::Symptom ? "symptom" : "temporal") +
+          " policy " + std::to_string(global_index) +
+          " is outside the person's applicable policy set");
+    position_mask |= 1u << position;
+  }
+  return position_mask;
+}
+
 }  // namespace june

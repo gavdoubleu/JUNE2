@@ -2451,7 +2451,7 @@ TEST_CASE("7m. Eligibility latches no compliance decision") {
       static_cast<int16_t>(tw.world.getActivityIndex("leisure"));
   for (size_t i = 0; i < tw.world.people.size(); ++i) {
     Person& person = tw.world.people[i];
-    CHECK(person.temporal_policy_decisions == 0);
+    CHECK(pm.decidedPolicies(person, PolicyKind::Temporal).none());
 
     // The authoritative caller now runs and latches. Suppressed by the query
     // iff overridden by ActivityManager.

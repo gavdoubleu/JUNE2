@@ -95,8 +95,9 @@ std::vector<uint32_t> buildOwnedPersonOrder(const std::vector<Person>& people) {
 // the embedded partition_index over contiguous geo_unit runs (so restore can
 // selectively read by geo without a full population scan). Rows follow `ord`
 // (sorted by geo_unit_id, person_id) so the run-based index aligns.
-// Applicable-policy set ids are rank-local, so the applicable policies are
-// written as global-index masks; with no PolicyManager they are empty.
+// Applicable-policy set ids are rank-local, so the applicable, decided and
+// participating policies are written as global-index masks; with no
+// PolicyManager they are empty.
 void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
                           const std::vector<Person>& people,
                           const PolicyManager* policy_manager, int comp) {
@@ -120,10 +121,18 @@ void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
     m_at.push_back(policy_manager
                        ? policy_manager->applicableMask(p, PolicyKind::Temporal)
                        : PolicyMask{});
-    m_ps.push_back(p.active_symptom_policy_participation);
-    m_pt.push_back(p.active_temporal_policy_participation);
-    m_ds.push_back(p.symptom_policy_decisions);
-    m_dt.push_back(p.temporal_policy_decisions);
+    m_ps.push_back(policy_manager ? policy_manager->participatingPolicies(
+                                        p, PolicyKind::Symptom)
+                                  : PolicyMask{});
+    m_pt.push_back(policy_manager ? policy_manager->participatingPolicies(
+                                        p, PolicyKind::Temporal)
+                                  : PolicyMask{});
+    m_ds.push_back(policy_manager
+                       ? policy_manager->decidedPolicies(p, PolicyKind::Symptom)
+                       : PolicyMask{});
+    m_dt.push_back(policy_manager ? policy_manager->decidedPolicies(
+                                        p, PolicyKind::Temporal)
+                                  : PolicyMask{});
     hop.push_back(p.schedule_hop.hopped_schedule_id);
     ret.push_back(p.schedule_hop.return_schedule_id);
     tslot.push_back(p.schedule_hop.temp_slot_progress);
