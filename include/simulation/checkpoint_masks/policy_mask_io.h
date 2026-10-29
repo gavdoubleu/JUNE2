@@ -17,7 +17,7 @@ void writeMasks(H5::H5File& file, const std::string& name,
                 const std::vector<PolicyMask>& masks, int compression);
 
 // Throws unless the dataset is N x kPolicyMaskWords with N == expected_rows.
-// A missing dataset counts as zero rows.
+// Throws if the dataset is missing.
 std::vector<PolicyMask> readMasks(H5::H5File& file, const std::string& name,
                                   size_t expected_rows);
 

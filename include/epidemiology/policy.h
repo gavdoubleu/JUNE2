@@ -776,9 +776,10 @@ class PolicyManager {
     }
   }
 
-  // Applicability is carried in a kMaxPoliciesPerKind-bit mask per person, so a
-  // policy past the cap can never fire. Name the first such policy rather than
-  // drop it.
+  // Global policy indices are bit positions in a kMaxPoliciesPerKind-bit
+  // PolicyMask, so a policy past the cap could never be marked applicable. Name
+  // the first such policy rather than drop it. One Person's set is capped
+  // lower, at kMaxApplicablePoliciesPerKind (see ApplicablePolicySets::intern).
   template <typename PolicyVector>
   static void rejectPoliciesBeyondMaskWidth(const PolicyVector& policies,
                                             const std::string& kind) {
