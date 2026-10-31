@@ -226,14 +226,14 @@ TEST_CASE("Response - levels and verdicts do not depend on rank count") {
                                    {kTwoClasses, kClassA, 0.5},
                                    {kTwoClasses, kClassB, 0.5},
                                    {kOtherSchool, kClassC, 0.25}};
+  const uint64_t kDrawKey = policyDrawKey(PolicyKind::Temporal, "keep_home");
   std::vector<int64_t> verdicts;
   for (const Seat& seat : seats) {
     const bool avoids =
         pm.getOverride(world.people[seat.person], kPrimary, seat.classroom, 0,
                        SlotVenueType::fromVenue(seat.classroom), 1.0, 0)
             .has_value();
-    SplitMix64 rng(
-        mix_seed(77, seat.person, kTemporalComplianceIndexOffset, 0xA701D4ULL));
+    SplitMix64 rng(mix_seed(77, seat.person, kDrawKey, 0xA701D4ULL));
     CHECK(avoids == (seat.level > uniform01(rng)));
     verdicts.push_back(avoids ? 1 : 0);
   }

@@ -422,8 +422,13 @@ std::vector<PersonId> remapFrozenStates(
   for (auto& [person_id, state] : frozen_states) {
     const std::optional<size_t> current_index = roster_match.currentIndex(
         PolicyKind::Symptom, state.triggering_policy_index);
+    // overlayShardManagerState keeps only freezes of Persons this rank owns.
     const Person* person = world.getPerson(person_id);
-    if (current_index && person &&
+    if (!person)
+      throw std::runtime_error("checkpoint: frozen person " +
+                               std::to_string(person_id) +
+                               " is not on this rank");
+    if (current_index &&
         applicable_policies.exportState(*person).symptom.participating.test(
             *current_index)) {
       state.triggering_policy_index = static_cast<uint8_t>(*current_index);

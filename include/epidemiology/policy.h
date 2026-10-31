@@ -377,6 +377,9 @@ struct ActiveWindow {
 
 struct SymptomPolicy {
   std::string name;
+  // Keys this policy's compliance and avoidance draws; policyDrawKey of its
+  // kind and name, set by PolicyManager when the policy is added.
+  uint64_t draw_key = 0;
 
   // Span of simulation time this policy is in force for
   ActiveWindow window;
@@ -445,6 +448,9 @@ struct SymptomPolicy {
 
 struct TemporalPolicy {
   std::string name;
+  // Keys this policy's compliance and avoidance draws; policyDrawKey of its
+  // kind and name, set by PolicyManager when the policy is added.
+  uint64_t draw_key = 0;
 
   // Span of simulation time this policy is in force for
   ActiveWindow window;
@@ -651,7 +657,6 @@ class PolicyManager {
     frozen_states_.erase(frozen_it);
   }
 
-  // Clear all policies
   // Statistics
   size_t getSymptomPolicyCount() const { return symptom_policies_.size(); }
   size_t getTemporalPolicyCount() const { return temporal_policies_.size(); }
@@ -667,6 +672,7 @@ class PolicyManager {
     // A policy is its name within its kind (checkpoints match policies by it).
     rejectDuplicateNames(
         makePolicyRoster(symptom_policies_, temporal_policies_));
+    rejectDrawKeyCollisions();
 
     for (auto& p : symptom_policies_) p.resolve(world_, disease);
     for (auto& p : temporal_policies_) p.resolve(world_);
@@ -759,6 +765,11 @@ class PolicyManager {
         policies[kMaxPoliciesPerKind].name + "' would never take effect");
   }
 
+  // Two policies sharing a draw key would draw alike for every Person. Names are
+  // unique per kind and the kind is hashed in, so only a hash collision does
+  // this; refuse it, naming both, rather than run with correlated draws.
+  void rejectDrawKeyCollisions() const;
+
   // The part of a policy decision that is a pure question: does this action
   // reach this Person's activity, at this slot's venue type, unexempted?
   // Shared by getOverride and suppressesParticipation so the gate ordering and
@@ -772,14 +783,14 @@ class PolicyManager {
   // reaches only the venues its metric has closed. That is one bit lookup, made
   // after the activity gate and before the venue type gate and the exemptions,
   // and it applies to everyone scheduled at a closed venue who is not exempt.
-  // A voluntary trigger (draw_index names the Policy in the draw) asks instead
+  // A voluntary trigger (draw_key names the Policy in the draw) asks instead
   // whether this person's decision unit avoids the venue.
   template <typename SlotVenueTypeResolver>
   bool actionApplies(const PolicyAction& action, const Person& person,
                      int16_t activity_index,
                      SlotVenueTypeResolver&& resolve_slot_venue_type,
                      const Person* partner, const PolicyTrigger* slot_trigger,
-                     VenueId slot_venue_id, uint32_t draw_index) const {
+                     VenueId slot_venue_id, uint64_t draw_key) const {
     if (!action.has_location_override) return false;
     action.throwIfVenueGateUnresolved();
 
@@ -787,7 +798,7 @@ class PolicyManager {
 
     if (slot_trigger) {
       if (slot_trigger->voluntary()) {
-        if (!avoids(*slot_trigger, person, slot_venue_id, draw_index))
+        if (!avoids(*slot_trigger, person, slot_venue_id, draw_key))
           return false;
       } else if (!unitClosedAt(*slot_trigger, slot_venue_id)) {
         return false;
@@ -815,7 +826,7 @@ class PolicyManager {
   // unit. Throws when a shared decision unit finds the person with other than
   // exactly one such venue; checkDecisionUnits rules that out at startup.
   bool avoids(const PolicyTrigger& trigger, const Person& person,
-              VenueId slot_venue_id, uint32_t draw_index) const;
+              VenueId slot_venue_id, uint64_t draw_key) const;
 
   // Helper: Get replacement location for a given activity name
   std::optional<PersonLocation> getReplacementLocation(

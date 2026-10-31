@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -16,17 +17,20 @@ namespace june {
 struct SymptomPolicy;
 struct TemporalPolicy;
 
-// Temporal policy i keys its compliance draw on i + this offset, so no
-// temporal key collides with a symptom policy's key (its index).
-inline constexpr uint32_t kTemporalComplianceIndexOffset =
-    static_cast<uint32_t>(kMaxPoliciesPerKind);
+// Key of every draw a policy makes: a hash of its kind and name, which is the
+// policy's identity across runs. Not its position, so adding, removing or
+// reordering other policies (allowed at resume) leaves its draws unchanged.
+// PolicyManager::resolveAll refuses two policies whose keys collide.
+inline uint64_t policyDrawKey(PolicyKind kind, const std::string& name) {
+  return hash_name(std::string(policyKindName(kind)) + ":" + name);
+}
 
 // Does this Person comply with a policy of this compliance rate? A pure draw:
 // SplitMix64 over (base_seed, person_id, compliance_key), no stored RNG state,
 // so the same triple always answers the same way. That is what lets a query
 // reach a verdict for an undecided Person without latching the decision.
 inline bool drawsCompliance(uint64_t base_seed, PersonId person_id,
-                            uint32_t compliance_key, double compliance_rate) {
+                            uint64_t compliance_key, double compliance_rate) {
   SplitMix64 rng(mix_seed(base_seed, person_id, compliance_key, 0xC0E1A9ULL));
   return uniform01(rng) < compliance_rate;
 }
@@ -78,13 +82,8 @@ class ApplicablePolicy {
   size_t index() const { return index_; }
   // Where the policy sits in the Person's set.
   size_t position() const { return position_; }
-  // Key of this Person's compliance draw on the policy, unique across kinds.
-  uint32_t complianceKey() const {
-    const auto key = static_cast<uint32_t>(index_);
-    return kPolicyKindOf<Policy> == PolicyKind::Temporal
-               ? key + kTemporalComplianceIndexOffset
-               : key;
-  }
+  // Key of this Person's compliance draw on the policy: its draw_key.
+  uint64_t complianceKey() const { return policy_->draw_key; }
 
   // Does the Person comply? The latched answer if decided, else a redraw that
   // stores nothing. The redraw is exactly what latch() would store, so a query

@@ -37,7 +37,8 @@ uint32_t ApplicablePolicySets::intern(const PolicyMask& symptom_mask,
                                policyKindName(static_cast<PolicyKind>(kind)) +
                                " policies; at most " +
                                std::to_string(kMaxApplicablePoliciesPerKind) +
-                               " of each kind may apply to one person");
+                               " of each kind may apply to one person "
+                               "(narrow applies_to or merge policies)");
   Entry entry;
   for (size_t kind = 0; kind < kPolicyKindCount; ++kind) {
     entry.indices[kind] = setBits(*masks[kind]);

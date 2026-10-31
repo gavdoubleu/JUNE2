@@ -509,7 +509,16 @@ policies:
   apply, the **first matching** policy wins — order them by
   specificity.
 - `override_activities: "*"` overrides everything.
-- `compliance_rate` is a sticky per-person decision for each policy.
+- `compliance_rate` is a sticky per-person decision for each policy. The
+  draw is keyed by the policy's kind and name, not its position, so
+  reordering, adding or removing other policies leaves it unchanged;
+  renaming the policy changes it.
+- Names must be unique within each kind.
+- Limits: at most 128 policies of each kind per run, and at most 32 of
+  each kind may apply to any one person. A person matching more (for
+  example, 33 temporal policies with no `applies_to`) stops the run at
+  startup with an error naming the person, kind and count. Narrow
+  `applies_to`, or merge policies, to stay under it.
 - `applies_to` uses the same selection grammar as everywhere else
   (`property`, `operator`, `value`).
 - Use `follow_up_policy` to chain policies (e.g. mild ⇒ severe).
@@ -1174,10 +1183,9 @@ start); the resumed run fills `[completed_day + 1, total_days)`. To run
   start undecided. A person held in place by a removed policy is released
   at resume. Rank 0 prints what was dropped, added or moved; nothing is
   printed when the list is unchanged.
-- A policy that moved position draws fresh compliance for people who had
-  not yet decided, because the draw is keyed by position. Those draws
-  differ from the ones an uninterrupted run would have made. Decisions
-  already taken are unaffected.
+- Draws are keyed by policy name, so a policy that only moved position
+  draws as it would have in an uninterrupted run. A new or renamed policy
+  draws afresh.
 - A checkpoint written by an older build (see `format_version` in its
   `manifest.yaml`) is refused, and the error names both versions. Start
   the run again from day 0.

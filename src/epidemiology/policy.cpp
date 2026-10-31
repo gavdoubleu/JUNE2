@@ -69,6 +69,8 @@ PolicyManager::PolicyManager(WorldState& world)
 
 void PolicyManager::addSymptomPolicy(const SymptomPolicy& policy) {
   symptom_policies_.push_back(policy);
+  symptom_policies_.back().draw_key =
+      policyDrawKey(PolicyKind::Symptom, policy.name);
   applicable_policies_.setLoadedCounts(symptom_policies_.size(),
                                        temporal_policies_.size());
   // A policy with a world scope threshold trigger starts off until the trigger
@@ -81,11 +83,30 @@ void PolicyManager::addSymptomPolicy(const SymptomPolicy& policy) {
 
 void PolicyManager::addTemporalPolicy(const TemporalPolicy& policy) {
   temporal_policies_.push_back(policy);
+  temporal_policies_.back().draw_key =
+      policyDrawKey(PolicyKind::Temporal, policy.name);
   applicable_policies_.setLoadedCounts(symptom_policies_.size(),
                                        temporal_policies_.size());
   if (policy.trigger)
     temporal_policies_.back().window.trigger_state =
         policy.trigger->holdsPolicy();
+}
+
+void PolicyManager::rejectDrawKeyCollisions() const {
+  std::unordered_map<uint64_t, std::string> owner_by_key;
+  auto claim = [&](PolicyKind kind, const auto& policy) {
+    const std::string owner =
+        std::string(policyKindName(kind)) + " policy '" + policy.name + "'";
+    const auto [it, inserted] = owner_by_key.emplace(policy.draw_key, owner);
+    if (!inserted)
+      throw std::runtime_error("PolicyManager: " + owner + " and " +
+                               it->second +
+                               " hash to the same draw key; rename one");
+  };
+  for (const auto& policy : symptom_policies_)
+    claim(PolicyKind::Symptom, policy);
+  for (const auto& policy : temporal_policies_)
+    claim(PolicyKind::Temporal, policy);
 }
 
 void PolicyManager::requireTriggerMetrics() {
@@ -188,7 +209,7 @@ void PolicyManager::rebuildResponseLevels() {
 }
 
 bool PolicyManager::avoids(const PolicyTrigger& trigger, const Person& person,
-                           VenueId slot_venue_id, uint32_t draw_index) const {
+                           VenueId slot_venue_id, uint64_t draw_key) const {
   double level = 0.0;
   VenueId unit = kInvalidVenueId;
   if (trigger.perUnit()) {
@@ -228,7 +249,7 @@ bool PolicyManager::avoids(const PolicyTrigger& trigger, const Person& person,
     key = venues[0].first;
   }
   SplitMix64 rng(mix_seed(applicable_policies_.baseSeed(),
-                          static_cast<uint64_t>(key), draw_index,
+                          static_cast<uint64_t>(key), draw_key,
                           kAvoidanceDrawTag));
   return level > uniform01(rng);
 }
@@ -451,8 +472,6 @@ PolicyManager::PolicyWindowBits PolicyManager::policyWindowBits(
 void PolicyManager::rebuildPersonTransmissionModifier(Person& person,
                                                       double current_time) {
   auto values = transmission_modifier_table_.get(0);
-  // complies(), not participates(): an effect on a voluntary policy still
-  // takes only the share of its applicable Persons its compliance rate draws.
   for (const auto& effect : transmission_effects_) {
     if (effect.scope != TransmissionEffectScope::Person) continue;
     if (effect.policy_kind == TransmissionPolicyKind::Temporal) {
@@ -802,8 +821,7 @@ void PolicyManager::precomputePolicyApplicability(std::vector<Person>& people) {
     if (person.is_dead) continue;
 
     PolicyMask symptom_mask;
-    for (size_t i = 0;
-         i < std::min(symptom_policies_.size(), kMaxPoliciesPerKind); ++i) {
+    for (size_t i = 0; i < symptom_policies_.size(); ++i) {
       const auto& policy = symptom_policies_[i];
       if (policy.appliesTo(person, &world_)) {
         symptom_mask.set(i);
@@ -811,8 +829,7 @@ void PolicyManager::precomputePolicyApplicability(std::vector<Person>& people) {
     }
 
     PolicyMask temporal_mask;
-    for (size_t i = 0;
-         i < std::min(temporal_policies_.size(), kMaxPoliciesPerKind); ++i) {
+    for (size_t i = 0; i < temporal_policies_.size(); ++i) {
       const auto& policy = temporal_policies_[i];
       if (policy.appliesTo(person, &world_)) {
         temporal_mask.set(i);

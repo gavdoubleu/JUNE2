@@ -19,8 +19,11 @@ namespace {
 template <typename Policy>
 std::vector<Policy> namedPolicies(size_t count) {
   std::vector<Policy> policies(count);
-  for (size_t index = 0; index < count; ++index)
+  for (size_t index = 0; index < count; ++index) {
     policies[index].name = "policy " + std::to_string(index);
+    policies[index].draw_key =
+        policyDrawKey(kPolicyKindOf<Policy>, policies[index].name);
+  }
   return policies;
 }
 
@@ -76,19 +79,30 @@ TEST_CASE("the walk yields a Person's applicable policies in ascending order") {
   CHECK(indices == std::vector<size_t>{5, 31, 64, 99});
 }
 
-TEST_CASE("a compliance key never collides across policy kinds") {
+TEST_CASE("a compliance key is the policy's draw key, not its position") {
   ApplicablePolicies applicable_policies = allLoaded();
-  const auto symptom_policies = namedPolicies<SymptomPolicy>(10);
-  const auto temporal_policies = namedPolicies<TemporalPolicy>(10);
+  auto symptom_policies = namedPolicies<SymptomPolicy>(10);
+  auto temporal_policies = namedPolicies<TemporalPolicy>(10);
+  symptom_policies[3].draw_key = 11;
+  temporal_policies[3].draw_key = 22;
   Person person;
   importApplicable(applicable_policies, person, maskOf({3}), maskOf({3}));
 
   for (const auto& applicable :
        applicable_policies.walk(person, symptom_policies))
-    CHECK(applicable.complianceKey() == 3);
+    CHECK(applicable.complianceKey() == 11);
   for (const auto& applicable :
        applicable_policies.walk(person, temporal_policies))
-    CHECK(applicable.complianceKey() == 3 + kTemporalComplianceIndexOffset);
+    CHECK(applicable.complianceKey() == 22);
+}
+
+TEST_CASE("a draw key hashes kind and name") {
+  CHECK(policyDrawKey(PolicyKind::Symptom, "a") ==
+        policyDrawKey(PolicyKind::Symptom, "a"));
+  CHECK(policyDrawKey(PolicyKind::Symptom, "a") !=
+        policyDrawKey(PolicyKind::Temporal, "a"));
+  CHECK(policyDrawKey(PolicyKind::Symptom, "a") !=
+        policyDrawKey(PolicyKind::Symptom, "b"));
 }
 
 TEST_CASE("looking up one policy finds it only inside the Person's set") {
@@ -105,7 +119,6 @@ TEST_CASE("looking up one policy finds it only inside the Person's set") {
   REQUIRE(found.has_value());
   CHECK(&found->policy() == &temporal_policies[7]);
   CHECK(found->index() == 7);
-  CHECK(found->complianceKey() == 7 + kTemporalComplianceIndexOffset);
 
   CHECK_FALSE(walk.find(3).has_value());
 }

@@ -116,6 +116,21 @@ TEST_CASE("the query walk draws compliance on the PolicyManager's base seed") {
   }
 }
 
+TEST_CASE("an added policy draws on its kind and name") {
+  WorldState world;
+  PolicyManager manager(world);
+  SymptomPolicy symptom_policy;
+  symptom_policy.name = "isolate";
+  manager.addSymptomPolicy(symptom_policy);
+  TemporalPolicy temporal_policy;
+  temporal_policy.name = "isolate";
+  manager.addTemporalPolicy(temporal_policy);
+  CHECK(manager.getSymptomPolicies()[0].draw_key ==
+        policyDrawKey(PolicyKind::Symptom, "isolate"));
+  CHECK(manager.getTemporalPolicies()[0].draw_key ==
+        policyDrawKey(PolicyKind::Temporal, "isolate"));
+}
+
 TEST_CASE("a relocating walk latches a decision once") {
   WorldState world;
   PolicyManager manager(world);

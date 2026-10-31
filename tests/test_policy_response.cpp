@@ -134,12 +134,14 @@ const std::string kHousehold = "{shared_venue: residence}";
 const std::string kDeaths = "{metric: deaths, weight: 0.1}";
 
 // The draw a unit is held to, written out from the specification: a pure
-// function of the base seed, the unit key and the policy index. The temporal
-// policy at position i draws with index i + kTemporalOffset.
-constexpr uint32_t kTemporalOffset = kTemporalComplianceIndexOffset;
+// function of the base seed, the unit key and the policy's draw key, a hash of
+// its kind and name.
+uint64_t temporalKey(const std::string& name) {
+  return policyDrawKey(PolicyKind::Temporal, name);
+}
 
-bool expectedAvoid(uint64_t key, uint32_t draw_index, double level) {
-  SplitMix64 rng(mix_seed(kSeed, key, draw_index, 0xA701D4ULL));
+bool expectedAvoid(uint64_t key, uint64_t draw_key, double level) {
+  SplitMix64 rng(mix_seed(kSeed, key, draw_key, 0xA701D4ULL));
   return level > uniform01(rng);
 }
 
@@ -496,7 +498,7 @@ TEST_CASE(
     int avoiding = 0;
     for (int h = 0; h < shape.households; ++h) {
       const PersonId kid = shape.kid(h, 0);
-      const bool expected = expectedAvoid(kid, kTemporalOffset, level);
+      const bool expected = expectedAvoid(kid, temporalKey("keep_home"), level);
       CHECK(r.avoids(kid, shape.classroomOf(h, 0), time) == expected);
       avoiding += expected;
     }
@@ -516,7 +518,7 @@ TEST_CASE("Response - a shared decision unit draws once per venue") {
   const double level = 0.0 + 0.1 * 4.0;
   for (int h = 0; h < shape.households; ++h) {
     const bool expected =
-        expectedAvoid(static_cast<uint64_t>(h), kTemporalOffset, level);
+        expectedAvoid(static_cast<uint64_t>(h), temporalKey("keep_home"), level);
     for (int j = 0; j < shape.kids; ++j) {
       INFO("household " << h << " child " << j);
       CHECK(r.avoids(shape.kid(h, j), shape.classroomOf(h, j), 1.0) ==
@@ -571,6 +573,30 @@ TEST_CASE("Response - two policies draw independently") {
   const std::string trigger = response(kDeaths, kHousehold);
   Responding first(makeSchoolWorld(shape),
                    temporalFile(keepHome("keep_home", trigger)));
+  Responding second(makeSchoolWorld(shape),
+                    temporalFile(keepHome("keep_home_too", trigger)));
+  first.endDay(0, 5);
+  second.endDay(0, 5);
+  const auto a = first.households(shape, 1.0);
+  const auto b = second.households(shape, 1.0);
+  for (int h = 0; h < shape.households; ++h)
+    CHECK(b[static_cast<size_t>(h)] ==
+          expectedAvoid(static_cast<uint64_t>(h), temporalKey("keep_home_too"),
+                        0.5));
+
+  int both = 0;
+  for (size_t i = 0; i < a.size(); ++i) both += a[i] && b[i];
+  // Independent halves overlap in a quarter: 250 of 1000, standard deviation
+  // about 14. Identical draws would overlap in 500.
+  CHECK(std::abs(both - 250) < 5 * 14);
+  CHECK(a != b);
+}
+
+TEST_CASE("Response - a policy's draws do not depend on its position") {
+  const Shape shape{1000, 1, 8};
+  const std::string trigger = response(kDeaths, kHousehold);
+  Responding first(makeSchoolWorld(shape),
+                   temporalFile(keepHome("keep_home", trigger)));
   // The same policy listed second, behind one that nobody complies with.
   Responding second(
       makeSchoolWorld(shape),
@@ -580,18 +606,7 @@ TEST_CASE("Response - two policies draw independently") {
                    keepHome("keep_home", trigger)));
   first.endDay(0, 5);
   second.endDay(0, 5);
-  const auto a = first.households(shape, 1.0);
-  const auto b = second.households(shape, 1.0);
-  for (int h = 0; h < shape.households; ++h)
-    CHECK(b[static_cast<size_t>(h)] ==
-          expectedAvoid(static_cast<uint64_t>(h), kTemporalOffset + 1, 0.5));
-
-  int both = 0;
-  for (size_t i = 0; i < a.size(); ++i) both += a[i] && b[i];
-  // Independent halves overlap in a quarter: 250 of 1000, standard deviation
-  // about 14. Identical draws would overlap in 500.
-  CHECK(std::abs(both - 250) < 5 * 14);
-  CHECK(a != b);
+  CHECK(first.households(shape, 1.0) == second.households(shape, 1.0));
 }
 
 TEST_CASE("Response - an exempt person and a non exempt one share a unit") {
@@ -611,7 +626,7 @@ TEST_CASE("Response - an exempt person and a non exempt one share a unit") {
   int avoiding_units = 0;
   for (int h = 0; h < shape.households; ++h) {
     const bool unit_avoids =
-        expectedAvoid(static_cast<uint64_t>(h), kTemporalOffset, 0.5);
+        expectedAvoid(static_cast<uint64_t>(h), temporalKey("keep_home"), 0.5);
     avoiding_units += unit_avoids;
     CHECK(r.avoids(shape.kid(h, 0), shape.classroomOf(h, 0), 1.0) ==
           unit_avoids);
@@ -703,7 +718,7 @@ TEST_CASE("Response - a death count at a venue keeps that venue's level") {
     const VenueId room = shape.classroomOf(h, 0);
     const bool expected =
         room == first &&
-        expectedAvoid(static_cast<uint64_t>(h), kTemporalOffset, 0.5);
+        expectedAvoid(static_cast<uint64_t>(h), temporalKey("keep_home"), 0.5);
     CHECK(r.avoids(shape.kid(h, 0), room, 21.0) == expected);
   }
 }
@@ -880,7 +895,9 @@ TEST_CASE("Response - symptomatic people stay home more as deaths rise") {
     int expected = 0;
     for (int h = 0; h < shape.households; h += 2)
       expected +=
-          expectedAvoid(static_cast<uint64_t>(shape.kid(h, 0)), 0, level);
+          expectedAvoid(static_cast<uint64_t>(shape.kid(h, 0)),
+                        policyDrawKey(PolicyKind::Symptom, "sick_stay_home"),
+                        level);
     return expected;
   };
 
