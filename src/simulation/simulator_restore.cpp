@@ -420,7 +420,8 @@ PolicyRoster readStoredRoster(const fs::path& cp) {
     if (H5Lexists(f.getId(), dataset.c_str(), H5P_DEFAULT) <= 0) {
       throw std::runtime_error("checkpoint dataset '" + dataset +
                                "' is missing (corrupt or partially written "
-                               "checkpoint) in " + (cp / "state.h5").string());
+                               "checkpoint) in " +
+                               (cp / "state.h5").string());
     }
     return readStrs(f, dataset);
   };

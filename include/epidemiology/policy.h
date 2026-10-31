@@ -798,9 +798,9 @@ class PolicyManager {
         policies[kMaxPoliciesPerKind].name + "' would never take effect");
   }
 
-  // Two policies sharing a draw key would draw alike for every Person. Names are
-  // unique per kind and the kind is hashed in, so only a hash collision does
-  // this; refuse it, naming both, rather than run with correlated draws.
+  // Two policies sharing a draw key would draw alike for every Person. Names
+  // are unique per kind and the kind is hashed in, so only a hash collision
+  // does this; refuse it, naming both, rather than run with correlated draws.
   void rejectDrawKeyCollisions() const;
 
   // The part of a policy decision that is a pure question: does this action

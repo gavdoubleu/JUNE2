@@ -60,8 +60,7 @@ void eachTriggered(Symptom& symptom_policies, Temporal& temporal_policies,
 
 }  // namespace
 
-PolicyManager::PolicyManager(WorldState& world)
-    : world_(world) {}
+PolicyManager::PolicyManager(WorldState& world) : world_(world) {}
 
 void PolicyManager::addSymptomPolicy(const SymptomPolicy& policy) {
   symptom_policies_.push_back(policy);
