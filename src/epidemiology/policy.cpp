@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <unordered_map>
 
 #include "epidemiology/applicable_policies/applicable_policy_walk.h"
 #include "epidemiology/disease.h"
@@ -64,10 +65,12 @@ void eachTriggered(Symptom& symptom_policies, Temporal& temporal_policies,
 }  // namespace
 
 PolicyManager::PolicyManager(WorldState& world)
-    : world_(world), base_seed_(0) {}
+    : world_(world) {}
 
 void PolicyManager::addSymptomPolicy(const SymptomPolicy& policy) {
   symptom_policies_.push_back(policy);
+  applicable_policies_.setLoadedCounts(symptom_policies_.size(),
+                                       temporal_policies_.size());
   // A policy with a world scope threshold trigger starts off until the trigger
   // closes. One triggered per venue, or a voluntary one, is in force from the
   // start: the closed venues, or the avoidance level, decide where it acts.
@@ -78,6 +81,8 @@ void PolicyManager::addSymptomPolicy(const SymptomPolicy& policy) {
 
 void PolicyManager::addTemporalPolicy(const TemporalPolicy& policy) {
   temporal_policies_.push_back(policy);
+  applicable_policies_.setLoadedCounts(symptom_policies_.size(),
+                                       temporal_policies_.size());
   if (policy.trigger)
     temporal_policies_.back().window.trigger_state =
         policy.trigger->holdsPolicy();
@@ -222,7 +227,8 @@ bool PolicyManager::avoids(const PolicyTrigger& trigger, const Person& person,
     }
     key = venues[0].first;
   }
-  SplitMix64 rng(mix_seed(base_seed_, static_cast<uint64_t>(key), draw_index,
+  SplitMix64 rng(mix_seed(applicable_policies_.baseSeed(),
+                          static_cast<uint64_t>(key), draw_index,
                           kAvoidanceDrawTag));
   return level > uniform01(rng);
 }
@@ -334,30 +340,36 @@ void PolicyManager::restoreTriggerStates(
            "]. A trigger's state cannot be rebuilt; resume with the same "
            "triggered Policies.");
   };
-  if (stored.size() != current.size()) wrongSet();
-  for (size_t i = 0; i < stored.size(); ++i) {
-    if (stored[i].key != current[i].key) wrongSet();
+  // Matched by key, so triggered policies may be reordered between runs.
+  std::unordered_map<std::string, const TriggerState*> stored_by_key;
+  for (const auto& state : stored)
+    if (!stored_by_key.emplace(state.key, &state).second) wrongSet();
+  if (stored_by_key.size() != current.size()) wrongSet();
+  for (const auto& now : current) {
+    const auto found = stored_by_key.find(now.key);
+    if (found == stored_by_key.end()) wrongSet();
+    const TriggerState& was = *found->second;
     // The same name counted per unit in one run and as a world total in the
     // other is not the same trigger, whatever the key says. Nor is a Policy
     // read as a threshold in one run and as a response in the other.
-    if (stored[i].scope != current[i].scope) {
-      refuse("'" + stored[i].key +
+    if (was.scope != now.scope) {
+      refuse("'" + was.key +
              "' reads a metric of another scope than the checkpoint's. A "
              "trigger's state cannot be rebuilt under another scope; resume "
              "with the same metrics.");
     }
-    if (stored[i].voluntary != current[i].voluntary) {
-      refuse("'" + stored[i].key + "' is " +
-             (stored[i].voluntary ? "a voluntary response" : "a threshold") +
+    if (was.voluntary != now.voluntary) {
+      refuse("'" + was.key + "' is " +
+             (was.voluntary ? "a voluntary response" : "a threshold") +
              " trigger in the checkpoint and " +
-             (current[i].voluntary ? "a voluntary response" : "a threshold") +
+             (now.voluntary ? "a voluntary response" : "a threshold") +
              " trigger in this run. Resume with the same triggered Policies.");
     }
   }
-  size_t next = 0;
   eachTriggered(symptom_policies_, temporal_policies_,
-                [&](const std::string&, auto& policy) {
-                  const TriggerState& state = stored[next++];
+                [&](const std::string& kind, auto& policy) {
+                  const TriggerState& state =
+                      *stored_by_key.at(kind + "/" + policy.name);
                   static_cast<TriggerCell&>(*policy.trigger) = state.cell;
                   policy.trigger->restoreUnits(state.units);
                   policy.window.trigger_state = policy.trigger->holdsPolicy();
@@ -432,8 +444,7 @@ PolicyManager::PolicyWindowBits PolicyManager::policyWindowBits(
     if (temporal_policies_[i].window.contains(current_time))
       bits.temporal.set(i);
   for (size_t i = 0; i < symptom_policies_.size(); ++i)
-    if (symptom_policies_[i].window.contains(current_time))
-      bits.symptom.set(i);
+    if (symptom_policies_[i].window.contains(current_time)) bits.symptom.set(i);
   return bits;
 }
 
@@ -446,16 +457,14 @@ void PolicyManager::rebuildPersonTransmissionModifier(Person& person,
     if (effect.scope != TransmissionEffectScope::Person) continue;
     if (effect.policy_kind == TransmissionPolicyKind::Temporal) {
       const auto applicable =
-          walkApplicablePolicies(applicable_policy_sets_, person,
-                                 temporal_policies_, base_seed_)
+          applicable_policies_.walk(person, temporal_policies_)
               .find(effect.policy_index);
       if (!applicable || !applicable->policy().window.contains(current_time) ||
           !applicable->complies())
         continue;
     } else {
       const auto applicable =
-          walkApplicablePolicies(applicable_policy_sets_, person,
-                                 symptom_policies_, base_seed_)
+          applicable_policies_.walk(person, symptom_policies_)
               .find(effect.policy_index);
       if (!applicable || !applicable->policy().window.contains(current_time) ||
           !person.infection ||
@@ -609,8 +618,8 @@ std::optional<PersonLocation> PolicyManager::getOverride(
     uint16_t current_symptom_id =
         person.infection->getTrajectory().getCurrentSymptomId(current_time);
 
-    for (const auto& applicable : walkApplicablePolicies(
-             applicable_policy_sets_, person, symptom_policies_, base_seed_)) {
+    for (const auto& applicable :
+         applicable_policies_.walk(person, symptom_policies_)) {
       const size_t i = applicable.index();
       const auto& policy = applicable.policy();
 
@@ -699,12 +708,12 @@ std::optional<PersonLocation> PolicyManager::getOverride(
                                     policy.action.replacement_activity_index);
     }
   } else {
-    person.sticky_compliance.clear(PolicyKind::Symptom);
+    applicable_policies_.clear(person, PolicyKind::Symptom);
   }
 
   // Priority 2: temporal policies (lockdowns, etc.)
-  for (const auto& applicable : walkApplicablePolicies(
-           applicable_policy_sets_, person, temporal_policies_, base_seed_)) {
+  for (const auto& applicable :
+       applicable_policies_.walk(person, temporal_policies_)) {
     const auto& policy = applicable.policy();
 
     bool is_active = policy.window.contains(current_time);
@@ -754,8 +763,8 @@ bool PolicyManager::suppressesParticipation(
     uint16_t current_symptom_id =
         person.infection->getTrajectory().getCurrentSymptomId(current_time);
 
-    for (const auto& applicable : walkApplicablePolicies(
-             applicable_policy_sets_, person, symptom_policies_, base_seed_)) {
+    for (const auto& applicable :
+         applicable_policies_.walk(person, symptom_policies_)) {
       const auto& policy = applicable.policy();
       if (!policy.window.contains(current_time)) continue;
       if (!policy.triggeredBy(current_symptom_id)) continue;
@@ -771,8 +780,8 @@ bool PolicyManager::suppressesParticipation(
   }
 
   // Priority 2: temporal policies (lockdowns, etc.)
-  for (const auto& applicable : walkApplicablePolicies(
-           applicable_policy_sets_, person, temporal_policies_, base_seed_)) {
+  for (const auto& applicable :
+       applicable_policies_.walk(person, temporal_policies_)) {
     const auto& policy = applicable.policy();
     if (!policy.window.contains(current_time)) continue;
 
@@ -810,76 +819,10 @@ void PolicyManager::precomputePolicyApplicability(std::vector<Person>& people) {
       }
     }
 
-    setApplicablePolicies(person, symptom_mask, temporal_mask);
-  }
-}
-
-void PolicyManager::setApplicablePolicies(Person& person,
-                                          const PolicyMask& symptom_mask,
-                                          const PolicyMask& temporal_mask) {
-  // The walks index policies by every position in the set unchecked, so an
-  // index past the loaded policies is refused here.
-  const auto refuseUnloaded = [&](const PolicyMask& mask, size_t policy_count,
-                                  const char* kind) {
-    if ((mask >> policy_count).none()) return;
-    throw std::runtime_error("person " + std::to_string(person.id) + ": " +
-                             kind + " policy mask names a policy past the " +
-                             std::to_string(policy_count) + " loaded");
-  };
-  refuseUnloaded(symptom_mask, symptom_policies_.size(), "symptom");
-  refuseUnloaded(temporal_mask, temporal_policies_.size(), "temporal");
-
-  // Decision state is held by set position, so carry it across the change of
-  // set by global index, dropping policies that no longer apply.
-  const bool has_policy_state = !person.sticky_compliance.empty();
-  PolicyMask decided[kPolicyKindCount];
-  PolicyMask participating[kPolicyKindCount];
-  const PolicyMask* applicable[kPolicyKindCount] = {&symptom_mask,
-                                                    &temporal_mask};
-  constexpr PolicyKind kinds[kPolicyKindCount] = {PolicyKind::Symptom,
-                                                  PolicyKind::Temporal};
-  if (has_policy_state)
-    for (size_t kind = 0; kind < kPolicyKindCount; ++kind) {
-      decided[kind] = decidedPolicies(person, kinds[kind]) & *applicable[kind];
-      participating[kind] =
-          participatingPolicies(person, kinds[kind]) & *applicable[kind];
-    }
-  try {
-    person.applicable_policy_set_id =
-        applicable_policy_sets_.intern(symptom_mask, temporal_mask);
-  } catch (const std::runtime_error& error) {
-    throw std::runtime_error("person " + std::to_string(person.id) + ": " +
-                             error.what());
-  }
-  if (has_policy_state)
-    for (size_t kind = 0; kind < kPolicyKindCount; ++kind)
-      setPolicyState(person, kinds[kind], decided[kind], participating[kind]);
-}
-
-void PolicyManager::setApplicablePolicies(Person& person, PolicyKind kind,
-                                          const PolicyMask& mask) {
-  if (kind == PolicyKind::Symptom)
-    setApplicablePolicies(person, mask,
-                          applicableMask(person, PolicyKind::Temporal));
-  else
-    setApplicablePolicies(person, applicableMask(person, PolicyKind::Symptom),
-                          mask);
-}
-
-void PolicyManager::setPolicyState(Person& person, PolicyKind kind,
-                                   const PolicyMask& decided_mask,
-                                   const PolicyMask& participating_mask) {
-  const uint32_t set_id = person.applicable_policy_set_id;
-  try {
-    StickyCompliance& sticky = person.sticky_compliance;
-    const size_t slot = StickyCompliance::slot(kind);
-    sticky.decided_[slot] =
-        applicable_policy_sets_.compact(set_id, kind, decided_mask);
-    sticky.participating_[slot] =
-        applicable_policy_sets_.compact(set_id, kind, participating_mask);
-  } catch (const std::runtime_error& error) {
-    throw std::runtime_error("person " + std::to_string(person.id) + ": " +
-                             error.what());
+    ApplicablePolicyMasks masks;
+    masks.symptom.applicable = symptom_mask;
+    masks.temporal.applicable = temporal_mask;
+    applicable_policies_.importState(person, masks);
   }
 }
 

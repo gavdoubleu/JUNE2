@@ -12,6 +12,7 @@
 #include "epidemiology/applicable_policies/applicable_policy_walk.h"
 #include "epidemiology/policy.h"
 #include "mpi_test_helpers.h"
+#include "policy_test_helpers.h"
 #include "venue_scope_fixtures.h"
 
 using namespace june;
@@ -118,7 +119,7 @@ TEST_CASE("Trigger - venue closures do not depend on rank count") {
   pm.requireTriggerMetrics();
   pm.observedMetrics().buildVenueParents(world);
   for (Person& p : world.people)
-    pm.setApplicablePolicies(p, PolicyKind::Temporal, 1);
+    policy_test::importApplicable(pm, p, PolicyMask{}, 1);
   pm.resolveAll(disease);
 
   // Who is infected on each day. The staff member registered to the school
@@ -194,7 +195,7 @@ TEST_CASE("Response - levels and verdicts do not depend on rank count") {
   pm.requireTriggerMetrics();
   pm.observedMetrics().buildVenueParents(world);
   for (Person& p : world.people)
-    pm.setApplicablePolicies(p, PolicyKind::Temporal, 1);
+    policy_test::importApplicable(pm, p, PolicyMask{}, 1);
   pm.resolveAll(disease);
 
   // Class A has two cases (pupil A and the person in both classes), class B

@@ -485,6 +485,43 @@ TEST_CASE("Trigger - restoring a different set of triggers is refused") {
   }
 }
 
+TEST_CASE("Trigger - reordered triggered policies restore by name") {
+  const auto policy = [](const std::string& name, int activate_at) {
+    return "    - name: " + name +
+           "\n"
+           "      override_activities: [leisure]\n"
+           "      replacement: residence\n"
+           "      compliance_rate: 1.0\n"
+           "      trigger: {metric: deaths, activate_at: " +
+           std::to_string(activate_at) + ", calm_days: 5}\n";
+  };
+  const std::string header = kMetrics + "policies:\n  temporal_policies:\n";
+  // TriggeredWorld makes only the first temporal policy applicable.
+  TriggeredWorld before(header + policy("closes", 3) + policy("stays_open", 100));
+  applyEveryPolicy(before.pm, before.world);
+  before.endDay(0, 3);
+  const auto states = before.pm.triggerStates();
+  REQUIRE(states.size() == 2);
+  REQUIRE(states[0].key == "temporal/closes");
+  REQUIRE(states[0].cell.closed);
+  REQUIRE_FALSE(states[1].cell.closed);
+  CHECK(before.overridden(1.0));
+
+  TriggeredWorld after(header + policy("stays_open", 100) + policy("closes", 3));
+  applyEveryPolicy(after.pm, after.world);
+  after.pm.observedMetrics().restoreSnapshot(
+      before.pm.observedMetrics().snapshot());
+  after.pm.restoreTriggerStates(states);
+  const auto restored = after.pm.triggerStates();
+  REQUIRE(restored.size() == 2);
+  CHECK(restored[0].key == "temporal/stays_open");
+  CHECK_FALSE(restored[0].cell.closed);
+  CHECK(restored[1].key == "temporal/closes");
+  CHECK(restored[1].cell.closed);
+  CHECK(restored[1].cell.anchor_day == states[0].cell.anchor_day);
+  CHECK(after.overridden(1.0));
+}
+
 // ---------------------------------------------------------------------------
 // Triggers counted per venue and per parent venue
 // ---------------------------------------------------------------------------

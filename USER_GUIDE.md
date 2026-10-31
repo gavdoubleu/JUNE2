@@ -1160,13 +1160,27 @@ start); the resumed run fills `[completed_day + 1, total_days)`. To run
 - A checkpoint stores the running totals of every metric a trigger reads
   and the state of every trigger. A cumulative total cannot be rebuilt, so
   a resume must use the same triggered policies (same kind, name and form,
-  counted over the same scope) and read the same set of metrics. Anything
-  else stops the run with an error that lists both sets. Declared metrics
-  that no trigger reads are not stored and may change freely.
+  counted over the same scope, in any order) and read the same set of
+  metrics. Anything else stops the run with an error that lists both sets.
+  Declared metrics that no trigger reads are not stored and may change
+  freely.
+- Untriggered policies may change between checkpoint and resume: fewer,
+  more, reordered, or with edited selection criteria. Policies are
+  matched by name within their kind (symptom or temporal), which is why
+  names must be unique per kind (a duplicate is refused at load, on any
+  run). Who each policy applies to is recomputed from the current config.
+  A person's compliance decision carries over when the policy still
+  exists and still applies to them; otherwise it is dropped. New policies
+  start undecided. A person held in place by a removed policy is released
+  at resume. Rank 0 prints what was dropped, added or moved; nothing is
+  printed when the list is unchanged.
+- A policy that moved position draws fresh compliance for people who had
+  not yet decided, because the draw is keyed by position. Those draws
+  differ from the ones an uninterrupted run would have made. Decisions
+  already taken are unaffected.
 - A checkpoint written by an older build (see `format_version` in its
-  `manifest.yaml`) may be refused by a run that uses metrics or triggers,
-  and the error says why. Resume without the triggers, or start the run
-  again from day 0.
+  `manifest.yaml`) is refused, and the error names both versions. Start
+  the run again from day 0.
 
 ### 17.5 Verifying determinism
 

@@ -17,6 +17,7 @@
 #include "doctest.h"
 #include "epidemiology/disease.h"
 #include "loaders/config_loader.h"
+#include "policy_test_helpers.h"
 #include "simulation/follow_bindings.h"
 #include "test_utils.h"
 #include "transmission_fixtures.h"
@@ -591,8 +592,8 @@ void addClosurePolicy(PolicyManager& policy_manager, WorldState& world,
   policy.resolve(world);
   policy_manager.addTemporalPolicy(policy);
   // Normally set by precomputePolicyApplicability.
-  policy_manager.setApplicablePolicies(world.people[0], PolicyKind::Temporal,
-                                       1);
+  policy_test::importApplicable(policy_manager, world.people[0], PolicyMask{},
+                                1);
 }
 
 }  // namespace
@@ -700,7 +701,7 @@ TEST_CASE("the mirror gate pins nobody at the host's venue") {
   follower.infection = std::make_unique<Infection>(&disease, 0.0, &follower, 42,
                                                    kNoTransmissionContext,
                                                    nullptr, "household", 0);
-  policy_manager.setApplicablePolicies(follower, PolicyKind::Symptom, 1);
+  policy_test::importApplicable(policy_manager, follower, 1, PolicyMask{});
   constexpr int16_t kHoppedSchedule = 3;
   constexpr int16_t kReturnSchedule = 1;
   follower.schedule_hop = ScheduleHop::begin(kHoppedSchedule, kReturnSchedule);

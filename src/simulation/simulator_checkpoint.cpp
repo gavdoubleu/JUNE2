@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include "epidemiology/policy_roster/policy_roster.h"
+#include "simulation/checkpoint_datasets/chunked_dataset.h"
 #include "simulation/checkpoint_manifest/checkpoint_manifest.h"
 #include "simulation/checkpoint_masks/policy_mask_io.h"
 #include "simulation/simulator.h"
@@ -39,24 +41,13 @@ std::string ymd(const std::string& iso) {  // "YYYY-MM-DD" -> "YYYYMMDD"
   return o;
 }
 
-// Create + write a 1-D numeric dataset. Handles the empty case (no chunk /
-// no filter, which HDF5 requires for zero-extent datasets).
+// Create + write a 1-D numeric dataset.
 template <typename T>
 void writeVec(H5::H5File& f, const std::string& name,
               const std::vector<T>& data, const H5::PredType& t,
               int compression) {
-  hsize_t dims[1] = {data.size()};
-  H5::DataSpace space(1, dims);
-  if (data.empty()) {
-    f.createDataSet(name, t, space);
-    return;
-  }
-  H5::DSetCreatPropList plist;
-  hsize_t chunk[1] = {std::min<hsize_t>(dims[0], 100000)};
-  plist.setChunk(1, chunk);
-  if (compression > 0) plist.setDeflate(compression);
-  H5::DataSet ds = f.createDataSet(name, t, space, plist);
-  ds.write(data.data(), t);
+  const hsize_t dims[1] = {data.size()};
+  writeChunkedDataSet(f, name, data.data(), t, dims, compression);
 }
 
 void writeStrs(H5::H5File& f, const std::string& name,
@@ -96,15 +87,16 @@ std::vector<uint32_t> buildOwnedPersonOrder(const std::vector<Person>& people) {
 // the embedded partition_index over contiguous geo_unit runs (so restore can
 // selectively read by geo without a full population scan). Rows follow `ord`
 // (sorted by geo_unit_id, person_id) so the run-based index aligns.
-// Applicable-policy set ids are rank-local, so the applicable, decided and
-// participating policies are written as global-index masks.
+// Applicable-policy set ids are rank-local, so the decided and participating
+// policies are written as global-index masks. Applicable policies are not
+// written: restore recomputes them from the current config.
 void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
                           const std::vector<Person>& people,
                           const PolicyManager& policy_manager, int comp) {
   std::vector<int32_t> ids, geo, hop, ret, tslot, hop_rep;
   std::vector<double> imm_l, imm_a, imm_w, death_t;
   std::vector<uint8_t> dead;
-  std::vector<PolicyMask> m_as, m_at, m_ps, m_pt, m_ds, m_dt;
+  std::vector<PolicyMask> m_ps, m_pt, m_ds, m_dt;
   ids.reserve(ord.size());
   for (uint32_t idx : ord) {
     const Person& p = people[idx];
@@ -115,14 +107,12 @@ void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
     imm_w.push_back(p.immunity.natural_waning_rate);
     dead.push_back(p.is_dead ? 1 : 0);
     death_t.push_back(p.death_time);
-    m_as.push_back(policy_manager.applicableMask(p, PolicyKind::Symptom));
-    m_at.push_back(policy_manager.applicableMask(p, PolicyKind::Temporal));
-    m_ps.push_back(
-        policy_manager.participatingPolicies(p, PolicyKind::Symptom));
-    m_pt.push_back(
-        policy_manager.participatingPolicies(p, PolicyKind::Temporal));
-    m_ds.push_back(policy_manager.decidedPolicies(p, PolicyKind::Symptom));
-    m_dt.push_back(policy_manager.decidedPolicies(p, PolicyKind::Temporal));
+    const ApplicablePolicyMasks policy_masks =
+        policy_manager.applicablePolicies().exportState(p);
+    m_ps.push_back(policy_masks.symptom.participating);
+    m_pt.push_back(policy_masks.temporal.participating);
+    m_ds.push_back(policy_masks.symptom.decided);
+    m_dt.push_back(policy_masks.temporal.decided);
     hop.push_back(p.schedule_hop.hopped_schedule_id);
     ret.push_back(p.schedule_hop.return_schedule_id);
     tslot.push_back(p.schedule_hop.temp_slot_progress);
@@ -151,8 +141,6 @@ void writeShardPopulation(H5::H5File& f, const std::vector<uint32_t>& ord,
   writeVec(f, "/population/immunity_natural_waning_rate", imm_w, F64, comp);
   writeVec(f, "/population/is_dead", dead, U8, comp);
   writeVec(f, "/population/death_time", death_t, F64, comp);
-  writeMasks(f, "/population/applicable_symptom_policy_mask", m_as, comp);
-  writeMasks(f, "/population/applicable_temporal_policy_mask", m_at, comp);
   writeMasks(f, "/population/active_symptom_policy_participation", m_ps, comp);
   writeMasks(f, "/population/active_temporal_policy_participation", m_pt, comp);
   writeMasks(f, "/population/symptom_policy_decisions", m_ds, comp);
@@ -565,6 +553,15 @@ void Simulator::writeCheckpointStateFile(const fs::path& tmp, int completed_day,
            std::vector<uint32_t>{config_.simulation.random_seed},
            H5::PredType::NATIVE_UINT32, 0);
   writeVec(f, "/scalars/day_type_counts", day_type_counts_, I32, 0);
+
+  // Policy names per kind in global-index order, so restore can match the
+  // stored masks and indices with the current policy list by name.
+  const PolicyRoster roster =
+      makePolicyRoster(policy_manager_->getSymptomPolicies(),
+                       policy_manager_->getTemporalPolicies());
+  f.createGroup("/policy_roster");
+  writeStrs(f, "/policy_roster/symptom_names", roster.symptom);
+  writeStrs(f, "/policy_roster/temporal_names", roster.temporal);
 
   // event-log on-disk durability marker (rank-0 logger record counts)
   std::vector<int64_t> ec = {

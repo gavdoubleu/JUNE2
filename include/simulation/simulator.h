@@ -58,6 +58,9 @@ class Simulator {
   // Get event logger for external access
   EventLogger* getEventLogger() { return &event_logger_; }
 
+  // Get policy manager for external access (per-person policy state, freezes)
+  PolicyManager& getPolicyManager() { return *policy_manager_; }
+
   // Write a checkpoint of all mutable simulation state (P3). Atomic: state
   // is written into "<root>.tmp/", then renamed; manifest.yaml is written
   // last as the commit marker. Per-rank shards keyed on global ids make the

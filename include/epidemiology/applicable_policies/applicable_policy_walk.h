@@ -9,10 +9,12 @@
 
 #include "core/types.h"
 #include "epidemiology/applicable_policies/applicable_policy_sets.h"
-#include "epidemiology/policy.h"
 #include "utils/deterministic_rng.h"
 
 namespace june {
+
+struct SymptomPolicy;
+struct TemporalPolicy;
 
 // Temporal policy i keys its compliance draw on i + this offset, so no
 // temporal key collides with a symptom policy's key (its index).
@@ -36,16 +38,25 @@ bool isVoluntary(const Policy& policy) {
   return policy.trigger && policy.trigger->voluntary();
 }
 
+// Left undefined for any other type, so a walk over one fails to compile
+// rather than reading another kind's decisions.
 template <typename Policy>
-inline constexpr PolicyKind kPolicyKindOf = PolicyKind::Symptom;
+struct PolicyKindOf;
 template <>
-inline constexpr PolicyKind kPolicyKindOf<TemporalPolicy> =
-    PolicyKind::Temporal;
+struct PolicyKindOf<SymptomPolicy> {
+  static constexpr PolicyKind value = PolicyKind::Symptom;
+};
+template <>
+struct PolicyKindOf<TemporalPolicy> {
+  static constexpr PolicyKind value = PolicyKind::Temporal;
+};
+template <typename Policy>
+inline constexpr PolicyKind kPolicyKindOf = PolicyKindOf<Policy>::value;
 
 // One Applicable Policy: a policy of a Person's Applicable Policy Set, seen
 // through that Person. PersonT is const Person for a query walk, which only
-// reads Sticky Compliance, and Person for the relocating walk, which also
-// latches, clears and hands it on.
+// reads its Applicable Policy State, and Person for the relocating walk, which
+// also latches, clears and hands it on.
 template <typename Policy, typename PersonT>
 class ApplicablePolicy {
   static constexpr bool kRelocating = !std::is_const_v<PersonT>;
@@ -79,9 +90,9 @@ class ApplicablePolicy {
   // stores nothing. The redraw is exactly what latch() would store, so a query
   // that beats the relocating walk to a Person still agrees with it.
   bool complies() const {
-    const StickyCompliance& sticky = person_->sticky_compliance;
-    if (sticky.decided_[kSlot] & bit())
-      return sticky.participating_[kSlot] & bit();
+    const ApplicablePolicyState& state = person_->applicable_policy_state;
+    if (state.decided_[kSlot] & bit())
+      return state.participating_[kSlot] & bit();
     return drawsCompliance(base_seed_, person_->id, complianceKey(),
                            policy_->action.compliance_rate);
   }
@@ -94,22 +105,22 @@ class ApplicablePolicy {
     requires kRelocating
   {
     if (isVoluntary(*policy_)) return true;
-    StickyCompliance& sticky = person_->sticky_compliance;
-    if (!(sticky.decided_[kSlot] & bit())) {
+    ApplicablePolicyState& state = person_->applicable_policy_state;
+    if (!(state.decided_[kSlot] & bit())) {
       if (drawsCompliance(base_seed_, person_->id, complianceKey(),
                           policy_->action.compliance_rate))
-        sticky.participating_[kSlot] |= bit();
-      sticky.decided_[kSlot] |= bit();
+        state.participating_[kSlot] |= bit();
+      state.decided_[kSlot] |= bit();
     }
-    return sticky.participating_[kSlot] & bit();
+    return state.participating_[kSlot] & bit();
   }
   // Forget the Person's decision on this policy.
   void clear() const
     requires kRelocating
   {
-    StickyCompliance& sticky = person_->sticky_compliance;
-    sticky.decided_[kSlot] &= ~bit();
-    sticky.participating_[kSlot] &= ~bit();
+    ApplicablePolicyState& state = person_->applicable_policy_state;
+    state.decided_[kSlot] &= ~bit();
+    state.participating_[kSlot] &= ~bit();
   }
   // Hand a latched decision on to the follow-up policy at a global index:
   // compliance if inherit_compliance, refusal if inherit_refusal. Inheriting
@@ -120,24 +131,25 @@ class ApplicablePolicy {
                  bool inherit_refusal) const
     requires kRelocating
   {
-    StickyCompliance& sticky = person_->sticky_compliance;
-    if (!(sticky.decided_[kSlot] & bit())) return;
+    ApplicablePolicyState& state = person_->applicable_policy_state;
+    if (!(state.decided_[kSlot] & bit())) return;
     const uint8_t follow_up_position =
-        sets_->position(person_->applicable_policy_set_id,
+        sets_->position(person_->applicable_policy_state.set_id_,
                         kPolicyKindOf<Policy>, follow_up_index);
     if (follow_up_position == ApplicablePolicySets::kAbsent) return;
-    const uint32_t follow_up_bit = 1u << follow_up_position;
-    const bool complying = sticky.participating_[kSlot] & bit();
+    const PolicyPositionMask follow_up_bit = PolicyPositionMask{1}
+                                             << follow_up_position;
+    const bool complying = state.participating_[kSlot] & bit();
     if (complying && inherit_compliance) {
-      sticky.participating_[kSlot] |= follow_up_bit;
-      sticky.decided_[kSlot] |= follow_up_bit;
+      state.participating_[kSlot] |= follow_up_bit;
+      state.decided_[kSlot] |= follow_up_bit;
     } else if (!complying && inherit_refusal) {
-      sticky.decided_[kSlot] |= follow_up_bit;
+      state.decided_[kSlot] |= follow_up_bit;
     }
   }
 
  private:
-  uint32_t bit() const { return 1u << position_; }
+  PolicyPositionMask bit() const { return PolicyPositionMask{1} << position_; }
 
   const Policy* policy_;
   PersonT* person_;
@@ -149,8 +161,8 @@ class ApplicablePolicy {
 
 // The Applicable Policies of one kind for one Person, in ascending global
 // index. Every index the set holds must address `policies`;
-// PolicyManager::setApplicablePolicies refuses any that does not, and
-// loaded policies are never removed.
+// ApplicablePolicies::importState refuses any that does not, and loaded
+// policies are never removed. Built by ApplicablePolicies::walk.
 template <typename Policy, typename PersonT>
 class ApplicablePolicyWalk {
  public:
@@ -163,7 +175,7 @@ class ApplicablePolicyWalk {
         person_(&person),
         policies_(policies),
         base_seed_(base_seed),
-        indices_(sets.indices(person.applicable_policy_set_id, kKind)) {}
+        indices_(sets.indices(person.applicable_policy_state.set_id_, kKind)) {}
 
   class iterator {
    public:
@@ -192,8 +204,8 @@ class ApplicablePolicyWalk {
 
   // The policy at a global index, if it is in the Person's set.
   std::optional<Entry> find(size_t global_index) const {
-    const uint8_t position =
-        sets_->position(person_->applicable_policy_set_id, kKind, global_index);
+    const uint8_t position = sets_->position(
+        person_->applicable_policy_state.set_id_, kKind, global_index);
     if (position == ApplicablePolicySets::kAbsent) return std::nullopt;
     return Entry(policies_[global_index], *person_, *sets_, base_seed_,
                  global_index, position);
@@ -206,15 +218,5 @@ class ApplicablePolicyWalk {
   uint64_t base_seed_;
   std::span<const uint8_t> indices_;
 };
-
-// Query walk for a const Person, relocating walk for a mutable one. base_seed
-// seeds the compliance draws.
-template <typename Policy, typename PersonT>
-ApplicablePolicyWalk<Policy, PersonT> walkApplicablePolicies(
-    const ApplicablePolicySets& sets, PersonT& person,
-    const std::vector<Policy>& policies, uint64_t base_seed) {
-  return ApplicablePolicyWalk<Policy, PersonT>(sets, person, policies,
-                                               base_seed);
-}
 
 }  // namespace june

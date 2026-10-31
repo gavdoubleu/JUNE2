@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -29,11 +30,41 @@ inline bool has(const std::string& text, const std::string& part) {
   return text.find(part) != std::string::npos;
 }
 
+inline PolicyMask maskOf(std::initializer_list<size_t> global_indices) {
+  PolicyMask mask;
+  for (size_t index : global_indices) mask.set(index);
+  return mask;
+}
+
+// Set the policies whose criteria `person` meets, as global-index masks, with
+// no decisions held. Normally set by precomputePolicyApplicability.
+inline void importApplicable(ApplicablePolicies& applicable_policies,
+                             Person& person, const PolicyMask& symptom_mask,
+                             const PolicyMask& temporal_mask) {
+  ApplicablePolicyMasks masks;
+  masks.symptom.applicable = symptom_mask;
+  masks.temporal.applicable = temporal_mask;
+  applicable_policies.importState(person, masks);
+}
+
+inline void importApplicable(PolicyManager& pm, Person& person,
+                             const PolicyMask& symptom_mask,
+                             const PolicyMask& temporal_mask) {
+  importApplicable(pm.applicablePolicies(), person, symptom_mask,
+                   temporal_mask);
+}
+
+// `person`'s Applicable Policy State as global-index masks.
+inline ApplicablePolicyMasks exportedState(const PolicyManager& pm,
+                                           const Person& person) {
+  return pm.applicablePolicies().exportState(person);
+}
+
 // Temporal policy 0 applies to every Person in `world`. Normally set by
 // precomputePolicyApplicability.
 inline void applyTemporalPolicyZero(PolicyManager& pm, WorldState& world) {
   for (Person& person : world.people)
-    pm.setApplicablePolicies(person, PolicyKind::Temporal, 1);
+    importApplicable(pm, person, PolicyMask{}, 1);
 }
 
 // Every policy `pm` holds applies to every Person in `world`. Normally set by
@@ -44,7 +75,7 @@ inline void applyEveryPolicy(PolicyManager& pm, WorldState& world) {
   for (size_t i = 0; i < pm.getSymptomPolicyCount(); ++i) symptom_mask.set(i);
   for (size_t i = 0; i < pm.getTemporalPolicyCount(); ++i) temporal_mask.set(i);
   for (Person& person : world.people)
-    pm.setApplicablePolicies(person, symptom_mask, temporal_mask);
+    importApplicable(pm, person, symptom_mask, temporal_mask);
 }
 
 // healthy(0) -> mild(1) -> dead(2), with the days each stage lasts. Only here

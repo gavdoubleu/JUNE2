@@ -10,10 +10,6 @@
 
 namespace june {
 
-// Per-Person decision and participation masks are uint32_t indexed by set
-// position, so one set holds at most this many policies of each kind.
-inline constexpr size_t kMaxApplicablePoliciesPerKind = 32;
-
 // Per-rank table of the distinct sets of policies a Person's selection criteria
 // match. Each Person keeps only a set id; few distinct sets exist because they
 // follow demographic criteria. Id 0 is always the empty set.
@@ -47,10 +43,10 @@ class ApplicablePolicySets {
 
   // Position mask (bit k = indices()[k]) to global-index mask.
   PolicyMask expand(uint32_t set_id, PolicyKind kind,
-                    uint32_t position_mask) const;
+                    PolicyPositionMask position_mask) const;
   // Global-index mask to position mask. Throws on a policy outside the set.
-  uint32_t compact(uint32_t set_id, PolicyKind kind,
-                   const PolicyMask& global_mask) const;
+  PolicyPositionMask compact(uint32_t set_id, PolicyKind kind,
+                             const PolicyMask& global_mask) const;
 
  private:
   struct Entry {

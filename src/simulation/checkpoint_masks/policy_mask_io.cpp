@@ -1,8 +1,9 @@
 #include "simulation/checkpoint_masks/policy_mask_io.h"
 
-#include <algorithm>
 #include <cstdint>
 #include <stdexcept>
+
+#include "simulation/checkpoint_datasets/chunked_dataset.h"
 
 namespace june {
 
@@ -11,21 +12,11 @@ void writeMasks(H5::H5File& file, const std::string& name,
   std::vector<uint64_t> words;
   words.reserve(masks.size() * kPolicyMaskWords);
   for (const PolicyMask& mask : masks)
-    for (size_t w = 0; w < kPolicyMaskWords; ++w)
-      words.push_back(policyMaskWord(mask, w));
-  const auto& uint64_type = H5::PredType::NATIVE_UINT64;
-  hsize_t dims[2] = {masks.size(), kPolicyMaskWords};
-  H5::DataSpace space(2, dims);
-  if (masks.empty()) {
-    file.createDataSet(name, uint64_type, space);
-    return;
-  }
-  H5::DSetCreatPropList plist;
-  hsize_t chunk[2] = {std::min<hsize_t>(dims[0], 100000), kPolicyMaskWords};
-  plist.setChunk(2, chunk);
-  if (compression > 0) plist.setDeflate(compression);
-  H5::DataSet dataset = file.createDataSet(name, uint64_type, space, plist);
-  dataset.write(words.data(), uint64_type);
+    for (size_t word = 0; word < kPolicyMaskWords; ++word)
+      words.push_back(policyMaskWord(mask, word));
+  const hsize_t dims[2] = {masks.size(), kPolicyMaskWords};
+  writeChunkedDataSet(file, name, words.data(), H5::PredType::NATIVE_UINT64,
+                      dims, compression);
 }
 
 std::vector<PolicyMask> readMasks(H5::H5File& file, const std::string& name,

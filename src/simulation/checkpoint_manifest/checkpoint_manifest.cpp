@@ -14,22 +14,25 @@ namespace fs = std::filesystem;
 void writeManifest(const fs::path& dir, int completed_day,
                    const std::string& date_iso, int nranks,
                    double current_simulation_time, unsigned int random_seed) {
-  YAML::Emitter m;
-  m << YAML::BeginMap;
-  m << YAML::Key << "format_version" << YAML::Value << kCheckpointFormatVersion;
-  m << YAML::Key << "completed_day" << YAML::Value << completed_day;
-  m << YAML::Key << "date" << YAML::Value << date_iso;
-  m << YAML::Key << "current_simulation_time" << YAML::Value
-    << current_simulation_time;
-  m << YAML::Key << "num_ranks" << YAML::Value << nranks;
-  m << YAML::Key << "effective_random_seed" << YAML::Value
-    << static_cast<unsigned long long>(random_seed);
-  m << YAML::Key << "world_path" << YAML::Value << "";
-  m << YAML::Key << "world_sha256" << YAML::Value << "";
-  m << YAML::Key << "shard_index" << YAML::Value << "shard_index.yaml";
-  m << YAML::Key << "state_file" << YAML::Value << "state.h5";
-  m << YAML::EndMap;
-  std::ofstream(dir / "manifest.yaml") << m.c_str() << "\n";
+  YAML::Emitter manifest_emitter;
+  manifest_emitter << YAML::BeginMap;
+  manifest_emitter << YAML::Key << "format_version" << YAML::Value
+                   << kCheckpointFormatVersion;
+  manifest_emitter << YAML::Key << "completed_day" << YAML::Value
+                   << completed_day;
+  manifest_emitter << YAML::Key << "date" << YAML::Value << date_iso;
+  manifest_emitter << YAML::Key << "current_simulation_time" << YAML::Value
+                   << current_simulation_time;
+  manifest_emitter << YAML::Key << "num_ranks" << YAML::Value << nranks;
+  manifest_emitter << YAML::Key << "effective_random_seed" << YAML::Value
+                   << static_cast<unsigned long long>(random_seed);
+  manifest_emitter << YAML::Key << "world_path" << YAML::Value << "";
+  manifest_emitter << YAML::Key << "world_sha256" << YAML::Value << "";
+  manifest_emitter << YAML::Key << "shard_index" << YAML::Value
+                   << "shard_index.yaml";
+  manifest_emitter << YAML::Key << "state_file" << YAML::Value << "state.h5";
+  manifest_emitter << YAML::EndMap;
+  std::ofstream(dir / "manifest.yaml") << manifest_emitter.c_str() << "\n";
 }
 
 int readAndValidateManifest(const fs::path& cp, unsigned int config_seed) {

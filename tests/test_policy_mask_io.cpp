@@ -7,6 +7,7 @@
 
 #include "doctest.h"
 #include "simulation/checkpoint_masks/policy_mask_io.h"
+#include "test_utils.h"
 
 using namespace june;
 
@@ -14,19 +15,22 @@ namespace {
 
 const std::string kMaskDataset = "/applicable_symptom_policy_mask";
 
-std::filesystem::path maskFilePath() {
-  return std::filesystem::temp_directory_path() / "june_policy_mask_io.h5";
-}
+// A mask file unique to this run, removed with the guard.
+struct MaskFile {
+  ScopedTestFiles files{"june_policy_mask_io"};
+  std::string path = (files.directory() / "masks.h5").string();
+};
 
 }  // namespace
 
 TEST_CASE("Reading masks whose row count differs from the population throws") {
+  const MaskFile mask_file;
   const std::vector<PolicyMask> masks(3);
   {
-    H5::H5File file(maskFilePath().string(), H5F_ACC_TRUNC);
+    H5::H5File file(mask_file.path, H5F_ACC_TRUNC);
     writeMasks(file, kMaskDataset, masks, 0);
   }
-  H5::H5File file(maskFilePath().string(), H5F_ACC_RDONLY);
+  H5::H5File file(mask_file.path, H5F_ACC_RDONLY);
 
   std::string message;
   try {
@@ -41,15 +45,16 @@ TEST_CASE("Reading masks whose row count differs from the population throws") {
 }
 
 TEST_CASE("Reading a dataset that is not N x 2 words throws") {
+  const MaskFile mask_file;
   const std::vector<uint32_t> one_word_per_person(3, 0);
   {
-    H5::H5File file(maskFilePath().string(), H5F_ACC_TRUNC);
+    H5::H5File file(mask_file.path, H5F_ACC_TRUNC);
     hsize_t dims[1] = {one_word_per_person.size()};
     H5::DataSet dataset = file.createDataSet(
         kMaskDataset, H5::PredType::NATIVE_UINT32, H5::DataSpace(1, dims));
     dataset.write(one_word_per_person.data(), H5::PredType::NATIVE_UINT32);
   }
-  H5::H5File file(maskFilePath().string(), H5F_ACC_RDONLY);
+  H5::H5File file(mask_file.path, H5F_ACC_RDONLY);
 
   std::string message;
   try {
@@ -63,22 +68,26 @@ TEST_CASE("Reading a dataset that is not N x 2 words throws") {
 }
 
 TEST_CASE("Masks survive a write and read through a checkpoint file") {
+  const MaskFile mask_file;
   std::vector<PolicyMask> masks(4);
   masks[1].set(0);
   masks[2].set(63).set(64);
   masks[3].set(kMaxPoliciesPerKind - 1);
   {
-    H5::H5File file(maskFilePath().string(), H5F_ACC_TRUNC);
+    H5::H5File file(mask_file.path, H5F_ACC_TRUNC);
     writeMasks(file, kMaskDataset, masks, 4);
   }
-  H5::H5File file(maskFilePath().string(), H5F_ACC_RDONLY);
+  H5::H5File file(mask_file.path, H5F_ACC_RDONLY);
 
   CHECK(readMasks(file, kMaskDataset, masks.size()) == masks);
 }
 
 TEST_CASE("Reading an absent mask dataset throws, even for an empty population") {
-  { H5::H5File file(maskFilePath().string(), H5F_ACC_TRUNC); }
-  H5::H5File file(maskFilePath().string(), H5F_ACC_RDONLY);
+  const MaskFile mask_file;
+  {
+    H5::H5File file(mask_file.path, H5F_ACC_TRUNC);
+  }
+  H5::H5File file(mask_file.path, H5F_ACC_RDONLY);
 
   for (const size_t expected_rows : {size_t{4}, size_t{0}}) {
     CAPTURE(expected_rows);

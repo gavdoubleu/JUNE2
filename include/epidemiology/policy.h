@@ -13,8 +13,9 @@
 #include "core/config.h"
 #include "core/types.h"
 #include "core/world_state.h"
-#include "epidemiology/applicable_policies/applicable_policy_sets.h"
+#include "epidemiology/applicable_policies/applicable_policies.h"
 #include "epidemiology/observed_metrics.h"
+#include "epidemiology/policy_roster/policy_roster.h"
 #include "epidemiology/policy_trigger.h"
 #include "epidemiology/transmission_modifiers.h"
 
@@ -495,7 +496,13 @@ class PolicyManager {
   PolicyManager(WorldState& world);
 
   // Set base seed for deterministic RNG (MPI reproducibility)
-  void setBaseSeed(uint64_t seed) { base_seed_ = seed; }
+  void setBaseSeed(uint64_t seed) { applicable_policies_.setBaseSeed(seed); }
+
+  // Every read or write of a Person's Applicable Policy State.
+  ApplicablePolicies& applicablePolicies() { return applicable_policies_; }
+  const ApplicablePolicies& applicablePolicies() const {
+    return applicable_policies_;
+  }
 
   // --- Checkpoint serialization ---
   // frozen_states_ pins the small set of persons mid policy-hop. It must be
@@ -650,54 +657,16 @@ class PolicyManager {
   size_t getTemporalPolicyCount() const { return temporal_policies_.size(); }
 
   // Precompute which policies can apply to each person (based on selection
-  // criteria) This caches the results as person.applicable_policy_set_id
+  // criteria) This caches the results in person.applicable_policy_state
   void precomputePolicyApplicability(std::vector<Person>& people);
-
-  // Set the policies whose criteria a Person meets, as global-index masks.
-  // Throws, naming the Person, if either kind exceeds
-  // kMaxApplicablePoliciesPerKind. Precompute and restore go through here.
-  void setApplicablePolicies(Person& person, const PolicyMask& symptom_mask,
-                             const PolicyMask& temporal_mask);
-  // Replace one kind's applicable policies, keeping the other kind's.
-  void setApplicablePolicies(Person& person, PolicyKind kind,
-                             const PolicyMask& mask);
-  bool isApplicable(const Person& person, PolicyKind kind,
-                    size_t global_index) const {
-    return applicable_policy_sets_.position(person.applicable_policy_set_id,
-                                            kind, global_index) !=
-           ApplicablePolicySets::kAbsent;
-  }
-  // A Person's applicable policies of one kind as a global-index mask
-  // (checkpoint layout).
-  PolicyMask applicableMask(const Person& person, PolicyKind kind) const {
-    return applicable_policy_sets_.globalMask(person.applicable_policy_set_id,
-                                              kind);
-  }
-
-  // A Person's decided / participating policies of one kind as global-index
-  // masks (checkpoint layout). Person stores them by set position.
-  PolicyMask decidedPolicies(const Person& person, PolicyKind kind) const {
-    return applicable_policy_sets_.expand(
-        person.applicable_policy_set_id, kind,
-        person.sticky_compliance.decided_[StickyCompliance::slot(kind)]);
-  }
-  PolicyMask participatingPolicies(const Person& person,
-                                   PolicyKind kind) const {
-    return applicable_policy_sets_.expand(
-        person.applicable_policy_set_id, kind,
-        person.sticky_compliance.participating_[StickyCompliance::slot(kind)]);
-  }
-  // Set one kind's decided / participating policies from global-index masks.
-  // Call after setApplicablePolicies. Throws, naming the Person, on a policy
-  // outside the Person's applicable set. Restore and tests go through here.
-  void setPolicyState(Person& person, PolicyKind kind,
-                      const PolicyMask& decided_mask,
-                      const PolicyMask& participating_mask);
 
   // Resolve all policy criteria and intern activities/symptoms
   void resolveAll(const Disease& disease) {
     rejectPoliciesBeyondMaskWidth(symptom_policies_, "symptom");
     rejectPoliciesBeyondMaskWidth(temporal_policies_, "temporal");
+    // A policy is its name within its kind (checkpoints match policies by it).
+    rejectDuplicateNames(
+        makePolicyRoster(symptom_policies_, temporal_policies_));
 
     for (auto& p : symptom_policies_) p.resolve(world_, disease);
     for (auto& p : temporal_policies_) p.resolve(world_);
@@ -733,12 +702,11 @@ class PolicyManager {
 
  private:
   WorldState& world_;
-  uint64_t base_seed_ = 0;
 
   std::vector<SymptomPolicy> symptom_policies_;
   std::vector<TemporalPolicy> temporal_policies_;
   std::vector<PolicyTransmissionEffect> transmission_effects_;
-  ApplicablePolicySets applicable_policy_sets_;
+  ApplicablePolicies applicable_policies_;
   ObservedMetrics observed_metrics_;
   TransmissionModifierTable transmission_modifier_table_;
   bool transmission_modifiers_initialized_ = false;

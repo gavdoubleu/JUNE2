@@ -2,18 +2,11 @@
 
 #include "core/types.h"
 #include "epidemiology/applicable_policies/applicable_policy_sets.h"
+#include "policy_test_helpers.h"
 
 using namespace june;
 
-namespace {
-
-PolicyMask maskOf(std::initializer_list<size_t> global_indices) {
-  PolicyMask mask;
-  for (size_t index : global_indices) mask.set(index);
-  return mask;
-}
-
-}  // namespace
+using policy_test::maskOf;
 
 TEST_CASE("applicable policy sets start with the empty set at id 0") {
   ApplicablePolicySets sets;

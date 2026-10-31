@@ -9,7 +9,7 @@
 #include <variant>
 #include <vector>
 
-#include "core/sticky_compliance.h"
+#include "core/applicable_policy_state.h"
 #include "epidemiology/emission/emission_record.h"
 #include "epidemiology/transmission/transmission_record.h"
 #include "epidemiology/vaccine.h"
@@ -304,14 +304,10 @@ struct Person {
   // +Cache schedule type pointer
   const ScheduleType* cached_schedule_type_ = nullptr;
 
-  // Which policies can apply to this person (based on selection criteria), as
-  // an id into PolicyManager's per-rank applicable-policy set table.
-  // Rank-local.
-  uint32_t applicable_policy_set_id = 0;
-
-  // Decided / participating policies, by position in the applicable set.
-  // Read and write through the Applicable Policy walk or PolicyManager.
-  StickyCompliance sticky_compliance;
+  // Which policies can apply to this person (based on selection criteria) and
+  // their Sticky Compliance on them. Opaque: read and write through
+  // PolicyManager::applicablePolicies().
+  ApplicablePolicyState applicable_policy_state;
 
   // Dynamic properties (ethnicity, comorbidities, work_mode, etc.)
   // Index into WorldState::person_properties flat table

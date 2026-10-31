@@ -30,12 +30,12 @@ uint32_t ApplicablePolicySets::intern(const PolicyMask& symptom_mask,
   auto it = ids_.find(key);
   if (it != ids_.end()) return it->second;
   const PolicyMask* masks[kPolicyKindCount] = {&symptom_mask, &temporal_mask};
-  const char* kind_names[kPolicyKindCount] = {"symptom", "temporal"};
   for (size_t kind = 0; kind < kPolicyKindCount; ++kind)
     if (masks[kind]->count() > kMaxApplicablePoliciesPerKind)
       throw std::runtime_error("applicable policy set holds " +
                                std::to_string(masks[kind]->count()) + " " +
-                               kind_names[kind] + " policies; at most " +
+                               policyKindName(static_cast<PolicyKind>(kind)) +
+                               " policies; at most " +
                                std::to_string(kMaxApplicablePoliciesPerKind) +
                                " of each kind may apply to one person");
   Entry entry;
@@ -59,28 +59,29 @@ PolicyMask ApplicablePolicySets::globalMask(uint32_t set_id,
   return mask;
 }
 
-PolicyMask ApplicablePolicySets::expand(uint32_t set_id, PolicyKind kind,
-                                        uint32_t position_mask) const {
+PolicyMask ApplicablePolicySets::expand(
+    uint32_t set_id, PolicyKind kind, PolicyPositionMask position_mask) const {
   const auto global_indices = indices(set_id, kind);
   PolicyMask mask;
   for (size_t position = 0; position < global_indices.size(); ++position)
-    if (position_mask & (1u << position)) mask.set(global_indices[position]);
+    if (position_mask & (PolicyPositionMask{1} << position))
+      mask.set(global_indices[position]);
   return mask;
 }
 
-uint32_t ApplicablePolicySets::compact(uint32_t set_id, PolicyKind kind,
-                                       const PolicyMask& global_mask) const {
-  uint32_t position_mask = 0;
+PolicyPositionMask ApplicablePolicySets::compact(
+    uint32_t set_id, PolicyKind kind, const PolicyMask& global_mask) const {
+  PolicyPositionMask position_mask = 0;
   for (size_t global_index = 0; global_index < kMaxPoliciesPerKind;
        ++global_index) {
     if (!global_mask.test(global_index)) continue;
     const uint8_t position = this->position(set_id, kind, global_index);
     if (position == kAbsent)
       throw std::runtime_error(
-          std::string(kind == PolicyKind::Symptom ? "symptom" : "temporal") +
-          " policy " + std::to_string(global_index) +
+          std::string(policyKindName(kind)) + " policy " +
+          std::to_string(global_index) +
           " is outside the person's applicable policy set");
-    position_mask |= 1u << position;
+    position_mask |= PolicyPositionMask{1} << position;
   }
   return position_mask;
 }
