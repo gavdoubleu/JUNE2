@@ -736,8 +736,8 @@ double Infection::getIntegratedInfectiousness(int mode_index, double t0,
   const auto& trans_params = disease_->getTransmissionParams();
 
   // TRAJECTORY-DRIVEN: no per-stage curve; use point-eval midpoint fallback.
-  // The profile ignores stage, so a Person recovered or dead at t0 (not yet
-  // cleared by the post-transmission update) is zeroed explicitly.
+  // The profile ignores stage, so a Person recovered or dead at t0 is zeroed
+  // explicitly.
   if (trans_params.mode == InfectiousnessMode::TRAJECTORY_DRIVEN) {
     if (isRecovered(t0) || isDead(t0)) return 0.0;
     return getInfectiousness(mode_index, 0.5 * (t0 + t1)) * (t1 - t0) * 24.0;

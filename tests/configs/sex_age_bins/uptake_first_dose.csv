@@ -1,0 +1,12 @@
+# Chance of accepting a first dose, by age and health, for the over 65 rollout.
+# Rows are tried from the top and the first match wins. The file holds filter
+# columns and one probability column and nothing else. A filter cell can be a
+# value, a range such as 65-79 or a comparison such as >=65. A cell on a list
+# property such as comorbidities matches one exact member. An empty cell
+# matches anyone, so the last row is the catch-all and every person is covered.
+filter.age,filter.properties.comorbidities,probability
+80-120,,0.95
+65-79,cvd,0.92
+65-79,crd,0.92
+65-79,,0.85
+,,0.70

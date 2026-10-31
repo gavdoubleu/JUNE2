@@ -1,0 +1,30 @@
+# Transmission effects for the policies in policies.yaml. One row is one effect,
+# and the policy column says which policy it belongs to. A row with no policy
+# applies to any policy that reads this file.
+#
+#   scope               person or venue
+#   transmission_mode   a mode named in disease.yaml
+#   effect_channel      source_infectiousness and target_susceptibility are
+#                       person effects. contact_intensity and
+#                       environmental_risk are venue effects.
+#   multiplier          1.0 changes nothing, below 1.0 reduces
+#   filter.*            who or what the row applies to, as everywhere else. A
+#                       person row can filter on age, sex and properties. A
+#                       venue row can filter on venue_type, id, geo_unit_id and
+#                       properties of the venue. An empty cell matches anything.
+#
+# All matching rows of all active policies multiply together. Two rows that
+# match the same people or venues under one policy are rejected as duplicates.
+# Venue effects need a temporal policy with compliance_rate 1.
+policy,filter.venue_type,filter.age,scope,transmission_mode,effect_channel,multiplier
+mask_wearing,,,person,respiratory,source_infectiousness,0.70
+mask_wearing,,,person,respiratory,target_susceptibility,0.80
+shielding_masks,,>=65,person,respiratory,target_susceptibility,0.55
+social_distancing,pub,,venue,respiratory,contact_intensity,0.60
+social_distancing,gym,,venue,respiratory,contact_intensity,0.60
+social_distancing,grocery,,venue,respiratory,contact_intensity,0.80
+social_distancing,office,,venue,respiratory,contact_intensity,0.85
+surface_cleaning,pub,,venue,fomite,environmental_risk,0.30
+surface_cleaning,gym,,venue,fomite,environmental_risk,0.30
+surface_cleaning,cinema,,venue,fomite,environmental_risk,0.30
+surface_cleaning,grocery,,venue,fomite,environmental_risk,0.40

@@ -1,0 +1,229 @@
+# Vaccines and campaigns for the sex and age bins scenario.
+#
+# Day numbers, with day 0 on Monday 2 March 2020:
+#   day 28  30 Mar   care home campaign opens
+#   day 35   6 Apr   over 65 campaign opens
+#   day 63   4 May   general campaign opens
+#   day 77  18 May   booster campaign opens
+#
+# A vaccine is a list of doses. Dose 0 is the first in the list, and tiers ask
+# for a dose by that number. Times are days since that dose was given.
+#
+#   days_to_onset      no protection before this. Optional, default 0, and not
+#                      later than days_to_effective.
+#   days_to_effective  protection has risen in a straight line to its peak
+#   days_to_waning     the peak holds until here
+#   days_to_finished   protection has fallen in a straight line to
+#                      peak * waning_factor, and stays there
+#   waning_factor      optional, default 1 (protection never falls)
+#
+# infection_efficacy lowers the chance of being infected. symptom_efficacy moves
+# the share of more severe outcomes onto the least severe trajectory when
+# someone is infected. Both are set per disease, named as in disease.yaml, and
+# either one number for ages 0 to 100 or bands written "min-max" in whole years.
+# A person with several doses gets the highest value of any dose, not the sum.
+# Any other key in a dose is an error, so a misspelt key cannot go unnoticed.
+
+enabled: true
+
+vaccines:
+    Pfizer:
+        doses:
+            - days_to_onset: 7
+              days_to_effective: 14
+              days_to_waning: 90
+              days_to_finished: 150
+              waning_factor: 0.6
+              infection_efficacy:
+                  covid19: {"0-17": 0.5, "18-64": 0.55, "65-120": 0.4}
+              symptom_efficacy:
+                  covid19: {"0-120": 0.7}
+            - days_to_onset: 3
+              days_to_effective: 7
+              days_to_waning: 120
+              days_to_finished: 200
+              waning_factor: 0.7
+              infection_efficacy:
+                  covid19: {"0-17": 0.9, "18-64": 0.95, "65-120": 0.85}
+              symptom_efficacy:
+                  covid19: {"0-120": 0.95}
+            # A third dose, used as a booster below.
+            - days_to_effective: 5
+              days_to_waning: 150
+              days_to_finished: 250
+              waning_factor: 0.8
+              infection_efficacy:
+                  covid19: 0.97
+              symptom_efficacy:
+                  covid19: 0.98
+
+    AstraZeneca:
+        doses:
+            - days_to_effective: 14
+              days_to_waning: 90
+              days_to_finished: 150
+              infection_efficacy:
+                  covid19: 0.32
+              symptom_efficacy:
+                  covid19: 0.5
+            - days_to_effective: 14
+              days_to_waning: 120
+              days_to_finished: 200
+              waning_factor: 0.8
+              infection_efficacy:
+                  covid19: {"0-64": 0.78, "65-120": 0.7}
+              symptom_efficacy:
+                  covid19: 0.85
+
+# Campaigns run in file order, each with its own budget and cap. A person gets
+# at most one dose a day, from the first campaign that reaches them.
+#
+#   vaccine_type         required, a vaccine above
+#   tiers                required, served strictly in the order listed
+#   start_date           first day, default the first day of the run
+#   end_date             last day, included, default the last day of the run
+#   days_to_next_dose    days to wait after each dose. [14] makes the second
+#                        dose due 14 days after the first
+#   courses_begun_with   vaccines whose course this campaign continues, for a
+#                        booster. Default is the campaign's own vaccine only
+#   dose_budget          {doses: D, per_days: P}. D doses every P days, with no
+#                        drift, shared by all tiers. Unspent doses are lost
+#   coverage_target      stops new first doses at this share of the population
+campaigns:
+
+    # No budget and no uptake: everyone in the tiers is dosed once they are due.
+    # The second dose is listed first so that it outranks new first doses.
+    "Care home Pfizer":
+        vaccine_type: "Pfizer"
+        start_date: "2020-03-30"
+        end_date: "2020-04-30"
+        days_to_next_dose: [14]
+        tiers:
+            - name: care_home_second_dose
+              dose: 1
+              selection:
+                  - {property: "activities.residence.venue_type", operator: "==", value: "care_home"}
+            - name: care_home_first_dose
+              dose: 0
+              selection:
+                  - {property: "activities.residence.venue_type", operator: "==", value: "care_home"}
+
+    # A budgeted rollout. 3000 doses every 7 days are shared by the tiers in
+    # order, so the second doses are served first, then the oldest. A tier only
+    # gets what the tiers above it leave, which is why the oldest group is
+    # narrow. The uptake of each tier is one of the three forms: a number, a
+    # list of rows, or a CSV file.
+    "Over 65 Pfizer":
+        vaccine_type: "Pfizer"
+        start_date: "2020-04-06"
+        end_date: "2020-05-31"
+        days_to_next_dose: [21]
+        dose_budget: {doses: 3000, per_days: 7}
+        coverage_target: 0.08
+        tiers:
+            - name: over_65_second_dose
+              dose: 1
+              selection:
+                  - {property: age, operator: ">=", value: 65}
+              uptake: 0.9
+            - name: over_85_first_dose
+              dose: 0
+              selection:
+                  - {property: age, operator: ">=", value: 85}
+              # The first row that matches wins. A row with no selection is
+              # the catch-all.
+              uptake:
+                  - selection:
+                        - {property: "properties.comorbidities", operator: contains, value: "immunosuppression"}
+                    probability: 0.98
+                  - probability: 0.93
+            - name: over_65_first_dose
+              dose: 0
+              selection:
+                  - {property: age, operator: ">=", value: 65}
+              # A CSV next to this file. Read at startup.
+              uptake: {file: uptake_first_dose.csv}
+              # Couples and older relatives in one household decide together.
+              # combine and if_no_decider are left out here, so they take their
+              # defaults: mean, and stop at startup if a unit has no decider.
+              decision_unit:
+                  shared_venue: residence
+                  scope:
+                      - {property: "activities.residence.venue_type", operator: "==", value: "household"}
+                  deciders:
+                      - {property: age, operator: ">=", value: 65}
+
+    # Children are vaccinated on their household's decision. Everyone in scope
+    # who lives in the same household decides together with one draw. The
+    # deciders are the adults, whose own uptake rows set the unit's chance, and
+    # a decider does not have to be in the tier's group.
+    "General AstraZeneca":
+        vaccine_type: "AstraZeneca"
+        start_date: "2020-05-04"
+        dose_budget: {doses: 20000, per_days: 7}
+        coverage_target: 0.2
+        days_to_next_dose: [14]
+        tiers:
+            - name: everyone_second_dose
+              dose: 1
+            - name: children_first_dose
+              dose: 0
+              selection:
+                  - {property: age, operator: ">=", value: 12}
+                  - {property: age, operator: "<", value: 18}
+              uptake:
+                  - selection:
+                        - {property: age, operator: "<", value: 40}
+                    probability: 0.6
+                  - probability: 0.85
+              decision_unit:
+                  shared_venue: residence
+                  # Who is inside a unit. People outside decide alone, which
+                  # keeps care homes and boarding schools out.
+                  scope:
+                      - {property: "activities.residence.venue_type", operator: "==", value: "household"}
+                  deciders:
+                      - {property: age, operator: ">=", value: 18}
+                  # min, mean or max of the deciders' probabilities. Max here:
+                  # a child is vaccinated if the keenest adult in the home wants
+                  # it.
+                  combine: max
+                  # error stops the run at startup if a household has no adult,
+                  # and individual lets each member decide alone.
+                  if_no_decider: individual
+            - name: adults_first_dose
+              dose: 0
+              selection:
+                  - {property: age, operator: ">=", value: 18}
+              uptake:
+                  - selection:
+                        - {property: age, operator: ">=", value: 50}
+                    probability: 0.8
+                  - probability: 0.6
+              decision_unit:
+                  shared_venue: residence
+                  scope:
+                      - {property: "activities.residence.venue_type", operator: "==", value: "household"}
+                  deciders:
+                      - {property: age, operator: ">=", value: 18}
+                  # The household accepts only as readily as its most hesitant
+                  # adult.
+                  combine: min
+                  if_no_decider: individual
+
+    # A booster continues courses begun with either vaccine. The list is checked
+    # against the vaccine of a person's first dose. Dose 2 is the third entry in
+    # Pfizer's doses, which is why Pfizer has three.
+    "Care home booster":
+        vaccine_type: "Pfizer"
+        start_date: "2020-05-18"
+        end_date: "2020-05-31"
+        courses_begun_with: ["Pfizer", "AstraZeneca"]
+        days_to_next_dose: [0, 0]
+        dose_budget: {doses: 400, per_days: 7}
+        tiers:
+            - name: care_home_booster
+              dose: 2
+              selection:
+                  - {property: "activities.residence.venue_type", operator: "==", value: "care_home"}
+              uptake: 0.9

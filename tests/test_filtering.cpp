@@ -1,10 +1,13 @@
 #include <string>
 #include <vector>
 
+#include <yaml-cpp/yaml.h>
+
 #include "core/config.h"
 #include "core/world_state.h"
 #include "doctest.h"
 #include "epidemiology/disease.h"
+#include "loaders/config_loader_detail.h"
 #include "utils/filtering.h"
 
 using namespace june;
@@ -274,4 +277,108 @@ TEST_CASE("infection context criteria refuse other operators and non-strings") {
   SelectionCriterion valid =
       makeCriterion("transmission_mode", "!=", std::string("respiratory"));
   CHECK_NOTHROW(valid.resolveOrThrow(world, "test"));
+}
+
+// Person 0 lives in a household, person 1 in a care home, and person 2 is
+// registered to no residence at all.
+static WorldState buildResidenceTypeWorld() {
+  WorldState world;
+  world.activity_names = {"residence"};
+  world.venue_type_names = {"household", "care_home"};
+  for (VenueId id = 0; id < 2; ++id) {
+    Venue venue{};
+    venue.id = id;
+    venue.type_id = static_cast<uint8_t>(id);
+    venue.geo_unit_id = 0;
+    world.venues.push_back(venue);
+  }
+  for (PersonId id = 0; id < 3; ++id) {
+    Person& person = world.people.emplace_back();
+    person.id = id;
+    person.age = 30.0f;
+    person.geo_unit_id = -1;
+    person.activity_meta_start =
+        static_cast<uint32_t>(world.activity_meta.size());
+    if (id == 2) continue;
+    world.activity_meta.push_back(
+        {0, static_cast<uint32_t>(world.activity_venues.size()), 1});
+    world.activity_venues.push_back({static_cast<VenueId>(id), 0});
+    ++person.activity_meta_count;
+  }
+  world.buildIndices();
+  return world;
+}
+
+TEST_CASE("not-equal on an activity's venue type excludes the type itself") {
+  const WorldState world = buildResidenceTypeWorld();
+  const auto matches = [&](const char* op, const char* type, PersonId id) {
+    SelectionCriterion criterion =
+        makeCriterion("activities.residence.venue_type", op, std::string(type));
+    return criterion.evaluate(world.people[id], &world);
+  };
+
+  SUBCASE("a type the world has") {
+    CHECK_FALSE(matches("==", "care_home", 0));
+    CHECK(matches("==", "care_home", 1));
+    CHECK_FALSE(matches("==", "care_home", 2));
+    CHECK(matches("!=", "care_home", 0));
+    // A care home resident does not live somewhere that is not a care home.
+    CHECK_FALSE(matches("!=", "care_home", 1));
+    // With no residence there is nothing to compare, so neither operator holds.
+    CHECK_FALSE(matches("!=", "care_home", 2));
+  }
+
+  SUBCASE("a type the world does not have") {
+    CHECK_FALSE(matches("==", "hospice", 0));
+    CHECK_FALSE(matches("==", "hospice", 1));
+    CHECK(matches("!=", "hospice", 0));
+    CHECK(matches("!=", "hospice", 1));
+    CHECK_FALSE(matches("!=", "hospice", 2));
+  }
+}
+
+TEST_CASE("is_alive written in YAML selects the living or the dead") {
+  WorldState world = buildSinglePersonWorld();
+  Person& dead = world.people.emplace_back();
+  dead.id = 1;
+  dead.age = 70.0f;
+  dead.sex = Sex::MALE;
+  dead.geo_unit_id = 10;
+  dead.is_dead = true;
+  world.buildIndices();
+  const Person& living = world.people[0];
+
+  auto fromYaml = [&](const std::string& op, const std::string& value) {
+    std::vector<SelectionCriterion> criteria;
+    config_detail::parseSelectionCriteria(
+        YAML::Load("[{property: is_alive, operator: \"" + op +
+                   "\", value: " + value + "}]"),
+        criteria);
+    REQUIRE(criteria.size() == 1);
+    return criteria.front();
+  };
+  auto selects = [&](const std::string& op, const std::string& value,
+                     const Person& person) {
+    SelectionCriterion criterion = fromYaml(op, value);
+    criterion.resolveOrThrow(world, "test");
+    return criterion.evaluate(person, &world);
+  };
+
+  CHECK(selects("==", "true", living));
+  CHECK_FALSE(selects("==", "true", dead));
+  CHECK(selects("!=", "false", living));
+  CHECK_FALSE(selects("!=", "false", dead));
+  CHECK(selects("==", "false", dead));
+  CHECK_FALSE(selects("==", "false", living));
+  CHECK(selects("!=", "true", dead));
+  CHECK_FALSE(selects("!=", "true", living));
+
+  SelectionCriterion greater = fromYaml(">", "true");
+  CHECK_THROWS_WITH(
+      greater.resolveOrThrow(world, "test"),
+      doctest::Contains("'is_alive' compares with == or != against true or false"));
+  SelectionCriterion maybe = fromYaml("==", "maybe");
+  CHECK_THROWS_WITH(
+      maybe.resolveOrThrow(world, "test"),
+      doctest::Contains("'is_alive' compares with == or != against true or false"));
 }

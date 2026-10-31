@@ -2,7 +2,6 @@
 # Controls how and when infections are introduced into the simulation
 
 global_parameters:
-  default_seed_past_infections: false
   default_seed_strength: 1.0
   base_cases_per_capita: 0.0002
 

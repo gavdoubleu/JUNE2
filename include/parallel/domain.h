@@ -53,6 +53,8 @@ class Domain {
     bool is_infected;
     float immunity_level;
     uint8_t encounter_type_id;  // Coordinated encounter type (ID in registry)
+    float age = 0.0f;           // Contact-matrix binning: the visitor is binned
+    uint8_t sex_code = 2;       // as its home rank would bin the same person
 
     // Stage at packing time: infector attribution and compartmental
     // deposition writeback

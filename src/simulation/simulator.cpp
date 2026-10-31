@@ -557,6 +557,9 @@ Simulator::Simulator(WorldState& world, Config& config,
     auto events = CalendarEventLoader::parse(
         file, world_, config_.simulation.start_date, total_days_, path);
     calendar_event_manager_ = CalendarEventManager(std::move(events));
+    calendar_event_manager_.checkCatchmentRules(
+        catchment_rules_,
+        config_.simulation.calendar_event_catchment_rules_file);
     activity_manager_.setCalendarEventManager(&calendar_event_manager_);
   }
   if (!config_.simulation.on_the_fly_venues_file.empty()) {
@@ -624,8 +627,40 @@ void Simulator::run() {
   writeFinalEventsAndLookups(rank);
   warnInfectorLookupGaps(rank);
   warnUnmatchedTrajectorySelections(rank);
+  // Collective, like the two checks above: every rank counts, rank 0 writes
+  if (vaccination_manager_) vaccination_manager_->printCoverage(std::cout);
 
   if (rank == 0) printRunSummary();
+}
+
+void Simulator::reportCalendarEvents(int rank) {
+  const auto& today = calendar_event_manager_.lastDayCounts();
+  if (today.empty()) return;  // same answer on every rank
+  constexpr size_t kFields = 5;
+  std::vector<uint64_t> local;
+  local.reserve(today.size() * kFields);
+  for (const auto& c : today) {
+    local.insert(local.end(), {c.in_catchment, c.passed_filters,
+                               c.already_hopping, c.refused, c.hopping});
+  }
+  std::vector<uint64_t> global = local;
+#ifdef USE_MPI
+  if (domain_mgr_) {
+    MPI_Allreduce(local.data(), global.data(), static_cast<int>(local.size()),
+                  MPI_UINT64_T, MPI_SUM, MPI_COMM_WORLD);
+  }
+#endif
+  if (rank != 0) return;
+  const std::string date = formatDate(current_date_);
+  for (size_t i = 0; i < today.size(); ++i) {
+    CalendarEventManager::EventDayCounts total = today[i];
+    total.in_catchment = global[i * kFields];
+    total.passed_filters = global[i * kFields + 1];
+    total.already_hopping = global[i * kFields + 2];
+    total.refused = global[i * kFields + 3];
+    total.hopping = global[i * kFields + 4];
+    std::cout << formatCalendarEventLine(total, date) << std::flush;
+  }
 }
 
 void Simulator::warnInfectorLookupGaps(int rank) {
@@ -673,13 +708,14 @@ void Simulator::runOneDay(int day, int rank) {
   // 1. Run vaccination manager updates at START of day
   // This ensures efficacy applies to today's interactions
   if (vaccination_manager_) {
-    vaccination_manager_->update(current_simulation_time_);
+    vaccination_manager_->update(day);
   }
 
   // 2. Trigger calendar events (schedule hops for fairs, etc.)
   calendar_event_manager_.triggerEventsForDay(day, world_, world_.people,
                                               config_.simulation.random_seed,
                                               catchment_rules_);
+  reportCalendarEvents(rank);
 
   // 3. Negotiate Coordinated Encounters
   negotiateAndLogDailyEncounters(day);

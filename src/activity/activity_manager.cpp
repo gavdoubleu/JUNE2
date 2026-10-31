@@ -562,6 +562,53 @@ void ActivityManager::precomputeOneSlot(
     Person& person, const TimeSlot& slot, size_t slot_idx, int dt_idx,
     const ScheduleType* schedule_type, uint64_t precomp_key,
     std::vector<ScheduleEntry>& dt_schedules) {
+  // A slot that offers an activity redrawn at runtime (stochastic, hybrid,
+  // forced hybrid or linked) with a chance of being taken must not have its
+  // outcome fixed here. Caching the result of this roll would pin everyone
+  // who missed it to the fallback activity and make the runtime roll apply
+  // a second time. Such a slot is left to the runtime: the entry caches the
+  // venue of the first redrawn hybrid activity, or nothing when only
+  // stochastic activities are on offer.
+  {
+    static thread_local std::vector<int16_t> available;
+    filterAvailableActivities(person, slot, available);
+    const std::vector<double>* rates =
+        (dt_idx >= 0 &&
+         dt_idx < static_cast<int>(
+                      schedule_type->participation_by_day_type_id.size()))
+            ? &schedule_type->participation_by_day_type_id[dt_idx]
+            : nullptr;
+    bool redrawn = false;
+    int16_t hybrid_act = -1;
+    for (int16_t a : available) {
+      if (a < 0) continue;
+      const ActivityMask bit = ActivityMask(1) << a;
+      const bool linked = (schedule_type->linked_activities_mask & bit) != 0;
+      const bool hybrid = config_.performance.isHybridIdx(a) ||
+                          (schedule_type->force_hybrid_mask & bit) != 0 ||
+                          linked;
+      const bool stochastic = !config_.performance.isDeterministicIdx(a, &slot);
+      if (!hybrid && !stochastic) continue;
+      const double rate = (rates && a < static_cast<int16_t>(rates->size()))
+                              ? (*rates)[a]
+                              : 0.0;
+      if (!linked && rate <= 0.0) continue;
+      redrawn = true;
+      if (hybrid && hybrid_act < 0 && a != no_venue_act_idx_) hybrid_act = a;
+    }
+    if (redrawn) {
+      if (hybrid_act >= 0) {
+        auto [venue_id, subset_idx] =
+            selectVenue(person, hybrid_act, slot, precomp_key);
+        if (venue_id != -1) {
+          dt_schedules.emplace_back(hybrid_act, venue_id, subset_idx, false);
+          return;
+        }
+      }
+      dt_schedules.emplace_back(available.back(), -1, -1, false);
+      return;
+    }
+  }
   int16_t act_idx = selectActivity(person, slot, slot_idx, schedule_type,
                                    dt_idx, precomp_key);
 

@@ -77,6 +77,26 @@ class CalendarEventManager {
   };
   const Stats& stats() const { return stats_; }
 
+  // What one event did on the last triggerEventsForDay call, on this rank only.
+  // All counts are integers so a sum across ranks does not depend on the rank
+  // count. `in_catchment` is everyone the rule's geo units hold, `passed_filters`
+  // those who also pass the attendee filters; each of those lands in exactly
+  // one of already_hopping, refused or hopping.
+  struct EventDayCounts {
+    int32_t calendar_event_id = -1;
+    int32_t catchment_rule_id = -1;
+    uint64_t in_catchment = 0;
+    uint64_t passed_filters = 0;
+    uint64_t already_hopping = 0;
+    uint64_t refused = 0;
+    uint64_t hopping = 0;
+  };
+  // One entry per event scheduled for the day, in file order; empty on a day
+  // with no events. Replaced at the start of every triggerEventsForDay call.
+  const std::vector<EventDayCounts>& lastDayCounts() const {
+    return last_day_counts_;
+  }
+
   bool hasActiveEvent(PersonId person_id) const {
     return active_event_.find(person_id) != active_event_.end();
   }
@@ -84,6 +104,14 @@ class CalendarEventManager {
   // Returns the hosting_geo_unit_id of the person's active event, or nullopt
   // if the person has no active event or the event has no hosting geo-unit.
   std::optional<GeoUnitId> getActiveHostingGeoUnit(PersonId person_id) const;
+
+  // Every event's catchment_rule_id must name a rule. Throws a descriptive
+  // error otherwise, so an event that could reach nobody is caught at start-up.
+  // `rules_source` is the rules file path, or empty if none was configured.
+  void checkCatchmentRules(
+      const std::unordered_map<int32_t, std::vector<GeoUnitId>>&
+          catchment_rules,
+      const std::string& rules_source) const;
 
   // Distinct hosting geo units across all events (dups harmless). Used by the
   // halo prototype to precompute hosting-strategy OTF pools.
@@ -98,14 +126,24 @@ class CalendarEventManager {
   // person -> opaque active calendar_event_id (never a venue).
   std::unordered_map<PersonId, int32_t> active_event_;
   Stats stats_;
+  std::vector<EventDayCounts> last_day_counts_;
 
   // Attendees for a catchment-rule event: gathered from people_by_geo_unit for
   // each geo_unit in the catchment rule, filtered by event.attendee_filters.
+  // `in_catchment` receives the number of people examined before filtering.
   std::vector<PersonId> attendeesForCatchmentEvent(
       const CalendarEvent& event, const WorldState& world,
       const std::unordered_map<int32_t, std::vector<GeoUnitId>>&
-          catchment_rules) const;
+          catchment_rules,
+      uint64_t& in_catchment) const;
 };
+
+// One report line for an event's day, e.g.
+// "[CalendarEvent] id=1 2020-03-14 catchment_rule=1: 10 in catchment, ..."
+// `counts` hold the totals summed over every rank.
+std::string formatCalendarEventLine(
+    const CalendarEventManager::EventDayCounts& counts,
+    const std::string& date);
 
 static_assert(!std::is_copy_constructible_v<CalendarEventManager>);
 

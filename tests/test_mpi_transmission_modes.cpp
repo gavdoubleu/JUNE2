@@ -53,6 +53,8 @@ static VisitorInfo toVisitorInfo(const Domain::VisitorData& vis) {
   vi.is_infected = vis.is_infected;
   vi.immunity_level = vis.immunity_level;
   vi.home_array_index = vis.person_id;
+  vi.age = vis.age;
+  vi.sex = static_cast<Sex>(vis.sex_code);
   vi.symptom_id = vis.symptom_id;
   vi.time_in_stage = vis.time_in_stage;
   vi.emission = vis.emission;
@@ -695,6 +697,155 @@ TEST_CASE("H9: mixed-state Visitors, one-way (P2P)") {
 
 TEST_CASE("H9b: mixed-state Visitors, two-way (all-to-all)") {
   checkMixedStateExchange({0, 1});
+}
+
+// ---------------------------------------------------------------------------
+// H12: a Visitor goes into the contact-matrix bin its home rank would give it
+// ---------------------------------------------------------------------------
+// Person 0 visits rank 1's household Venue while person 1, identical in age
+// and sex, stays there. An infectious local is also present. The matrix gives
+// contacts only to observers in one bin, with counts so large that a person
+// in that bin is infected for certain and anyone else is not, so the outcome
+// says which bin the person was put in. Visitor and local must agree, and
+// agree with the bin their age or sex selects.
+static ContactMatrixConfig binnedMatrix(
+    const WorldState& world, const Disease& disease,
+    const std::vector<std::string>& bins,
+    const std::vector<std::vector<double>>& contacts) {
+  ContactMatrix matrix;
+  matrix.bins = bins;
+  matrix.contacts = contacts;
+  ContactMatrixConfig cm;
+  cm.matrices["household"] = matrix;
+  cm.mode_matrices["household"]["default"] = matrix;
+  cm.default_matrix = matrix;
+  cm.mode_names = {"default"};
+  finalizeContactMatrices(cm, world, disease);
+  return cm;
+}
+
+// Whether the Visitor and the local twin were each infected in one slot.
+struct BinOutcome {
+  bool evaluated = false;  // only the rank holding the Venue evaluates
+  bool visitor_infected = false;
+  bool local_infected = false;
+};
+
+static BinOutcome infectionByBin(
+    Sex sex, float age, const std::vector<std::string>& bins,
+    const std::vector<std::vector<double>>& contacts) {
+  constexpr PersonId kSource = 2;
+  constexpr double kCurrentTime = 10.5;
+  constexpr double kDeltaHours = 1.0;
+  TwoRankFixture f;
+  REQUIRE(f.size == 2);
+  Disease disease = makeStageDisease(std::make_shared<ConstantCurve>(5.0));
+
+  f.world.getPerson(f.rank)->sex = sex;
+  f.world.getPerson(f.rank)->age = age;
+  f.dm->setPersonRank(kSource, 1);
+  if (f.rank == 1) {
+    Person& source = f.world.people.emplace_back();
+    source.id = kSource;
+    source.age = 30.0f;
+    source.sex = Sex::MALE;
+    source.geo_unit_id = f.rank;
+    source.infection = makeInfection(disease, 9.0, {{9.0, 1}});
+    Domain& domain = f.dm->getDomain();
+    domain.resident_ids.push_back(kSource);
+    domain.resident_set.insert(kSource);
+  }
+  f.dm->setMaxPersonId(kSource);
+  f.world.buildIndices();
+
+  f.dm->exchangeVisitors({makeRemoteLocation(f.rank)}, disease, kCurrentTime,
+                         kDeltaHours);
+  BinOutcome outcome;
+  if (f.rank != 1) return outcome;
+  outcome.evaluated = true;
+
+  const auto& incoming = f.dm->getDomain().incoming_visitors;
+  REQUIRE(incoming.size() == 1);
+  const PersonId visitor_id = incoming[0].person_id;
+  std::unordered_map<PersonId, VisitorInfo> visitor_data = {
+      {visitor_id, toVisitorInfo(incoming[0])}};
+  std::unordered_set<PersonId> visitor_ids = {visitor_id};
+
+  ContactMatrixConfig cm = binnedMatrix(f.world, disease, bins, contacts);
+  SimulationConfig sim;
+  ParallelConfig par;
+  const size_t source_index = f.world.person_index.at(kSource);
+  const PersonLocation source_loc{kSource, f.rank, -1, 0, 255, source_index};
+
+  std::vector<PendingInfection> pending;
+  {
+    InteractionManager im(f.world, cm, sim, par, &disease, nullptr);
+    im.processTransmissions({source_loc, {visitor_id, f.rank, -1, 0, 255, 0}},
+                            kCurrentTime, kDeltaHours, nullptr, &visitor_ids,
+                            &pending, &visitor_data);
+  }
+  for (const auto& infection : pending) {
+    if (infection.person_id == visitor_id) outcome.visitor_infected = true;
+  }
+
+  Person* twin = f.world.getPerson(f.rank);
+  const size_t twin_index = f.world.person_index.at(twin->id);
+  {
+    InteractionManager im(f.world, cm, sim, par, &disease, nullptr);
+    im.processTransmissions(
+        {source_loc, {twin->id, f.rank, -1, 0, 255, twin_index}}, kCurrentTime,
+        kDeltaHours, nullptr, nullptr, nullptr, nullptr);
+  }
+  outcome.local_infected = twin->infection != nullptr;
+  return outcome;
+}
+
+TEST_CASE("H12: Visitor is binned by sex like an identical local") {
+  struct SexCase {
+    std::vector<std::string> bins;
+    std::vector<std::vector<double>> contacts;
+    Sex infectable_sex;  // the sex whose bin has contacts
+  };
+  // Contacts sit on the male row in one scheme and the female row in the
+  // other, so a Visitor dropped into the first bin is wrong for one sex in
+  // each scheme.
+  const SexCase cases[] = {
+      {{"male", "female"}, {{1e4, 1e4}, {0, 0}}, Sex::MALE},
+      {{"female", "male"}, {{0, 0}, {1e4, 1e4}}, Sex::MALE},
+      {{"male", "female"}, {{0, 0}, {1e4, 1e4}}, Sex::FEMALE},
+  };
+  for (const SexCase& c : cases) {
+    for (Sex sex : {Sex::MALE, Sex::FEMALE}) {
+      const bool expect = sex == c.infectable_sex;
+      const BinOutcome outcome = infectionByBin(sex, 30.0f, c.bins, c.contacts);
+      if (!outcome.evaluated) continue;
+      CHECK(outcome.local_infected == expect);
+      CHECK(outcome.visitor_infected == expect);
+    }
+  }
+}
+
+TEST_CASE("H12b: Visitor is binned by age across band edges like a local") {
+  const std::vector<std::string> bins = {"0-17", "18-64", "65+"};
+  // Only the middle band has contacts, and the infectious local is in it.
+  const std::vector<std::vector<double>> contacts = {
+      {0, 0, 0}, {0, 1e4, 0}, {0, 0, 0}};
+  struct AgeCase {
+    float age;
+    bool in_middle_band;
+  };
+  const AgeCase cases[] = {{0.0f, false},  {17.0f, false}, {17.99f, false},
+                           {18.0f, true},  {64.0f, true},  {64.99f, true},
+                           {65.0f, false}, {99.0f, false}, {100.0f, false},
+                           {130.0f, false}};
+  for (const AgeCase& c : cases) {
+    CAPTURE(c.age);
+    const BinOutcome outcome =
+        infectionByBin(Sex::UNKNOWN, c.age, bins, contacts);
+    if (!outcome.evaluated) continue;
+    CHECK(outcome.local_infected == c.in_middle_band);
+    CHECK(outcome.visitor_infected == c.in_middle_band);
+  }
 }
 
 // One slot at venue 1, where nobody is infectious but a large fomite deposit

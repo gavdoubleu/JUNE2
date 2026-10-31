@@ -647,3 +647,152 @@ TEST_CASE(
   REQUIRE(venue != nullptr);
   for (const auto& history : venue->fomite_history) CHECK(history.empty());
 }
+
+// -----------------------------------------------------------------------------
+// A rider who arrives from another rank is put into the same contact-matrix
+// bin as an identical rider who lives here. The home world (which the
+// allocator reads) holds an infectious rider and two susceptible riders of the
+// same age and sex on the same legs. The rank under test holds the infectious
+// rider and one of the two, and is told about the other as a visitor. Contacts
+// are given only to some bins, so lambda is positive or zero according to the
+// bin the rider was put in.
+// -----------------------------------------------------------------------------
+namespace {
+
+struct RiderLambdas {
+  double local = 0.0;
+  double visitor = 0.0;
+};
+
+RiderLambdas riderLambdasByBin(Sex sex, float age,
+                               const std::vector<std::string>& bins,
+                               const std::vector<std::vector<double>>& rows) {
+  constexpr PersonId kInfectious = 0;
+  constexpr PersonId kLocalRider = 1;
+  constexpr PersonId kVisitorRider = 2;
+
+  Config config;
+  SimulationConfig& sim_cfg = config.simulation;
+  sim_cfg.random_seed = 12345;
+  auto disease = makeUnitConstantDisease();
+
+  auto build = [&](WorldState& world, bool with_visitor_rider) {
+    registerScaffolding(world);
+    const uint8_t type_id =
+        addPartialPresenceVenueType(world, sim_cfg, "route_line", 100);
+    const VenueId line = addPartialPresenceVenue(world, type_id);
+    std::vector<PartialPresenceLegSpec> legs;
+    for (PersonId pid : {kInfectious, kLocalRider, kVisitorRider}) {
+      if (pid == kVisitorRider && !with_visitor_rider) continue;
+      addAdult(world, pid);
+      Person& person = world.people.back();
+      person.age = pid == kInfectious ? 30.0f : age;
+      person.sex = pid == kInfectious ? Sex::MALE : sex;
+      legs.push_back(PartialPresenceLegSpec{pid, line, 0.0f, 20.0f});
+    }
+    addPartialPresenceLegs(world, /*activity_index=*/0, legs);
+    world.buildIndices();
+    return line;
+  };
+
+  // The allocator knows every rider; the rank under test lacks the visitor.
+  WorldState home_world;
+  const VenueId line = build(home_world, /*with_visitor_rider=*/true);
+  WorldState world;
+  REQUIRE(build(world, /*with_visitor_rider=*/false) == line);
+
+  ContactMatrix matrix;
+  matrix.bins = bins;
+  matrix.contacts = rows;
+  ContactMatrixConfig cm;
+  cm.matrices["route_line"] = matrix;
+  cm.mode_matrices["route_line"]["respiratory"] = matrix;
+  cm.mode_names = {"respiratory"};
+  finalizeContactMatrices(cm, world);
+
+  world.getPerson(kInfectious)->infection = std::make_unique<Infection>(
+      disease.get(), 0.0, world.getPerson(kInfectious), /*seed=*/7,
+      kNoTransmissionContext, &world, "route_line", line);
+
+  RuntimeGroupAllocator allocator(home_world, config);
+  ParallelConfig parallel_config;
+  InteractionManager im(world, cm, sim_cfg, parallel_config, disease.get(),
+                        nullptr);
+  im.setRuntimeGroupAllocator(&allocator);
+  std::vector<PersonLocation> locs =
+      makePartialPresenceLocations(home_world, /*activity_index=*/0);
+  TimeSlot slot;
+  const double delta_hours = 1.0;
+  allocator.allocateForSlot(/*time_slot_index=*/0, /*day_type_idx=*/0, slot,
+                            /*current_simulation_time=*/0.0, delta_hours, locs);
+  REQUIRE(allocator.getNumGroups(line) == 1);
+
+  VisitorInfo visitor;
+  visitor.person_id = kVisitorRider;
+  visitor.is_infected = false;
+  visitor.immunity_level = 0.0f;
+  visitor.age = age;
+  visitor.sex = sex;
+  std::unordered_map<PersonId, VisitorInfo> visitor_data = {
+      {kVisitorRider, visitor}};
+
+  // The visitor has no slot in this rank's people array.
+  std::vector<InteractionMember> members;
+  for (const auto& l : locs) {
+    InteractionMember m;
+    m.id = l.person_id;
+    m.array_index = l.person_id == kVisitorRider ? world.people.size()
+                                                 : l.person_array_index;
+    m.subset_index = l.subset_index;
+    m.encounter_type_id = l.encounter_type_id;
+    members.push_back(m);
+  }
+
+  auto acc = im.computePartialPresenceLambda(
+      members, world.getVenue(line), line, /*current_time=*/5.0, delta_hours,
+      &visitor_data, /*encounter_type_id=*/255);
+  auto lambda_of = [&](PersonId pid) {
+    auto it = acc.susc_lambda.find(pid);
+    return it == acc.susc_lambda.end() ? 0.0 : it->second;
+  };
+  return {lambda_of(kLocalRider), lambda_of(kVisitorRider)};
+}
+
+}  // namespace
+
+TEST_CASE(
+    "partial-presence FOI: a visitor rider is binned by sex like a local "
+    "rider") {
+  // Contacts only for observers in the male bin.
+  const std::vector<std::vector<double>> rows = {{6.0, 6.0}, {0.0, 0.0}};
+  const RiderLambdas male =
+      riderLambdasByBin(Sex::MALE, 30.0f, {"male", "female"}, rows);
+  CHECK(male.local > 0.0);
+  CHECK(male.visitor == doctest::Approx(male.local).epsilon(1e-12));
+
+  const RiderLambdas female =
+      riderLambdasByBin(Sex::FEMALE, 30.0f, {"male", "female"}, rows);
+  CHECK(female.local == 0.0);
+  CHECK(female.visitor == 0.0);
+}
+
+TEST_CASE(
+    "partial-presence FOI: a visitor rider is binned by age like a local "
+    "rider") {
+  // Contacts only for observers in the adult band, where the infectious rider
+  // (age 30) is.
+  const std::vector<std::vector<double>> rows = {{0.0, 0.0}, {0.0, 6.0}};
+  const std::vector<std::string> bins = {"0-17", "18+"};
+  for (float age : {18.0f, 64.0f, 100.0f}) {
+    CAPTURE(age);
+    const RiderLambdas adult = riderLambdasByBin(Sex::UNKNOWN, age, bins, rows);
+    CHECK(adult.local > 0.0);
+    CHECK(adult.visitor == doctest::Approx(adult.local).epsilon(1e-12));
+  }
+  for (float age : {0.0f, 17.0f, 17.99f}) {
+    CAPTURE(age);
+    const RiderLambdas child = riderLambdasByBin(Sex::UNKNOWN, age, bins, rows);
+    CHECK(child.local == 0.0);
+    CHECK(child.visitor == 0.0);
+  }
+}

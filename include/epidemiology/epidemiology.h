@@ -27,7 +27,8 @@ class Epidemiology {
                EventLogger* event_logger = nullptr);
 
   // Update infection states (symptom changes, recoveries, deaths) for all
-  // actively infected people
+  // actively infected people. Every transition up to current_simulation_time
+  // is applied, so the caller passes the end of the slot it has just run.
   EpiSlotStats updateInfectionStates(
       double current_simulation_time,
       const std::vector<PersonLocation>& locations);

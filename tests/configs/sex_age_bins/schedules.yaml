@@ -1,0 +1,224 @@
+# Weekly time use for the sex and age bins scenario.
+#
+# Slot boundaries are shared. The first schedule type in priority order sets
+# the clock for the whole run, and every other schedule type that is not
+# temporary must have the same number of slots with the same start and end for
+# every day type. What can differ between schedule types is which activities a
+# slot allows, how likely each is, and the hops and options below.
+#
+# Day types: Monday to Friday are "weekday", then "saturday" and "sunday".
+# The cycle is positional (sim_day % 7), so simulation.yaml starts on a Monday.
+day_type_cycle: [weekday, weekday, weekday, weekday, weekday, saturday, sunday]
+
+# Used when nothing matches. It must name a schedule type below.
+default_schedule_type: "has_primary_activity"
+
+# Probabilistic assignment on top of the rules below. A row in the CSV can hand
+# a share of a group to a schedule type, and the rest fall through to the
+# selection rules in this file.
+schedule_csv: "tests/configs/sex_age_bins/schedules.csv"
+
+schedule_types:
+
+    # -------------------------------------------------------------------------
+    # Clinically vulnerable: anyone whose comorbidity list holds
+    # immunosuppression. Highest priority, so it is the reference for the clock.
+    # `contains` on a list property matches one exact member of the list.
+    # -------------------------------------------------------------------------
+    clinically_vulnerable:
+        priority: 40
+        selection:
+            - {property: "properties.comorbidities", operator: contains, value: "immunosuppression"}
+        weekday: &weekday_slots
+            - {name: morning_commute, start: "08:00", end: "09:00", allowed_activities: [commute, no_venue, residence]}
+            - {name: primary_activity, start: "09:00", end: "17:00", allowed_activities: [primary_activity, residence]}
+            - {name: evening_commute, start: "17:00", end: "18:00", allowed_activities: [commute, no_venue, residence]}
+            - {name: evening, start: "18:00", end: "21:00", allowed_activities: [leisure, residence]}
+            - {name: night, start: "21:00", end: "08:00", allowed_activities: [residence]}
+        saturday: &weekend_slots
+            - {name: morning, start: "08:00", end: "12:00", allowed_activities: [leisure, residence]}
+            - {name: day, start: "12:00", end: "16:00", allowed_activities: [leisure, residence]}
+            - {name: afternoon, start: "16:00", end: "18:00", allowed_activities: [leisure, residence]}
+            - {name: evening, start: "18:00", end: "21:00", allowed_activities: [leisure, residence]}
+            - {name: night, start: "21:00", end: "08:00", allowed_activities: [residence]}
+        sunday: *weekend_slots
+        # Leisure is redrawn every slot for this group even though the
+        # performance file caches other activities, so the low rate below is
+        # rolled fresh each time.
+        force_hybrid_activities: [leisure]
+        participation:
+            primary_activity: {weekday: 0.4, saturday: 0.0, sunday: 0.0}
+            commute: {weekday: 0.4, saturday: 0.0, sunday: 0.0}
+            no_venue: {weekday: 0.4, saturday: 0.0, sunday: 0.0}
+            leisure: {weekday: 0.1, saturday: 0.15, sunday: 0.15}
+            residence: {weekday: 1.0, saturday: 1.0, sunday: 1.0}
+
+    # -------------------------------------------------------------------------
+    # Night owls: a quarter of adults aged 18 to 29, chosen in schedules.csv.
+    # After 21:00 on a weekend, leisure is not something that is rolled for. It
+    # exists only as a coordinated encounter, so a night out happens when
+    # friends commit to one (see coordinated_encounters.yaml) and never on its
+    # own. The selection below can never match, so the CSV is the only way in.
+    # -------------------------------------------------------------------------
+    night_owls:
+        priority: 35
+        selection:
+            - {property: age, operator: "<", value: 0}
+        weekday: *weekday_slots
+        saturday: &owl_weekend_slots
+            - {name: morning, start: "08:00", end: "12:00", allowed_activities: [leisure, residence]}
+            - {name: day, start: "12:00", end: "16:00", allowed_activities: [leisure, residence]}
+            - {name: afternoon, start: "16:00", end: "18:00", allowed_activities: [leisure, residence]}
+            - {name: evening, start: "18:00", end: "21:00", allowed_activities: [leisure, residence]}
+            - {name: night, start: "21:00", end: "08:00", allowed_activities: [residence], coordinated_only_activities: [leisure]}
+        sunday: *owl_weekend_slots
+        participation:
+            primary_activity: {weekday: 1.0, saturday: 0.0, sunday: 0.0}
+            commute: {weekday: 1.0, saturday: 0.0, sunday: 0.0}
+            no_venue: {weekday: 1.0, saturday: 0.0, sunday: 0.0}
+            leisure: {weekday: 0.4, saturday: 0.6, sunday: 0.5}
+            residence: {weekday: 1.0, saturday: 1.0, sunday: 1.0}
+
+    # -------------------------------------------------------------------------
+    # People with no primary activity (no job, school or care home work).
+    # -------------------------------------------------------------------------
+    no_primary_activity:
+        priority: 10
+        selection:
+            - {property: "activities.primary_activity.length", operator: "==", value: 0}
+        weekday:
+            - {name: morning_commute, start: "08:00", end: "09:00", allowed_activities: [residence]}
+            # specified_activity pins the venue for this slot: when the person
+            # picks leisure here they go to the first grocery (index 0) among
+            # their leisure venues, as a shopping trip, instead of a weighted
+            # draw over every venue type. Without a grocery they draw as usual.
+            - {name: primary_activity, start: "09:00", end: "17:00", allowed_activities: [leisure, residence],
+               specified_activity: {type: leisure, venue_type: grocery, index: 0}}
+            - {name: evening_commute, start: "17:00", end: "18:00", allowed_activities: [leisure, residence]}
+            - {name: evening, start: "18:00", end: "21:00", allowed_activities: [leisure, residence]}
+            - {name: night, start: "21:00", end: "08:00", allowed_activities: [residence]}
+        saturday: *weekend_slots
+        sunday: *weekend_slots
+        participation:
+            leisure: {weekday: 0.4, saturday: 0.5, sunday: 0.5}
+            residence: {weekday: 1.0, saturday: 1.0, sunday: 1.0}
+
+    # -------------------------------------------------------------------------
+    # Workers, split by work_mode. The world places every worker in a workplace
+    # whatever their work mode, so these schedules decide who actually goes.
+    # They rank above night_owls so a young hybrid worker keeps their work mode.
+    # -------------------------------------------------------------------------
+    has_primary_activity_from_home:
+        priority: 38
+        selection:
+            - {property: "properties.work_mode", operator: "==", value: "From_Home"}
+        weekday: *weekday_slots
+        saturday: *weekend_slots
+        sunday: *weekend_slots
+        participation:
+            primary_activity: {weekday: 0.0, saturday: 0.0, sunday: 0.0}
+            commute: {weekday: 0.0, saturday: 0.0, sunday: 0.0}
+            no_venue: {weekday: 0.0, saturday: 0.0, sunday: 0.0}
+            leisure: {weekday: 0.3, saturday: 0.5, sunday: 0.5}
+            residence: {weekday: 1.0, saturday: 1.0, sunday: 1.0}
+
+    has_primary_activity_hybrid:
+        priority: 37
+        selection:
+            - {property: "properties.work_mode", operator: "==", value: "Hybrid"}
+        weekday: *weekday_slots
+        saturday: *weekend_slots
+        sunday: *weekend_slots
+        # One dice roll a day for all three. A hybrid worker is either in
+        # today, commuting and at work, or out of it all day. Linked activities
+        # are redrawn at runtime, so they are hybrid without being listed
+        # under force_hybrid_activities, and the first one's rate is used.
+        linked_activities: [commute, no_venue, primary_activity]
+        participation:
+            primary_activity: {weekday: 0.6, saturday: 0.0, sunday: 0.0}
+            commute: {weekday: 0.6, saturday: 0.0, sunday: 0.0}
+            no_venue: {weekday: 0.6, saturday: 0.0, sunday: 0.0}
+            leisure: {weekday: 0.3, saturday: 0.5, sunday: 0.5}
+            residence: {weekday: 1.0, saturday: 1.0, sunday: 1.0}
+
+    # -------------------------------------------------------------------------
+    # Everyone else with a primary activity. The empty selection matches anyone,
+    # so this is the fallback.
+    # -------------------------------------------------------------------------
+    has_primary_activity:
+        priority: 0
+        selection: []
+        weekday:
+            - {name: morning_commute, start: "08:00", end: "09:00", allowed_activities: [commute, no_venue, residence]}
+            - {name: primary_activity, start: "09:00", end: "17:00", allowed_activities: [primary_activity, residence]}
+            - {name: evening_commute, start: "17:00", end: "18:00", allowed_activities: [commute, no_venue, residence]}
+            # A person who picks leisure here hops onto the temporary
+            # travel_trip schedule below. hop_on_activity maps an activity to
+            # the schedule to hop to. Followers bound to a host (see
+            # coordinated_encounters.yaml) travel with them.
+            - {name: evening, start: "18:00", end: "21:00", allowed_activities: [leisure, residence],
+               hop_on_activity: {leisure: travel_trip}}
+            - {name: night, start: "21:00", end: "08:00", allowed_activities: [residence]}
+        saturday: *weekend_slots
+        sunday: *weekend_slots
+        participation:
+            primary_activity: {weekday: 1.0, saturday: 0.0, sunday: 0.0}
+            commute: {weekday: 1.0, saturday: 0.0, sunday: 0.0}
+            # Walkers, cyclists and drivers have no transport line, so commute
+            # is not open to them. They pass through no_venue instead: in
+            # transit, in no venue, with no transmission.
+            no_venue: {weekday: 1.0, saturday: 0.0, sunday: 0.0}
+            leisure: {weekday: 0.3, saturday: 0.5, sunday: 0.5}
+            residence: {weekday: 1.0, saturday: 1.0, sunday: 1.0}
+
+    # -------------------------------------------------------------------------
+    # Temporary schedules. is_temporary schedules are never assigned to anyone
+    # directly. A person hops onto one, runs its flat_slots one per clock slot
+    # in order, and returns when they are done. They get negative priorities so
+    # they can never be the reference for the clock. A temporary schedule still
+    # needs a participation table, because that is how its slots choose an
+    # activity.
+    # -------------------------------------------------------------------------
+
+    # A night away: out in the evening, away overnight, back the next morning.
+    # return_schedule sends the traveller back to this schedule when the trip
+    # ends. Only has_primary_activity people hop onto it, so it is the schedule
+    # they left. Leave it out to return to whatever the person had before.
+    travel_trip:
+        priority: -10
+        is_temporary: true
+        return_schedule: has_primary_activity
+        flat_slots:
+            - {name: trip_evening, start: "18:00", end: "21:00", allowed_activities: [leisure]}
+            - {name: trip_overnight, start: "21:00", end: "08:00", allowed_activities: [residence]}
+            - {name: trip_morning, start: "08:00", end: "09:00", allowed_activities: [residence]}
+        participation:
+            leisure: {weekday: 1.0, saturday: 1.0, sunday: 1.0}
+            residence: {weekday: 1.0, saturday: 1.0, sunday: 1.0}
+
+    # Where a policy sends a traveller who is cut short (curtail_trips in
+    # policies.yaml): home for the rest of the trip.
+    stay_put:
+        priority: -30
+        is_temporary: true
+        flat_slots:
+            - {name: stay_evening, start: "18:00", end: "21:00", allowed_activities: [residence]}
+            - {name: stay_overnight, start: "21:00", end: "08:00", allowed_activities: [residence]}
+            - {name: stay_morning, start: "08:00", end: "09:00", allowed_activities: [residence]}
+        participation:
+            residence: {weekday: 1.0, saturday: 1.0, sunday: 1.0}
+
+    # A day out for a calendar event (calendar_events.csv). Five slots, one per
+    # clock slot of a weekend day.
+    gathering_day:
+        priority: -20
+        is_temporary: true
+        flat_slots:
+            - {name: gathering_morning, start: "08:00", end: "12:00", allowed_activities: [leisure, residence]}
+            - {name: gathering_day, start: "12:00", end: "16:00", allowed_activities: [leisure]}
+            - {name: gathering_afternoon, start: "16:00", end: "18:00", allowed_activities: [leisure]}
+            - {name: gathering_evening, start: "18:00", end: "21:00", allowed_activities: [leisure, residence]}
+            - {name: gathering_night, start: "21:00", end: "08:00", allowed_activities: [residence]}
+        participation:
+            leisure: {weekday: 0.9, saturday: 0.9, sunday: 0.9}
+            residence: {weekday: 1.0, saturday: 1.0, sunday: 1.0}

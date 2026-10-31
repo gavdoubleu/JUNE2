@@ -6,6 +6,7 @@
 #include <stdexcept>
 
 #include "core/world_state.h"
+#include "loaders/config_loader_detail.h"
 
 namespace june {
 
@@ -20,10 +21,16 @@ OnTheFlyVenueAllocator::OnTheFlyVenueAllocator(const std::string& config_path)
 
 OnTheFlyVenueAllocator::OnTheFlyVenueAllocator(const YAML::Node& root) {
   std::unordered_map<std::string, RuleConfig> parsed_rules;
+  config_detail::rejectUnknownKeys(root, {"rules", "activity_rules"},
+                                   "on_the_fly_venues: ");
   const auto& rules_node = root["rules"];
   for (const auto& entry : rules_node) {
     const std::string rule_name = entry.first.as<std::string>();
     const YAML::Node& cfg = entry.second;
+
+    config_detail::rejectUnknownKeys(
+        cfg, {"strategy", "venue_type", "venue_stability", "geo_unit_level"},
+        "on_the_fly_venues: ", " in rule '" + rule_name + "'");
 
     RuleConfig rule;
 

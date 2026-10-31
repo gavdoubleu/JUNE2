@@ -41,23 +41,3 @@ parallel:
     # Optimal for large-scale: 500 geo_units = ~100MB per chunk
     # For 180K geo_units: adjust based on memory (500-1000 recommended)
     geo_unit_chunk_size: 1000
-
-  # MPI communication options
-  communication:
-    # Buffer size for MPI_Alltoallv (in MB)
-    buffer_size_mb: 256
-
-  # Output and reporting
-  output:
-    # Save domain partition to file for visualization
-    save_partition: true
-    partition_file: "output/partition.json"
-
-    # Report load balance statistics at initialization
-    report_load_balance: true
-
-    # Report communication statistics during simulation
-    report_communication: false
-
-    # How often to report stats (in simulation days)
-    report_interval_days: 1

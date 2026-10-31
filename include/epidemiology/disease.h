@@ -37,11 +37,6 @@ struct SymptomTag {
 // =============================================================================
 
 struct DiseaseStageSettings {
-  std::string default_lowest_stage;
-  std::string max_mild_symptom_tag;
-
-  std::vector<std::string> stay_at_home_stages;
-  std::vector<std::string> severe_symptoms_stay_at_home_stages;
   std::vector<std::string> hospitalised_stages;
   std::vector<std::string> intensive_care_stages;
   std::vector<std::string> fatality_stages;

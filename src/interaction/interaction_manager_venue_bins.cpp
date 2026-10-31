@@ -264,13 +264,15 @@ void InteractionManager::binMemberClassification(
 }
 
 int InteractionManager::resolveMemberBinIndex(
-    const InteractionMember& member, const Person* person, Venue* venue,
+    const InteractionMember& member, const Person* person,
+    const VisitorInfo* visitor, Venue* venue,
     const ContactMatrix& bin_structure, int num_bins_needed,
     uint8_t encounter_type_id, [[maybe_unused]] const std::string& venue_type,
     [[maybe_unused]] uint8_t venue_type_id) {
   stats_.bin_lookups++;
-  int bin_index = computeBinIndexForMatrix(person, venue, member.subset_index,
-                                           &bin_structure, num_bins_needed);
+  int bin_index =
+      computeBinIndexForMatrix(person, visitor, venue, member.subset_index,
+                               &bin_structure, num_bins_needed);
   if (bin_index >= 0 && bin_index < num_bins_needed) return bin_index;
 
 #ifdef DEBUG_TRANSMISSION
@@ -311,9 +313,15 @@ void InteractionManager::binOneMember(
     person = world_.getPerson(pid);
   }
 
-  int bin_index = resolveMemberBinIndex(member, person, venue, bin_structure,
-                                        num_bins_needed, encounter_type_id,
-                                        venue_type, venue_type_id);
+  const VisitorInfo* visitor = nullptr;
+  if (!person && visitor_data != nullptr) {
+    auto it = visitor_data->find(pid);
+    if (it != visitor_data->end()) visitor = &it->second;
+  }
+
+  int bin_index = resolveMemberBinIndex(
+      member, person, visitor, venue, bin_structure, num_bins_needed,
+      encounter_type_id, venue_type, venue_type_id);
 
   // Track which bins are used (for selective clearing next call)
   if (bins_buffer_[bin_index].total_size == 0) {
@@ -324,11 +332,6 @@ void InteractionManager::binOneMember(
     bins_buffer_[bin_index].total_size++;
   }
 
-  const VisitorInfo* visitor = nullptr;
-  if (!person && visitor_data != nullptr) {
-    auto it = visitor_data->find(pid);
-    if (it != visitor_data->end()) visitor = &it->second;
-  }
   binMemberClassification(member, person, visitor, bin_index,
                           emission_calculator, current_time);
 }

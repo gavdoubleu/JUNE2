@@ -1,6 +1,5 @@
 coordinated_encounters:
   enabled: false
-  log_commitments: false
   encounters:
     - name: "social_encounters"
       priority: 10

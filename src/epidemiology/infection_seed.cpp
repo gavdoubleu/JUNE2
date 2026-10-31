@@ -17,6 +17,7 @@
 #include "epidemiology/seeding/seed_cluster_planner.h"
 #include "epidemiology/seeding/seed_identity.h"
 #include "epidemiology/seeding/seed_selector.h"
+#include "loaders/config_loader_detail.h"
 #include "utils/deterministic_rng.h"
 #include "utils/filtered_csv.h"
 #include "utils/mpi_utils.h"
@@ -24,6 +25,8 @@
 #include "utils/time_utils.h"
 
 namespace june {
+
+using ::june::config_detail::rejectUnknownKeys;
 
 namespace {
 
@@ -251,11 +254,27 @@ InfectionSeedConfig InfectionSeedConfigLoader::loadFromFile(
   try {
     YAML::Node root = YAML::LoadFile(filename);
 
+    rejectUnknownKeys(root,
+                      {"global_parameters", "bulk_csv", "infection_seeds"},
+                      filename + ": ", "");
+
     if (root["global_parameters"]) {
       auto global = root["global_parameters"];
+      rejectUnknownKeys(global,
+                        {"base_cases_per_capita", "default_seed_strength"},
+                        filename + ": ", " in 'global_parameters'");
       if (global["base_cases_per_capita"]) {
         config.global_params.base_cases_per_capita =
             global["base_cases_per_capita"].as<double>();
+      }
+      if (global["default_seed_strength"]) {
+        const double strength = global["default_seed_strength"].as<double>();
+        if (!std::isfinite(strength) || strength < 0.0) {
+          throw std::runtime_error("global_parameters: default_seed_strength " +
+                                   std::to_string(strength) +
+                                   " must be zero or more");
+        }
+        config.global_params.default_seed_strength = strength;
       }
     }
 
@@ -268,6 +287,12 @@ InfectionSeedConfig InfectionSeedConfigLoader::loadFromFile(
       for (const auto& seed_node : root["infection_seeds"]) {
         InfectionSeedEvent seed;
         seed.name = seed_node["name"].as<std::string>();
+        rejectUnknownKeys(seed_node,
+                          {"name", "type", "date", "trajectory_key",
+                           "start_symptom", "infector_symptom",
+                           "transmission_mode", "geo_level", "parameters"},
+                          filename + ": ",
+                          " in infection seed '" + seed.name + "'");
         seed.type = parseSeedType(seed_node["type"].as<std::string>());
         seed.date_time = seed_node["date"].as<std::string>();
 
@@ -284,6 +309,11 @@ InfectionSeedConfig InfectionSeedConfigLoader::loadFromFile(
 
         if (seed_node["parameters"]) {
           auto params = seed_node["parameters"];
+          rejectUnknownKeys(
+              params,
+              {"seed_strength", "attribute_filters",
+               "cases_per_capita_multiplier", "age_groups", "units"},
+              filename + ": ", " in 'parameters' of seed '" + seed.name + "'");
           seed.seed_strength = params["seed_strength"].as<double>(
               config.global_params.default_seed_strength);
           // A negative strength turns every budget negative, which undercuts

@@ -40,9 +40,6 @@ disease:
   outcome_rates_csv:
     file: ../../data/infection_outcome_rates_covid19.csv
 
-    # Age column configuration
-    age_column_index: 0  # First column contains age ranges
-
     # Population types (residence/demographic groups)
     # These are prefixes in the CSV column names
     populations:
@@ -52,10 +49,6 @@ disease:
         description: General population not in care facilities
       ch:
         name: care_home
-        selection:
-          - property: "activities.residence.venue_type"
-            operator: "=="
-            value: "care_home"
         description: Residents of care homes / long-term care facilities
 
     # Sex categories
@@ -87,14 +80,6 @@ disease:
       icu_ifr:
         symptom_tag: dead_icu
         description: Infection fatality rate for deaths in ICU
-
-      # Tags that don't have direct CSV columns
-    # Their rates are calculated from other outcomes
-    calculated_outcomes:
-      severe:
-        symptom_tag: severe
-        description: Severe symptoms at home (calculated)
-        calculation: "1.0 - asymptomatic - mild - hospital - home_ifr"
 
   trajectories:
     # 'severity' (0.0-1.0) defines how the vaccine shifts probability away from this outcome.

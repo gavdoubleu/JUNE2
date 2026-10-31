@@ -25,10 +25,21 @@ namespace {
 
 namespace fs = std::filesystem;
 
+// Every dataset below is created by the writer even when it has no rows, so a
+// missing one means a truncated or damaged file. Resuming from the rest of it
+// would drop state without saying so, which is why a read throws. A section
+// that may legitimately be absent is tested for by its group before any read.
+void requireDataset(H5::H5File& f, const std::string& n) {
+  if (H5Lexists(f.getId(), n.c_str(), H5P_DEFAULT) <= 0)
+    throw std::runtime_error(
+        "restoreFromCheckpoint: checkpoint is missing " + n +
+        " (incomplete or damaged checkpoint): " + f.getFileName());
+}
+
 template <typename T>
 std::vector<T> readVec(H5::H5File& f, const std::string& n,
                        const H5::PredType& t) {
-  if (!H5Lexists(f.getId(), n.c_str(), H5P_DEFAULT)) return {};
+  requireDataset(f, n);
   H5::DataSet d = f.openDataSet(n);
   hsize_t dim[1];
   d.getSpace().getSimpleExtentDims(dim);
@@ -38,7 +49,7 @@ std::vector<T> readVec(H5::H5File& f, const std::string& n,
 }
 
 std::vector<std::string> readStrs(H5::H5File& f, const std::string& n) {
-  if (!H5Lexists(f.getId(), n.c_str(), H5P_DEFAULT)) return {};
+  requireDataset(f, n);
   H5::DataSet d = f.openDataSet(n);
   hsize_t dim[1];
   d.getSpace().getSimpleExtentDims(dim);
@@ -94,7 +105,9 @@ void overlayShardManagerState(
 
   // Follows: keep a relationship if THIS rank owns the follower, and a
   // tried-host if it owns the host. Each stochastic rule has its own named
-  // subgroup; a criteria rule wrote none and rebuilds itself. A run with no
+  // subgroup; a criteria rule wrote none and rebuilds itself, and a rule added
+  // since the checkpoint has nothing to restore. So a rule with no subgroup is
+  // skipped, and a subgroup that is present must be complete. A run with no
   // follow rule writes no group at all.
   if (H5Lexists(f.getId(), "/follow", H5P_DEFAULT) > 0) {
     for (size_t ri = 0; ri < follow_names.size(); ++ri) {
@@ -240,6 +253,7 @@ size_t overlayShardVaccine(H5::H5File& f, WorldState& world,
   auto dcnt = readVec<int32_t>(f, "/vaccine/dose_counts", I32);
   auto dnum = readVec<int32_t>(f, "/vaccine/dose_number", I32);
   auto dad = readVec<double>(f, "/vaccine/dose_day_administered", F64);
+  auto donset = readVec<double>(f, "/vaccine/dose_days_to_onset", F64);
   auto deff = readVec<double>(f, "/vaccine/dose_days_to_effective", F64);
   auto dwan = readVec<double>(f, "/vaccine/dose_days_to_waning", F64);
   auto dfin = readVec<double>(f, "/vaccine/dose_days_to_finished", F64);
@@ -257,6 +271,7 @@ size_t overlayShardVaccine(H5::H5File& f, WorldState& world,
       Dose d;
       d.number = dnum[off + k];
       d.day_administered = dad[off + k];
+      d.days_to_onset = donset[off + k];
       d.days_to_effective = deff[off + k];
       d.days_to_waning = dwan[off + k];
       d.days_to_finished = dfin[off + k];
@@ -305,6 +320,8 @@ size_t overlayShardFomite(H5::H5File& f, WorldState& world) {
 
 void overlayShardCalendarEvents(H5::H5File& f, WorldState& world,
                                 CalendarEventManager::Snapshot& snap) {
+  // The group is written only while some event is active, so a shard without
+  // it is normal.
   if (!f.exists("/calendar_events")) return;
   const auto I32 = H5::PredType::NATIVE_INT32;
   auto pids = readVec<int32_t>(f, "/calendar_events/person_ids", I32);
@@ -508,7 +525,13 @@ void Simulator::restoreFromCheckpoint(const std::string& checkpoint_dir) {
   CalendarEventManager::Snapshot ce_snap;
   for (int s = 0; s < n_shards; ++s) {
     fs::path sf = cp / ("delta_rank" + std::to_string(s) + ".h5");
-    if (!fs::exists(sf)) continue;
+    // Every rank writes its shard, even with no people, so one that is not
+    // there is a damaged checkpoint and its people would be left unrestored.
+    if (!fs::exists(sf))
+      throw std::runtime_error(
+          "restoreFromCheckpoint: checkpoint is missing its shard for rank " +
+          std::to_string(s) +
+          " (incomplete or damaged checkpoint): " + sf.string());
     H5::H5File f(sf.string(), H5F_ACC_RDONLY);
     n_people +=
         overlayShardPopulation(f, world_, *policy_manager_, roster_match);

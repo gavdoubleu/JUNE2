@@ -48,6 +48,10 @@ void mergeEventFiles(const std::vector<std::string>& input_files,
     event_merger_detail::mergeDatasetTemplate<FollowEvent>(
         out_file, "/events/follows", input_files, event_schema::follow());
     std::cout << "  Merged /events/follows" << std::endl;
+    event_merger_detail::mergeDatasetTemplate<CampaignDayEvent>(
+        out_file, "/events/campaign_days", input_files,
+        event_schema::campaignDay());
+    std::cout << "  Merged /events/campaign_days" << std::endl;
 
     event_merger_detail::mergePeopleLookup(out_file, input_files);
     event_merger_detail::mergeVenueLookup(out_file, input_files);

@@ -45,6 +45,8 @@ Domain::VisitorData buildVisitorPayload(const PersonLocation& location,
   visitor.immunity_level = static_cast<float>(1.0 - susceptibility);
 
   visitor.encounter_type_id = location.encounter_type_id;
+  visitor.age = person.age;
+  visitor.sex_code = static_cast<uint8_t>(person.sex);
   visitor.newly_infected = false;
   visitor.new_infection_time = -1.0;
 

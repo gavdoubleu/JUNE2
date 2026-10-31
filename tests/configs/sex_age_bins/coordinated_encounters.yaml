@@ -1,0 +1,135 @@
+# Coordinated encounters: meetings that only happen when specific people
+# commit to them, as opposed to the mass mixing the contact matrices describe.
+# Plus follow rules, which place one person wherever another goes.
+
+coordinated_encounters:
+    enabled: true
+
+    # Rates read from a table. An encounter that names a group here takes its
+    # proposal rate from the table instead of proposal_probability, and the two
+    # cannot be given together. Encounters that share a group share one roll per
+    # person per day.
+    frequency_groups:
+        social_rates:
+            csv: "tests/configs/sex_age_bins/social_frequency.csv"
+            rate_column: events_per_month
+            # One of per_day, per_week, per_month (30 days), per_year (365).
+            rate_unit: per_month
+
+    encounters:
+        # Lower priority numbers are handled first.
+
+        # A couple, at a virtual venue. There is no real venue: the people who
+        # commit meet in a synthetic one whose contact rates are the
+        # private_gathering block in contact_matrices.yaml. The network is the
+        # world's cohabiting_couple ties.
+        - name: "couple_time"
+          priority: 5
+          enabled: true
+          network: "cohabiting_couple"
+          trigger_slots: ["leisure"]
+          allowed_venues: []
+          is_virtual: true
+          virtual_contact_matrix: "private_gathering"
+          proposal_probability: 0.08
+          invite_distribution: {type: fixed, count: 1}
+          acceptance_probability: 0.95
+          daily_max_distribution: {type: fixed, count: 1}
+
+        # Friends meeting at a pub or cinema. trigger_slots are activity names:
+        # the encounter can start in any slot that allows one of them. Three
+        # people at least, or the meeting is cancelled and everyone keeps their
+        # own plans.
+        - name: "social_encounters"
+          priority: 10
+          enabled: true
+          network: "friendships"
+          trigger_slots: ["leisure"]
+          allowed_venues: ["pub", "cinema"]
+          daily_max_distribution: {type: poisson, mean: 1.5}
+          proposal_probability: 0.05
+          invite_distribution: {type: binomial, p: 0.3}
+          acceptance_probability: 0.8
+          min_attendees: 3
+
+        # Gym sessions. The host's rate comes from the table above, and the
+        # host invites exactly two friends.
+        - name: "gym_buddies"
+          priority: 20
+          enabled: true
+          network: "friendships"
+          trigger_slots: ["leisure"]
+          allowed_venues: ["gym"]
+          frequency_group: "social_rates"
+          invite_distribution: {type: fixed, count: 2}
+
+        # Switched off, to show the flag. It is parsed and resolved like the
+        # others but never fires.
+        - name: "pub_quiz"
+          priority: 30
+          enabled: false
+          network: "friendships"
+          trigger_slots: ["leisure"]
+          allowed_venues: ["pub"]
+          proposal_probability: 0.02
+          invite_distribution: {type: poisson, mean: 4}
+
+    # Follow rules. A follower is placed wherever its host is, slot by slot,
+    # while they are bound. They work with or without the encounters above.
+    # Each rule picks a pool (set exactly one of pool_venue_type or network),
+    # how a binding forms (establishment) and how long it lasts (span).
+    #
+    # A person can be a host under any number of rules but a follower under at
+    # most one, the first rule that binds them, and never both at once.
+    follows:
+        # Children under 10 go where an adult in their household goes. The
+        # binding is a rule with no randomness, so it is rebuilt every day and
+        # costs nothing in a checkpoint.
+        - name: kids_with_a_parent
+          enabled: true
+          pool_venue_type: household
+          establishment: criteria
+          span: standing
+          eligibility:
+              - {property: age, operator: "<", value: 10}
+          host_eligibility:
+              - {property: age, operator: ">=", value: 18}
+          # Three ways to leave the follower on its own plans for a slot. A
+          # child does not go to work or on the commute with the parent...
+          activity_exceptions: [primary_activity, commute]
+          # ...nor to the gym...
+          venue_exceptions: [gym]
+          # ...and a child who has school of its own goes to school wherever the
+          # parent is.
+          follower_activity_exceptions: [primary_activity]
+          log: true
+
+        # An adult partner who joins a household member's night away. A
+        # stochastic binding is a per-host roll, kept the same at every rank
+        # count. A hop binding lasts one trip of the host's and ends when the
+        # host gets back, so it needs the hop_on_activity in schedules.yaml.
+        - name: partner_joins_trip
+          enabled: true
+          pool_venue_type: household
+          establishment: stochastic
+          probability: 0.2
+          span: hop
+          eligibility:
+              - {property: age, operator: ">=", value: 18}
+          host_eligibility:
+              - {property: age, operator: ">=", value: 18}
+          follower_activity_exceptions: [primary_activity]
+          log: true
+
+        # A friend tags along on a trip. The pool is the host's partners in a
+        # network, who can live on another rank, so a network pool cannot take
+        # host_eligibility. encounter_type stamps the follower's location with
+        # an encounter name from this file, for the logs.
+        - name: friends_on_trips
+          enabled: true
+          network: friendships
+          establishment: stochastic
+          probability: 0.1
+          span: hop
+          encounter_type: social_encounters
+          log: true

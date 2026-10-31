@@ -1,6 +1,7 @@
 #include "epidemiology/calendar_event.h"
 
 #include <random>
+#include <stdexcept>
 
 #include "core/world_state.h"
 #include "utils/deterministic_rng.h"
@@ -17,9 +18,10 @@ CalendarEventManager::CalendarEventManager(
 
 std::vector<PersonId> CalendarEventManager::attendeesForCatchmentEvent(
     const CalendarEvent& event, const WorldState& world,
-    const std::unordered_map<int32_t, std::vector<GeoUnitId>>& catchment_rules)
-    const {
+    const std::unordered_map<int32_t, std::vector<GeoUnitId>>& catchment_rules,
+    uint64_t& in_catchment) const {
   std::vector<PersonId> attendees;
+  in_catchment = 0;
   auto rule_it = catchment_rules.find(event.catchment_rule_id);
   if (rule_it == catchment_rules.end()) return attendees;
 
@@ -28,6 +30,7 @@ std::vector<PersonId> CalendarEventManager::attendeesForCatchmentEvent(
     if (ppl_it == world.people_by_geo_unit.end()) continue;
     for (uint32_t person_idx : ppl_it->second) {
       const Person& person = world.people[person_idx];
+      ++in_catchment;
       if (event.attendee_filters.empty() ||
           filtering::matchesCriteria(person, &world, event.attendee_filters)) {
         attendees.push_back(person.id);
@@ -57,23 +60,29 @@ void CalendarEventManager::triggerEventsForDay(
     const std::unordered_map<int32_t, std::vector<GeoUnitId>>&
         catchment_rules) {
   sweepCompletedHops(world.person_index, people);
+  last_day_counts_.clear();
 
   if (day < 0 || day >= static_cast<int>(events_by_day_.size())) return;
   const auto& todays_events = events_by_day_[day];
   if (todays_events.empty()) return;
 
   for (const auto& event : todays_events) {
-    const std::vector<PersonId> attendees =
-        attendeesForCatchmentEvent(event, world, catchment_rules);
+    EventDayCounts counts;
+    counts.calendar_event_id = event.calendar_event_id;
+    counts.catchment_rule_id = event.catchment_rule_id;
+    const std::vector<PersonId> attendees = attendeesForCatchmentEvent(
+        event, world, catchment_rules, counts.in_catchment);
 
     for (PersonId pid : attendees) {
       auto idx_it = world.person_index.find(pid);
       if (idx_it == world.person_index.end()) continue;  // not on this rank
+      ++counts.passed_filters;
       Person& person = people[idx_it->second];
 
       // Collision: never override a person already mid-hop.
       if (person.schedule_hop.isActive()) {
         ++stats_.skipped_collision;
+        ++counts.already_hopping;
         continue;
       }
 
@@ -83,6 +92,7 @@ void CalendarEventManager::triggerEventsForDay(
       double roll = uniform01(rng);
       if (roll >= event.compliance_rate) {
         ++stats_.skipped_compliance;
+        ++counts.refused;
         continue;
       }
 
@@ -92,8 +102,40 @@ void CalendarEventManager::triggerEventsForDay(
                                                event.duration_days - 1);
       active_event_[person.id] = event.calendar_event_id;
       ++stats_.triggered;
+      ++counts.hopping;
+    }
+    last_day_counts_.push_back(counts);
+  }
+}
+
+void CalendarEventManager::checkCatchmentRules(
+    const std::unordered_map<int32_t, std::vector<GeoUnitId>>& catchment_rules,
+    const std::string& rules_source) const {
+  for (const auto& day_events : events_by_day_) {
+    for (const auto& event : day_events) {
+      if (catchment_rules.count(event.catchment_rule_id)) continue;
+      throw std::runtime_error(
+          "calendar event " + std::to_string(event.calendar_event_id) +
+          " names catchment_rule_id " +
+          std::to_string(event.catchment_rule_id) + ", which is not in " +
+          (rules_source.empty()
+               ? std::string("any catchment rules file (none is configured)")
+               : rules_source));
     }
   }
+}
+
+std::string formatCalendarEventLine(
+    const CalendarEventManager::EventDayCounts& counts,
+    const std::string& date) {
+  return "[CalendarEvent] id=" + std::to_string(counts.calendar_event_id) +
+         " " + date +
+         " catchment_rule=" + std::to_string(counts.catchment_rule_id) + ": " +
+         std::to_string(counts.in_catchment) + " in catchment, " +
+         std::to_string(counts.passed_filters) + " pass filters, " +
+         std::to_string(counts.already_hopping) + " already hopping, " +
+         std::to_string(counts.refused) + " refused, " +
+         std::to_string(counts.hopping) + " hopping\n";
 }
 
 std::optional<GeoUnitId> CalendarEventManager::getActiveHostingGeoUnit(

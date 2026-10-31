@@ -42,6 +42,7 @@ TEST_CASE("Trigger - activation days do not depend on rank count") {
   pm.observedMetrics().declare("deaths", {"death", "world", "", ""});
   TemporalPolicy policy;
   policy.name = "close";
+  policy.action.replacement_activity = "residence";
   PolicyTrigger trigger;
   trigger.metric = "deaths";
   trigger.cumulative = true;
@@ -107,6 +108,7 @@ TEST_CASE("Trigger - venue closures do not depend on rank count") {
       "cases", {"infection", "parent_venue", "primary_activity", ""});
   TemporalPolicy policy;
   policy.name = "close";
+  policy.action.replacement_activity = "residence";
   policy.action.override_activities = {"primary_activity"};
   PolicyTrigger trigger;
   trigger.metric = "cases";
@@ -185,6 +187,7 @@ TEST_CASE("Response - levels and verdicts do not depend on rank count") {
                                {"infection", "venue", "primary_activity", ""});
   TemporalPolicy policy;
   policy.name = "keep_home";
+  policy.action.replacement_activity = "residence";
   policy.action.override_activities = {"primary_activity"};
   PolicyTrigger trigger;
   trigger.scope = MetricScope::Venue;
@@ -265,6 +268,7 @@ TEST_CASE("Response - the startup check agrees on every rank") {
   pm.observedMetrics().declare("deaths", {"death", "world", "", ""});
   TemporalPolicy policy;
   policy.name = "keep_home";
+  policy.action.replacement_activity = "residence";
   policy.action.override_activities = {"primary_activity"};
   PolicyTrigger trigger;
   trigger.terms = {{"deaths", 0.1}};

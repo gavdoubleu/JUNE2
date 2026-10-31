@@ -1,0 +1,285 @@
+# A generic respiratory pathogen with a surface (fomite) route, using the
+# Stage-Driven transmission mode.
+#
+# The name is covid19 because the vaccine efficacies, the outcome table and the
+# seeds all refer to the disease by name. Rename it everywhere together if you
+# want a different pathogen.
+#
+# The other infectiousness mode, Trajectory-Driven, is sketched in a comment at
+# the end of the transmission block. It has no fomite mode, so switching means
+# dropping the fomite rows from transmission_effects.csv as well.
+
+disease:
+    name: covid19
+
+    # Roles the engine needs to recognise. Each list names symptom tags, and a
+    # tag can be in several lists.
+    settings:
+        fatality_stage:
+            - name: dead_home
+            - name: dead_hospital
+            - name: dead_icu
+        recovered_stage:
+            - name: recovered
+        hospitalised_stage:
+            - name: hospitalised
+            - name: intensive_care
+        intensive_care_stage:
+            - name: intensive_care
+
+    # Every state a person can be in. A higher value is sicker. Policies and
+    # seeds refer to tags by name.
+    symptom_tags:
+        - {name: recovered, value: -2}
+        - {name: healthy, value: -1}
+        - {name: exposed, value: 0}
+        - {name: asymptomatic, value: 1}
+        - {name: mild, value: 2}
+        - {name: severe, value: 3}
+        - {name: hospitalised, value: 4}
+        - {name: intensive_care, value: 5}
+        - {name: dead_home, value: 6}
+        - {name: dead_hospital, value: 7}
+        - {name: dead_icu, value: 8}
+
+    # Which clinical path a new infection follows is drawn from this table.
+    # It sits next to this file and carries extra filter columns that look at
+    # how the person was infected.
+    outcome_rates_csv:
+        file: outcome_rates_covid19.csv
+
+    # A trajectory is one clinical path. selection_key is the table column that
+    # gives its probability, severity ranks the paths for vaccine symptom
+    # efficacy, and every stage draws how long it lasts from a distribution.
+    # The distribution types are constant, normal, lognormal, beta, gamma and
+    # exponweib.
+    trajectories:
+        - description: "exposed, asymptomatic, recovered"
+          selection_key: asymptomatic
+          severity: 0.0
+          infectiousness_factor: 0.5
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: beta, a: 2.29, b: 19.05, loc: 0.39, scale: 39.8}
+              - symptom_tag: asymptomatic
+                completion_time: {type: constant, value: 14}
+              - symptom_tag: recovered
+                completion_time: {type: constant, value: 0.0}
+
+        - description: "exposed, mild, recovered"
+          selection_key: mild
+          severity: 0.2
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: beta, a: 2.29, b: 19.05, loc: 0.39, scale: 39.8}
+              - symptom_tag: mild
+                completion_time: {type: normal, loc: 20.0, scale: 3.0}
+              - symptom_tag: recovered
+                completion_time: {type: constant, value: 0.0}
+
+        - description: "exposed, mild, severe, recovered at home"
+          selection_key: severe
+          severity: 0.5
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: beta, a: 2.29, b: 19.05, loc: 0.39, scale: 39.8}
+              - symptom_tag: mild
+                completion_time: {type: lognormal, s: 0.8325, loc: 0.0, scale: 5.727}
+              - symptom_tag: severe
+                completion_time: {type: gamma, shape: 8.0, scale: 2.5}
+              - symptom_tag: recovered
+                completion_time: {type: constant, value: 0.0}
+
+        - description: "exposed, mild, hospitalised, recovered"
+          selection_key: hospital
+          severity: 0.7
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: beta, a: 2.29, b: 19.05, loc: 0.39, scale: 39.8}
+              - symptom_tag: mild
+                completion_time: {type: lognormal, s: 0.55, loc: 0.0, scale: 5.0}
+              - symptom_tag: hospitalised
+                completion_time: {type: beta, a: 1.35, b: 3.68, loc: 0.05, scale: 27.1}
+              - symptom_tag: mild
+                completion_time: {type: constant, value: 8}
+              - symptom_tag: recovered
+                completion_time: {type: constant, value: 0.0}
+
+        - description: "exposed, mild, hospitalised, intensive care, recovered"
+          selection_key: icu
+          severity: 0.9
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: beta, a: 2.29, b: 19.05, loc: 0.39, scale: 39.8}
+              - symptom_tag: mild
+                completion_time: {type: lognormal, s: 0.55, loc: 0.0, scale: 5.0}
+              - symptom_tag: hospitalised
+                completion_time: {type: exponweib, a: 0.085, c: 4.14, loc: 0.0, scale: 6.8}
+              - symptom_tag: intensive_care
+                completion_time: {type: exponweib, a: 1.06, c: 0.89, loc: 0.0, scale: 12}
+              - symptom_tag: hospitalised
+                completion_time: {type: exponweib, a: 15.95, c: 0.4, loc: 0.0, scale: 0.41}
+              - symptom_tag: mild
+                completion_time: {type: constant, value: 3}
+              - symptom_tag: recovered
+                completion_time: {type: constant, value: 0.0}
+
+        - description: "exposed, mild, severe, dies at home"
+          selection_key: home_ifr
+          severity: 1.0
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: beta, a: 2.29, b: 19.05, loc: 0.39, scale: 39.8}
+              - symptom_tag: mild
+                completion_time: {type: lognormal, s: 0.8325, loc: 0.0, scale: 5.727}
+              - symptom_tag: severe
+                completion_time: {type: constant, value: 3.0}
+              - symptom_tag: dead_home
+                completion_time: {type: constant, value: 0.0}
+
+        - description: "exposed, mild, hospitalised, dies in hospital"
+          selection_key: hospital_ifr
+          severity: 1.0
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: beta, a: 2.29, b: 19.05, loc: 0.39, scale: 39.8}
+              - symptom_tag: mild
+                completion_time: {type: lognormal, s: 0.55, loc: 0.0, scale: 5.0}
+              - symptom_tag: hospitalised
+                completion_time: {type: beta, a: 1.21, b: 1.97, loc: 0.08, scale: 12.9}
+              - symptom_tag: dead_hospital
+                completion_time: {type: constant, value: 0.0}
+
+        - description: "exposed, mild, hospitalised, intensive care, dies in ICU"
+          selection_key: icu_ifr
+          severity: 1.0
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: beta, a: 2.29, b: 19.05, loc: 0.39, scale: 39.8}
+              - symptom_tag: mild
+                completion_time: {type: lognormal, s: 0.55, loc: 0.0, scale: 5.0}
+              - symptom_tag: hospitalised
+                completion_time: {type: lognormal, s: 1.412, loc: 0.0, scale: 0.907}
+              - symptom_tag: intensive_care
+                completion_time: {type: exponweib, a: 1.23, c: 1.10, loc: 0.0, scale: 9.69}
+              - symptom_tag: dead_icu
+                completion_time: {type: constant, value: 0.0}
+
+        # A fixed weight instead of a table column: about one infection in a
+        # hundred follows this long, mild course whatever the table says. The
+        # weights are renormalised when they add up to more than one.
+        - description: "exposed, long mild illness, recovered"
+          selection_key: prolonged_mild
+          probability: 0.01
+          severity: 0.3
+          infectiousness_factor: 0.8
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: beta, a: 2.29, b: 19.05, loc: 0.39, scale: 39.8}
+              - symptom_tag: mild
+                completion_time: {type: lognormal, s: 0.4, loc: 0.0, scale: 30.0}
+              - symptom_tag: recovered
+                completion_time: {type: constant, value: 0.0}
+
+        # Reached only when a seed asks for it by key. The table has no column
+        # for it, so ordinary infections never pick it. start_stage makes the
+        # person enter at their first "mild" stage and skip the latent period.
+        - description: "imported case, enters already symptomatic"
+          selection_key: imported_mild
+          start_stage: mild
+          severity: 0.2
+          stages:
+              - symptom_tag: exposed
+                completion_time: {type: constant, value: 3}
+              - symptom_tag: mild
+                completion_time: {type: normal, loc: 12.0, scale: 2.0}
+              - symptom_tag: recovered
+                completion_time: {type: constant, value: 0.0}
+
+    transmission:
+        # Stage-Driven: each mode has its own infectiousness curve per symptom
+        # stage, and the clock restarts every time a person enters a stage.
+        mode: Stage-Driven
+
+        # A mode with no `type` is person to person. Its venue rates come from
+        # contact_matrices.yaml, where the matrix name is the mode name.
+        # mode_transmissibility_multiplier is folded into those betas, so it is
+        # left at 1.0 for the two person to person modes.
+        modes:
+            - name: respiratory
+              mode_transmissibility_multiplier: 1.0
+            - name: physical_contact
+              mode_transmissibility_multiplier: 1.0
+
+            # A fomite mode is infection through material left on surfaces.
+            # Infectious people deposit it where they are (rate per hour from
+            # deposition_stages, by stage), it loses or gains potency with age
+            # along fomite_curve (age in days), and it is dropped after
+            # max_age days. sub_bin_time splits each slot into bins of about
+            # that many hours so deposits made early in a slot can reach people
+            # who arrive later.
+            - name: fomite
+              type: fomite
+              mode_transmissibility_multiplier: 1.0
+              max_age: 7.0
+              sub_bin_time: 4.0
+              fomite_curve:
+                  type: lognormal
+                  mu: 0.5
+                  sigma: 0.5
+                  max_infectiousness: 0.005
+              deposition_stages:
+                  exposed: {type: linear_ramp, start_value: 0.0, end_value: 0.05, ramp_duration: 3.0}
+                  asymptomatic: {type: constant, value: 0.05}
+                  mild: {type: linear_ramp, start_value: 0.05, end_value: 0.1, ramp_duration: 3.0}
+                  severe: {type: exponential_decay, initial_value: 0.1, decay_rate: 0.2}
+
+        # Infectiousness by stage, per mode. The curve types are constant,
+        # gamma, exponential_decay, linear_ramp, lognormal and beta. A stage
+        # left out gets zero for that mode, with a warning for any stage that
+        # is sicker than healthy.
+        stage_curves:
+            respiratory:
+                exposed: {type: constant, value: 0.0}
+                asymptomatic: {type: gamma, max_infectiousness: 0.5, shape: 1.56, rate: 0.53}
+                mild: {type: gamma, max_infectiousness: 1.0, shape: 2.0, rate: 0.5}
+                severe: {type: exponential_decay, initial_value: 1.0, decay_rate: 0.2}
+                hospitalised: {type: constant, value: 0.6}
+                intensive_care: {type: constant, value: 0.5}
+                dead_home: {type: constant, value: 0.0}
+                dead_hospital: {type: constant, value: 0.0}
+                dead_icu: {type: constant, value: 0.0}
+            physical_contact:
+                exposed: {type: constant, value: 0.0}
+                asymptomatic: {type: lognormal, max_infectiousness: 0.5, mu: 1.0, sigma: 0.6}
+                mild: {type: beta, max_infectiousness: 1.0, alpha: 2.0, beta: 5.0, duration: 14.0}
+                severe: {type: linear_ramp, start_value: 1.0, end_value: 0.4, ramp_duration: 6.0}
+                hospitalised: {type: constant, value: 0.6}
+                intensive_care: {type: constant, value: 0.5}
+                dead_home: {type: constant, value: 0.0}
+                dead_hospital: {type: constant, value: 0.0}
+                dead_icu: {type: constant, value: 0.0}
+
+    # ---- The other mode, for reference ------------------------------------------
+    # Trajectory-Driven uses one infectiousness curve for the whole infection.
+    # Each infected person draws their own max_infectiousness, shape, rate and
+    # shift from the distributions below, and the trajectory's
+    # infectiousness_factor scales the curve. There are no per-stage curves and
+    # no fomite mode. Each mode's per-venue beta stays in contact_matrices.yaml.
+    #
+    # transmission:
+    #     mode: Trajectory-Driven
+    #     type: gamma
+    #     max_infectiousness: {type: lognormal, s: 0.5, loc: 0.0, scale: 1}
+    #     shape: {type: normal, loc: 1.56, scale: 0.08}
+    #     rate: {type: normal, loc: 0.53, scale: 0.03}
+    #     shift: {type: normal, loc: -2.12, scale: 0.1}
+    #     modes:
+    #         - {name: respiratory, mode_transmissibility_multiplier: 1.0}
+    #         - {name: physical_contact, mode_transmissibility_multiplier: 1.0}
+
+    # Chance that recovery leaves a person immune, and the daily rate at which
+    # that immunity wears off.
+    immunity:
+        level: 0.95
+        waning_rate: 0.001

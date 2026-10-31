@@ -1,0 +1,125 @@
+# Infection seeds for the sex and age bins scenario. Seeds are how infection enters the
+# world, on day 0 or later. A seed has a name, a type, and a date and time
+# ("YYYY-MM-DD HH:MM") that has to fall inside the run. A seed's name, date,
+# type and the four fields below (trajectory_key, start_symptom,
+# infector_symptom, transmission_mode) together identify it, and two seeds with
+# the same identity are refused.
+#
+# Fields any seed can carry:
+#   trajectory_key      force this clinical path (a selection_key in
+#                       disease.yaml) instead of drawing one
+#   start_symptom       enter the path at this stage and skip the earlier ones
+#   infector_symptom    pretend the infector was in this symptom stage. Outcome
+#                       table rows with filter.infector_symptom can then match
+#   transmission_mode   pretend the infection came by this mode. Rows with
+#                       filter.transmission_mode can then match
+#   parameters.seed_strength   multiplies every count in the seed, default 1
+#
+# Seeds can also come from a CSV, see bulk_csv at the bottom.
+
+global_parameters:
+    # Cases per head of population for a uniform seed with multiplier 1. A
+    # seed's cases_per_capita_multiplier scales this.
+    base_cases_per_capita: 0.0002
+
+infection_seeds:
+
+    # ---- Uniform: random people across the whole population -------------------
+
+    # 2 x 0.0002 of the population, about 250 people.
+    - name: "background_uniform"
+      type: "uniform"
+      date: "2020-03-02 08:00"
+      parameters:
+          cases_per_capita_multiplier: 2.0
+
+    # Restricted to some people. attribute_filters takes property paths and
+    # values as they are written in CSV filter columns: a value, a range such
+    # as 30-59, or a comparison such as >=65.
+    - name: "working_age_in_person"
+      type: "uniform"
+      date: "2020-03-02 08:00"
+      parameters:
+          cases_per_capita_multiplier: 1.0
+          attribute_filters:
+              age: "30-59"
+              properties.work_mode: "Normal"
+
+    # A later wave of importations.
+    - name: "second_wave_women"
+      type: "uniform"
+      date: "2020-04-13 08:00"
+      parameters:
+          cases_per_capita_multiplier: 0.5
+          attribute_filters:
+              sex: "female"
+              age: "18-64"
+
+    # ---- Exact: a stated number of cases in named units -----------------------
+    # geo_level says what the unit names in `units` are: XLGU, LGU, MGU or SGU.
+    # A level above the partition is fine. Each rank covering part of the unit
+    # takes its share and the total is still placed once, at any rank count.
+
+    # One count per age group, in the order the groups are declared. A band is
+    # a closed "min-max" range, because an open "65+" would be read as an exact
+    # age and match nobody. These cases are imported and arrive symptomatic.
+    - name: "imported_cases_county_durham"
+      type: "exact"
+      date: "2020-03-03 08:00"
+      geo_level: "LGU"
+      trajectory_key: "imported_mild"
+      start_symptom: "mild"
+      parameters:
+          age_groups: ["0-17", "18-64", "65-120"]
+          units:
+              "County Durham": [3, 12, 2]
+
+    # A single total, drawn from anyone in the unit. With no age_groups there
+    # is no demographic restriction.
+    - name: "single_mgu_total"
+      type: "exact"
+      date: "2020-03-04 08:00"
+      geo_level: "MGU"
+      parameters:
+          units:
+              "E02004303": 8
+
+    # Infected by touch from a severely ill person, and with the counts doubled
+    # by seed_strength. The outcome table has a row for exactly this pairing, so
+    # these cases are more likely to be severe.
+    - name: "touch_from_severe_in_darlington"
+      type: "exact"
+      date: "2020-03-16 08:00"
+      geo_level: "LGU"
+      transmission_mode: "physical_contact"
+      infector_symptom: "severe"
+      parameters:
+          seed_strength: 2.0
+          age_groups: ["0-17", "18-64", "65-120"]
+          units:
+              "Darlington": [1, 3, 1]
+
+    # ---- Clustered: like exact, but placed household by household ------------
+
+    # Infections land in whole households first, so the cases share homes.
+    - name: "oa_household_cluster"
+      type: "clustered"
+      date: "2020-03-05 08:00"
+      geo_level: "SGU"
+      parameters:
+          age_groups: ["18-40"]
+          units:
+              "E00062043": 4
+
+    - name: "region_household_clusters"
+      type: "clustered"
+      date: "2020-03-09 08:00"
+      geo_level: "XLGU"
+      parameters:
+          units:
+              "North East": 12
+
+# Many seeds in one file. Rows that share a name, date and type (and the four
+# identity fields) merge into one seed. A seed here must not share an identity
+# with one above.
+bulk_csv: "tests/configs/sex_age_bins/bulk_seeds.csv"

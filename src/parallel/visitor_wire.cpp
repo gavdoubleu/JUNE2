@@ -24,7 +24,8 @@ constexpr auto kVisitorWire = makeWireRecord(
     &Domain::VisitorData::person_id, &Domain::VisitorData::home_rank,
     &Domain::VisitorData::venue_id, &Domain::VisitorData::subset_idx,
     &Domain::VisitorData::is_infected, &Domain::VisitorData::immunity_level,
-    &Domain::VisitorData::encounter_type_id, &Domain::VisitorData::symptom_id,
+    &Domain::VisitorData::encounter_type_id, &Domain::VisitorData::age,
+    &Domain::VisitorData::sex_code, &Domain::VisitorData::symptom_id,
     &Domain::VisitorData::time_in_stage);
 constexpr int VISITOR_WIRE_HEADER = kVisitorWire.size();
 // Tripwire: VisitorData's trailing emission and vectors (emission through
@@ -41,7 +42,7 @@ constexpr int VISITOR_WIRE_HEADER = kVisitorWire.size();
 static_assert(std::is_standard_layout_v<Domain::VisitorData>,
               "VisitorData must stay standard-layout for the offsetof check "
               "below to be well-defined");
-static_assert(offsetof(Domain::VisitorData, emission) == 40,
+static_assert(offsetof(Domain::VisitorData, emission) == 48,
               "VisitorData's fixed-header region changed - check kVisitorWire "
               "covers every field, then update this literal");
 

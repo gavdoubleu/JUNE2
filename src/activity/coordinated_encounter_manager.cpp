@@ -350,15 +350,19 @@ void CoordinatedEncounterManager::emitProposals(
   shuffle_det(eligible_partners.begin(), eligible_partners.end(), gen);
   int invited = 0;
 
+  // One host, one slot and one encounter type make one meeting, so every
+  // invitee carries the same id and finalizing gathers them into one group.
+  const int encounter_id = static_cast<int>(
+      mix_seed(config_.simulation.random_seed, person.id,
+               static_cast<uint64_t>(slot_idx),
+               static_cast<uint64_t>(enc_def.cached_encounter_type_id)) &
+      0x7FFFFFFF);
+
   for (PersonId partner_id : eligible_partners) {
     if (invited >= to_invite) break;
 
     EncounterProposal prop;
-    prop.encounter_id =
-        static_cast<int>(mix_seed(config_.simulation.random_seed, person.id,
-                                  static_cast<uint64_t>(slot_idx),
-                                  static_cast<uint64_t>(partner_id)) &
-                         0x7FFFFFFF);
+    prop.encounter_id = encounter_id;
     prop.host_id = person.id;
     prop.host_rank = mpi_rank_;
     prop.invitee_id = partner_id;

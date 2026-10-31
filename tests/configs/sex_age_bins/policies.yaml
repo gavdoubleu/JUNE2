@@ -1,0 +1,356 @@
+# Policies for the sex and age bins scenario.
+#
+# Day numbers, with day 0 on Monday 2 March 2020:
+#   day 10  12 Mar     day 14  16 Mar     day 21  23 Mar
+#   day 49  20 Apr     day 70  11 May     day 77  18 May
+#
+# Order matters. Symptom policies are checked before temporal ones, and inside
+# each kind the first policy that matches a person and an activity wins, so put
+# the most specific ones first. A policy that does not match is simply skipped.
+
+# -----------------------------------------------------------------------------
+# Observed metrics
+# -----------------------------------------------------------------------------
+# A metric is a count the engine keeps so that a policy can react to the
+# epidemic and not only to the calendar. The name on the left is a label that a
+# trigger refers to, and means nothing to the engine. A metric is only counted
+# when a trigger reads it.
+#
+#   source   infection        people infected now, exposed included (current)
+#            stage            infected people in the named stage now (current)
+#            death            deaths so far (cumulative)
+#            stage_admission  entries into the named stage so far (cumulative)
+#   scope    world            one total
+#            venue            one count per venue, over the people registered to
+#                             it for `activity`
+#            parent_venue     as venue, pooled by parent (school over its
+#                             classrooms, company over its offices)
+#   activity required for venue and parent_venue, not allowed for world
+#   stage    a symptom tag, required by stage and stage_admission only
+#
+# Counts are read once a day after the last slot and act from the next day.
+observed_metrics:
+    deaths: {source: death, scope: world}
+    icu_now: {source: stage, scope: world, stage: intensive_care}
+    new_infections: {source: stage_admission, scope: world, stage: exposed}
+    infected_now: {source: infection, scope: world}
+    primary_venue_cases: {source: infection, scope: venue, activity: primary_activity}
+    primary_parent_cases: {source: infection, scope: parent_venue, activity: primary_activity}
+
+policies:
+
+    # -------------------------------------------------------------------------
+    # Symptom policies: fire when a person has one of the listed symptom tags.
+    # -------------------------------------------------------------------------
+    symptom_policies:
+
+        # Most specific first. Older people with symptoms are told to stay in,
+        # and an applies_to limits a policy to people it selects.
+        - name: "elderly_isolation"
+          start_date: "2020-03-12"
+          symptoms: ["mild", "severe"]
+          applies_to:
+              - {property: age, operator: ">=", value: 65}
+          override_activities: ["primary_activity", "leisure"]
+          replacement: "residence"
+          compliance_rate: 0.95
+
+        # 12 to 16 March: advice to self-isolate. A window is half open: the
+        # start day is in, the end day is out. If symptoms get worse the person
+        # moves on to follow_up_policy. With inherit_compliance they keep the
+        # compliance decision they already made, and with inherit_refusal false
+        # someone who ignored the advice gets to decide again.
+        - name: "isolate_when_mild"
+          start_date: "2020-03-12"
+          end_date: "2020-03-16"
+          symptoms: ["mild"]
+          override_activities: ["primary_activity", "leisure"]
+          replacement: "residence"
+          compliance_rate: 0.4
+          follow_up_policy: "isolate_when_severe"
+          inherit_compliance: true
+          inherit_refusal: false
+
+        - name: "isolate_when_severe"
+          start_date: "2020-03-12"
+          end_date: "2020-03-16"
+          symptoms: ["severe"]
+          override_activities: ["primary_activity", "leisure"]
+          replacement: "residence"
+          compliance_rate: 0.8
+
+        # 16 March to 20 April: firmer instruction, higher compliance.
+        - name: "isolate_household_when_mild"
+          start_date: "2020-03-16"
+          end_date: "2020-04-20"
+          symptoms: ["mild"]
+          override_activities: ["primary_activity", "leisure"]
+          replacement: "residence"
+          compliance_rate: 0.7
+          follow_up_policy: "isolate_household_when_severe"
+          inherit_compliance: true
+          inherit_refusal: false
+
+        - name: "isolate_household_when_severe"
+          start_date: "2020-03-16"
+          end_date: "2020-04-20"
+          symptoms: ["severe"]
+          override_activities: ["primary_activity", "leisure"]
+          replacement: "residence"
+          compliance_rate: 0.9
+
+        # From 20 April isolation is voluntary and follows the news. There is
+        # no compliance rate. Each person has one fixed draw between 0 and 1 and
+        # stays in when the level is above it. The level is
+        #   base + weight * metric   (capped at 1)
+        # so with 0.1 to start and 0.001 for each death it reaches 0.5 at 400
+        # deaths. Nothing is rolled again, so people who stay in at 0.3 still
+        # do at 0.5. A symptom policy with a response needs a world metric and
+        # a person decision unit, and takes no follow_up_policy.
+        - name: "isolate_as_deaths_rise"
+          start_date: "2020-04-20"
+          symptoms: ["mild", "severe"]
+          override_activities: ["primary_activity", "leisure"]
+          replacement: "residence"
+          trigger:
+              response:
+                  base: 0.1
+                  terms:
+                      - {metric: deaths, weight: 0.001}
+              decision_unit: person
+
+        # Hospital care is clinical and not an intervention of the period, so
+        # it has no dates. "*" overrides every activity.
+        - name: "hospitalize_severe_cases"
+          symptoms: ["hospitalised", "intensive_care"]
+          override_activities: "*"
+          replacement: "medical_facility"
+          compliance_rate: 1.0
+
+    # -------------------------------------------------------------------------
+    # Temporal policies: in force on a date window and, optionally, while a
+    # trigger is closed.
+    # -------------------------------------------------------------------------
+    temporal_policies:
+
+        # ---- Scheduled measures ----------------------------------------------
+
+        # The first lockdown closes workplaces except the venue types listed
+        # in exempt_venue_types. `exempt` is a second way out: people who match
+        # the selection keep the named activity, here workers whose work_mode
+        # is Other, standing in for key workers.
+        - name: "lockdown_workplaces"
+          start_date: "2020-03-23"
+          end_date: "2020-05-11"
+          override_activities: ["primary_activity"]
+          exempt_venue_types: ["grocery", "hospital", "care_home"]
+          exempt:
+              - activity: "primary_activity"
+                selection:
+                    - {property: "properties.work_mode", operator: "==", value: "Other"}
+          replacement: "residence"
+          compliance_rate: 0.85
+
+        # A venue gate does not see people in no venue (walkers, cyclists and
+        # drivers on the way to work), so they get their own policy on the
+        # no_venue activity.
+        - name: "lockdown_no_venue_traffic"
+          start_date: "2020-03-23"
+          end_date: "2020-05-11"
+          override_activities: ["no_venue"]
+          replacement: "residence"
+          compliance_rate: 0.85
+
+        # override_venue_types is the other direction: only these venue types
+        # are shut and every other leisure venue stays open.
+        - name: "close_hospitality"
+          start_date: "2020-03-23"
+          end_date: "2020-05-18"
+          override_activities: ["leisure"]
+          override_venue_types: ["pub", "cinema", "gym"]
+          replacement: "residence"
+          compliance_rate: 0.9
+          applies_to:
+              - {property: age, operator: "<", value: 75}
+
+        # A window can be given in days from the start instead of dates, with
+        # start_time and end_time. Do not mix the two forms for one end.
+        # Schools shut for pupils, and applies_to stands in for "pupil" because
+        # a selection cannot see a person's role in a venue.
+        - name: "school_closure"
+          start_time: 21
+          end_time: 70
+          override_activities: ["primary_activity"]
+          override_venue_types: ["school", "classroom"]
+          replacement: "residence"
+          compliance_rate: 0.95
+          applies_to:
+              - {property: age, operator: "<", value: 18}
+
+        # A regional measure: people are selected by the local authority they
+        # live in.
+        - name: "darlington_extra_leisure_limits"
+          start_date: "2020-03-30"
+          end_date: "2020-04-27"
+          override_activities: ["leisure"]
+          replacement: "residence"
+          compliance_rate: 0.5
+          applies_to:
+              - {property: "geo_unit.LGU", operator: "==", value: "Darlington"}
+
+        # replacement_schedule hops the person onto a temporary schedule instead
+        # of swapping the activity. It only acts on people who are already
+        # mid-hop, here on a night away, who are cut short.
+        - name: "curtail_trips"
+          start_date: "2020-03-23"
+          end_date: "2020-05-11"
+          override_activities: ["leisure"]
+          replacement_schedule: "stay_put"
+          compliance_rate: 0.7
+
+        # ---- Transmission effects -------------------------------------------
+        # A policy that names a transmission_effects_file and no location action
+        # changes transmission and sends nobody home. The path is tried as
+        # written, then relative to this file. The policy column of the CSV
+        # picks the rows for each policy.
+
+        # Person effects use a sticky per-person compliance decision.
+        - name: "mask_wearing"
+          start_date: "2020-03-23"
+          end_date: "2020-05-25"
+          compliance_rate: 0.8
+          transmission_effects_file: "transmission_effects.csv"
+
+        - name: "shielding_masks"
+          start_date: "2020-03-16"
+          compliance_rate: 0.9
+          transmission_effects_file: "transmission_effects.csv"
+
+        # Venue effects hold for the whole venue, so compliance has to be 1.
+        - name: "social_distancing"
+          start_date: "2020-03-23"
+          end_date: "2020-05-25"
+          compliance_rate: 1.0
+          transmission_effects_file: "transmission_effects.csv"
+
+        # Cleaning cuts the risk from deposits on surfaces, the fomite route.
+        - name: "surface_cleaning"
+          start_date: "2020-03-16"
+          compliance_rate: 1.0
+          transmission_effects_file: "transmission_effects.csv"
+
+        # ---- Triggered by the epidemic ----------------------------------------
+        # These sit after the scheduled policies, so while a scheduled policy
+        # already covers a person and an activity it wins and these wait.
+
+        # A person who ignores one policy is still caught by the next one that
+        # matches, so compliance stacks. These rates are kept modest for that
+        # reason.
+        #
+        # A current metric rises and falls. The gap between activate_at and
+        # deactivate_at stops the policy flickering. The policy has no dates,
+        # so the trigger alone decides.
+        - name: "stay_home_when_icu_is_busy"
+          override_activities: ["primary_activity", "leisure"]
+          replacement: "residence"
+          compliance_rate: 0.5
+          trigger:
+              metric: icu_now
+              activate_at: 100
+              deactivate_at: 40
+
+        # A cumulative metric only grows, so activate_at is growth since the
+        # baseline and the policy lifts after calm_days with no more than the
+        # tolerance in new growth. tolerance is a count and tolerance_pct is a
+        # percent of the reference value. The larger one counts.
+        - name: "stay_home_after_deaths"
+          override_activities: ["primary_activity", "leisure"]
+          replacement: "residence"
+          compliance_rate: 0.4
+          trigger:
+              metric: deaths
+              activate_at: 400
+              calm_days: 14
+              tolerance: 2
+              tolerance_pct: 1
+
+        # A cumulative metric on new infections, with dates as well. The policy
+        # is in force when the window holds and the trigger is closed.
+        - name: "curfew_on_surge"
+          start_date: "2020-04-06"
+          end_date: "2020-05-25"
+          override_activities: ["leisure"]
+          override_venue_types: ["pub", "cinema"]
+          replacement: "residence"
+          compliance_rate: 0.9
+          trigger:
+              metric: new_infections
+              activate_at: 20000
+              calm_days: 7
+              tolerance_pct: 3
+
+        # ---- Closing venues one at a time --------------------------------------
+        # With a venue or parent_venue metric every venue has its own trigger,
+        # so one classroom can shut while the next stays open. These policies
+        # must have compliance 1 (a shut venue shuts for everyone), carry no
+        # transmission effects, and list the activity the metric counts.
+        - name: "close_classroom"
+          override_activities: ["primary_activity"]
+          override_venue_types: ["classroom"]
+          replacement: "residence"
+          trigger:
+              metric: primary_venue_cases
+              activate_at: 2
+              deactivate_at: 0
+
+        # The parent version pools a school's classrooms and shuts them all.
+        - name: "close_school"
+          override_activities: ["primary_activity"]
+          override_venue_types: ["school", "classroom"]
+          replacement: "residence"
+          trigger:
+              metric: primary_parent_cases
+              activate_at: 8
+              deactivate_at: 1
+
+        - name: "close_company"
+          override_activities: ["primary_activity"]
+          override_venue_types: ["company", "office"]
+          replacement: "residence"
+          trigger:
+              metric: primary_parent_cases
+              activate_at: 25
+              deactivate_at: 5
+
+        # ---- Voluntary avoidance ----------------------------------------------
+        # The venue stays open, and families choose to keep children home as
+        # cases build up in the classroom. The level for a venue is
+        #   base + weight * infected people registered to it
+        # and a unit avoids when the level is above its own fixed draw. With
+        # shared_venue: residence every member of a household shares one draw,
+        # so siblings tend to stay home together. There is no compliance_rate.
+        - name: "keep_children_home"
+          override_activities: ["primary_activity"]
+          override_venue_types: ["classroom"]
+          replacement: "residence"
+          applies_to:
+              - {property: age, operator: "<", value: 18}
+          trigger:
+              response:
+                  base: 0.02
+                  terms:
+                      - {metric: primary_venue_cases, weight: 0.05}
+              decision_unit: {shared_venue: residence}
+
+        # A temporal response on a world metric: more people stay away from
+        # pubs, cinemas and gyms as deaths mount, each person on their own.
+        - name: "avoid_crowds_as_deaths_rise"
+          override_activities: ["leisure"]
+          override_venue_types: ["pub", "cinema", "gym"]
+          replacement: "residence"
+          trigger:
+              response:
+                  terms:
+                      - {metric: deaths, weight: 0.0005}
+                      - {metric: icu_now, weight: 0.002}
+              decision_unit: person

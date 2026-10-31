@@ -1,0 +1,15 @@
+# Dated events. On its date, everyone in the catchment who passes the filters
+# and the compliance roll hops onto schedule_name for duration_days. Their
+# leisure venue then comes from the on-the-fly rule for leisure, inside
+# hosting_geo_unit_id (2191, 2204 and 2154 are middle layer units, each with at
+# least one cinema).
+#
+# The filter columns work as they do everywhere else. In this world every adult
+# has leisure venues of their own and only children have none, and the
+# on-the-fly rule is what can place someone who has none. So these are Saturday
+# matinees for children aged 5 to 17 with no leisure venue, and 5 in 100 of them
+# in the catchment go. Everyone invited ends up at a cinema in the host unit.
+calendar_event_id,date,schedule_name,hosting_geo_unit_id,venue_type_name,catchment_rule_id,duration_days,compliance_rate,filter.age,filter.activities.leisure.length
+1,2020-03-14,gathering_day,2191,cinema,1,1,0.05,5-17,0
+2,2020-03-21,gathering_day,2204,cinema,2,1,0.05,5-17,0
+3,2020-05-23,gathering_day,2154,cinema,3,1,0.05,5-17,0

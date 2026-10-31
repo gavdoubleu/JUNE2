@@ -8,9 +8,12 @@
 #include <stdexcept>
 #include <unordered_set>
 
+#include "loaders/config_loader_detail.h"
 #include "utils/filtered_csv.h"
 
 namespace june {
+
+using ::june::config_detail::rejectUnknownKeys;
 
 namespace {
 
@@ -32,52 +35,132 @@ namespace {
 // Parse Distribution Parameters from YAML
 // =============================================================================
 
-DistributionParams parseDistribution(const YAML::Node& dist_node) {
+// The parameters each distribution type takes. `required` ones are the ones
+// sampleFromDistribution cannot do without; the rest fall back to its defaults.
+struct DistributionSpec {
+  const char* type;
+  std::vector<std::string> required;
+  std::vector<std::string> optional;
+};
+
+const std::vector<DistributionSpec>& distributionSpecs() {
+  static const std::vector<DistributionSpec> specs = {
+      {"constant", {"value"}, {}},
+      {"normal", {}, {"loc", "scale"}},
+      {"lognormal", {"s", "loc", "scale"}, {}},
+      {"beta", {"a", "b", "loc", "scale"}, {}},
+      {"exponweib", {"a", "c", "loc", "scale"}, {}},
+      {"gamma", {"shape", "scale"}, {"loc"}},
+  };
+  return specs;
+}
+
+std::string joinNames(const std::vector<std::string>& names) {
+  std::string joined;
+  for (const auto& name : names) joined += (joined.empty() ? "" : ", ") + name;
+  return joined;
+}
+
+DistributionParams parseDistribution(const YAML::Node& dist_node,
+                                     const std::string& context) {
   DistributionParams dist;
 
   if (!dist_node["type"]) {
-    throw std::runtime_error("Distribution must have a 'type' field");
+    throw std::runtime_error(context +
+                             ": distribution must have a 'type' field");
   }
 
   dist.type = dist_node["type"].as<std::string>();
 
-  // Parse all parameters into the params map
+  const DistributionSpec* spec = nullptr;
+  std::vector<std::string> types;
+  for (const auto& candidate : distributionSpecs()) {
+    types.push_back(candidate.type);
+    if (dist.type == candidate.type) spec = &candidate;
+  }
+  if (!spec) {
+    throw std::runtime_error(context + ": unknown distribution type '" +
+                             dist.type + "'. Types are " + joinNames(types) +
+                             ".");
+  }
+
+  std::vector<std::string> params = spec->required;
+  params.insert(params.end(), spec->optional.begin(), spec->optional.end());
+
   for (auto it = dist_node.begin(); it != dist_node.end(); ++it) {
-    std::string key = it->first.as<std::string>();
-    if (key != "type") {  // Skip the type field
-      try {
-        double value = it->second.as<double>();
-        dist.params[key] = value;
-      } catch (const YAML::Exception& e) {
-        std::cerr << "Warning: Could not parse parameter '" << key
-                  << "' as double: " << e.what() << std::endl;
-      }
+    const std::string key = it->first.as<std::string>();
+    if (key == "type") continue;
+    if (std::find(params.begin(), params.end(), key) == params.end()) {
+      throw std::runtime_error(
+          context + ": unknown parameter '" + key + "' for a " + dist.type +
+          " distribution. Parameters are " + joinNames(params) + ".");
+    }
+    try {
+      dist.params[key] = it->second.as<double>();
+    } catch (const YAML::Exception&) {
+      throw std::runtime_error(context + ": parameter '" + key + "' of a " +
+                               dist.type +
+                               " distribution must be a number, got '" +
+                               YAML::Dump(it->second) + "'.");
+    }
+  }
+
+  for (const auto& key : spec->required) {
+    if (!dist.params.count(key)) {
+      throw std::runtime_error(context + ": " + dist.type +
+                               " distribution is missing '" + key +
+                               "'. Parameters are " + joinNames(params) + ".");
     }
   }
 
   return dist;
 }
 
+// Throws unless `name` is one of the disease's symptom tags. `where` says
+// which block named it.
+void requireSymptomTag(const std::string& name, const std::string& where,
+                       const std::vector<SymptomTag>& symptom_tags) {
+  for (const auto& tag : symptom_tags) {
+    if (tag.name == name) return;
+  }
+  std::string tags;
+  for (const auto& tag : symptom_tags) {
+    if (!tags.empty()) tags += ", ";
+    tags += tag.name;
+  }
+  throw std::runtime_error("disease: " + where + " names stage '" + name +
+                           "', which is not a symptom tag. Tags: " + tags);
+}
+
 // =============================================================================
 // Parse Trajectory Definitions from YAML
 // =============================================================================
 
-std::optional<TrajectoryStage> parseTrajectoryStage(
-    const YAML::Node& stage_node) {
+TrajectoryStage parseTrajectoryStage(const YAML::Node& stage_node,
+                                     const std::string& traj_label) {
+  rejectUnknownKeys(stage_node, {"symptom_tag", "completion_time"}, "",
+                    "a stage of " + traj_label);
   if (!stage_node["symptom_tag"]) {
-    std::cerr << "Warning: Stage missing 'symptom_tag' field" << std::endl;
-    return std::nullopt;
+    throw std::runtime_error("disease: a stage of " + traj_label +
+                             " is missing 'symptom_tag'");
   }
   TrajectoryStage stage;
   stage.symptom_tag = stage_node["symptom_tag"].as<std::string>();
   if (stage_node["completion_time"]) {
-    stage.completion_time = parseDistribution(stage_node["completion_time"]);
+    stage.completion_time = parseDistribution(
+        stage_node["completion_time"],
+        traj_label + " stage '" + stage.symptom_tag + "' completion_time");
   }
   return stage;
 }
 
-std::optional<TrajectoryDefinition> parseOneTrajectory(
-    const YAML::Node& traj_node) {
+TrajectoryDefinition parseOneTrajectory(const YAML::Node& traj_node,
+                                        size_t index) {
+  rejectUnknownKeys(
+      traj_node,
+      {"description", "selection_key", "probability", "severity",
+       "infectiousness_factor", "start_stage", "stages"},
+      "disease: ", " in trajectory[" + std::to_string(index) + "]");
   TrajectoryDefinition traj;
 
   if (traj_node["description"]) {
@@ -104,15 +187,14 @@ std::optional<TrajectoryDefinition> parseOneTrajectory(
     traj.start_stage = traj_node["start_stage"].as<std::string>();
   }
 
+  const std::string traj_label =
+      traj.description.empty() ? ("trajectory[" + std::to_string(index) + "]")
+                               : ("trajectory \"" + traj.description + "\"");
   if (!traj_node["stages"]) {
-    std::cerr << "Warning: Trajectory missing 'stages' field" << std::endl;
-    return std::nullopt;
+    throw std::runtime_error("disease: " + traj_label + " is missing 'stages'");
   }
-
   for (const auto& stage_node : traj_node["stages"]) {
-    if (auto stage = parseTrajectoryStage(stage_node)) {
-      traj.stages.push_back(std::move(*stage));
-    }
+    traj.stages.push_back(parseTrajectoryStage(stage_node, traj_label));
   }
 
   return traj;
@@ -128,10 +210,9 @@ std::vector<TrajectoryDefinition> parseTrajectories(
     return trajectories;
   }
 
+  size_t index = 0;
   for (const auto& traj_node : trajectories_node) {
-    if (auto traj = parseOneTrajectory(traj_node)) {
-      trajectories.push_back(std::move(*traj));
-    }
+    trajectories.push_back(parseOneTrajectory(traj_node, index++));
   }
 
   return trajectories;
@@ -204,7 +285,8 @@ void attachStageCurvesToModes(const YAML::Node& stage_curves_node,
                               bool verbose);
 void finalizeStageDrivenMultiMode(TransmissionParams& transmission,
                                   const std::vector<SymptomTag>& symptom_tags);
-void loadModeCompartmentalUptake(TransmissionMode& tmode, int mode_idx);
+void loadModeCompartmentalUptake(const YAML::Node& mode_node,
+                                 TransmissionMode& tmode, int mode_idx);
 void loadModeCompartmentalDeposition(
     const YAML::Node& mode_node, TransmissionMode& tmode, int mode_idx,
     const std::vector<SymptomTag>& symptom_tags, bool verbose);
@@ -213,6 +295,11 @@ void loadModeFomite(const YAML::Node& mode_node, TransmissionMode& tmode,
                     int mode_idx, const std::vector<SymptomTag>& symptom_tags,
                     bool verbose) {
   tmode.type = TransmissionModeType::Fomite;
+  rejectUnknownKeys(
+      mode_node,
+      {"name", "mode_transmissibility_multiplier", "type", "max_age",
+       "sub_bin_time", "fomite_curve", "deposition_stages"},
+      "disease: ", " in fomite mode '" + tmode.name + "'");
   FomiteConfig fcfg;
   fcfg.mode_index = mode_idx;
   fcfg.max_age =
@@ -244,9 +331,23 @@ void loadTransmission(const YAML::Node& config,
   std::string mode_str = trans_node["mode"]
                              ? trans_node["mode"].as<std::string>()
                              : "Trajectory-Driven";
+  if (mode_str != "Stage-Driven" && mode_str != "Trajectory-Driven") {
+    throw std::runtime_error("disease: transmission.mode '" + mode_str +
+                             "' is not a mode. Modes: Stage-Driven, "
+                             "Trajectory-Driven");
+  }
   transmission.mode = (mode_str == "Stage-Driven")
                           ? InfectiousnessMode::STAGE_DRIVEN
                           : InfectiousnessMode::TRAJECTORY_DRIVEN;
+  if (transmission.mode == InfectiousnessMode::TRAJECTORY_DRIVEN) {
+    rejectUnknownKeys(trans_node,
+                      {"mode", "type", "max_infectiousness", "shape", "rate",
+                       "shift", "modes"},
+                      "disease: ", " in 'transmission' (Trajectory-Driven)");
+  } else {
+    rejectUnknownKeys(trans_node, {"mode", "modes", "stage_curves"},
+                      "disease: ", " in 'transmission' (Stage-Driven)");
+  }
 
   if (transmission.mode == InfectiousnessMode::TRAJECTORY_DRIVEN) {
     loadTransmissionTrajectoryDriven(trans_node, transmission);
@@ -293,6 +394,7 @@ void loadTransmissionStageDrivenFlat(
     for (auto it = trans_node["stage_curves"].begin();
          it != trans_node["stage_curves"].end(); ++it) {
       std::string stage_name = it->first.as<std::string>();
+      requireSymptomTag(stage_name, "stage_curves", symptom_tags);
       stage_curves[stage_name] =
           parseCurve(it->second, "stage_curves / " + stage_name, verbose);
     }
@@ -342,10 +444,24 @@ void attachStageCurvesToModes(const YAML::Node& stage_curves_node,
                               bool verbose) {
   for (const auto& mode_kv : stage_curves_node) {
     std::string mname = mode_kv.first.as<std::string>();
+    const bool is_mode =
+        std::any_of(transmission.modes.begin(), transmission.modes.end(),
+                    [&](const TransmissionMode& m) { return m.name == mname; });
+    if (!is_mode) {
+      std::string modes;
+      for (const auto& m : transmission.modes) {
+        if (!modes.empty()) modes += ", ";
+        modes += m.name;
+      }
+      throw std::runtime_error(
+          "disease: transmission.stage_curves names mode '" + mname +
+          "', which is not a transmission mode. Modes: " + modes);
+    }
     std::vector<std::shared_ptr<InfectiousnessCurve>> mode_curves(
         symptom_tags.size(), nullptr);
     for (auto it = mode_kv.second.begin(); it != mode_kv.second.end(); ++it) {
       std::string stage_name = it->first.as<std::string>();
+      requireSymptomTag(stage_name, "stage_curves." + mname, symptom_tags);
       auto curve = parseCurve(it->second, mname + " / " + stage_name, verbose);
       for (const auto& tag : symptom_tags) {
         if (tag.name == stage_name) {
@@ -391,20 +507,33 @@ void parseStageDrivenModes(const YAML::Node& modes_node,
         mode_node["type"] ? mode_node["type"].as<std::string>() : "";
     int mode_idx = static_cast<int>(transmission.modes.size());
 
+    if (mode_type.empty()) {
+      rejectUnknownKeys(mode_node, {"name", "mode_transmissibility_multiplier"},
+                        "disease: ", " in mode '" + tmode.name + "'");
+    }
     if (mode_type == "fomite") {
       loadModeFomite(mode_node, tmode, mode_idx, symptom_tags, verbose);
     } else if (mode_type == "compartmental_uptake") {
-      loadModeCompartmentalUptake(tmode, mode_idx);
+      loadModeCompartmentalUptake(mode_node, tmode, mode_idx);
     } else if (mode_type == "compartmental_deposition") {
       loadModeCompartmentalDeposition(mode_node, tmode, mode_idx, symptom_tags,
                                       verbose);
+    } else if (!mode_type.empty()) {
+      throw std::runtime_error(
+          "disease: unknown type '" + mode_type + "' in mode '" + tmode.name +
+          "'. Types are fomite, compartmental_uptake, compartmental_deposition "
+          "(leave 'type' out for an ordinary mode).");
     }
 
     transmission.modes.push_back(std::move(tmode));
   }
 }
 
-void loadModeCompartmentalUptake(TransmissionMode& tmode, int mode_idx) {
+void loadModeCompartmentalUptake(const YAML::Node& mode_node,
+                                 TransmissionMode& tmode, int mode_idx) {
+  rejectUnknownKeys(
+      mode_node, {"name", "mode_transmissibility_multiplier", "type"},
+      "disease: ", " in compartmental_uptake mode '" + tmode.name + "'");
   tmode.type = TransmissionModeType::CompartmentalUptake;
   CompartmentalUptakeConfig ucfg;
   ucfg.mode_index = mode_idx;
@@ -417,6 +546,10 @@ void loadModeCompartmentalDeposition(
     const YAML::Node& mode_node, TransmissionMode& tmode, int mode_idx,
     const std::vector<SymptomTag>& symptom_tags, bool verbose) {
   tmode.type = TransmissionModeType::CompartmentalDeposition;
+  rejectUnknownKeys(
+      mode_node,
+      {"name", "mode_transmissibility_multiplier", "type", "deposition_stages"},
+      "disease: ", " in compartmental_deposition mode '" + tmode.name + "'");
   CompartmentalDepositionConfig dcfg;
   dcfg.mode_index = mode_idx;
   parseDepositionStages(mode_node, dcfg.deposition_by_symptom,
@@ -437,17 +570,20 @@ void loadTransmissionTrajectoryDriven(const YAML::Node& trans_node,
 
   // Load infectiousness distribution parameters
   if (trans_node["max_infectiousness"]) {
-    transmission.max_infectiousness =
-        parseDistribution(trans_node["max_infectiousness"]);
+    transmission.max_infectiousness = parseDistribution(
+        trans_node["max_infectiousness"], "transmission max_infectiousness");
   }
   if (trans_node["shape"]) {
-    transmission.shape = parseDistribution(trans_node["shape"]);
+    transmission.shape =
+        parseDistribution(trans_node["shape"], "transmission shape");
   }
   if (trans_node["rate"]) {
-    transmission.rate = parseDistribution(trans_node["rate"]);
+    transmission.rate =
+        parseDistribution(trans_node["rate"], "transmission rate");
   }
   if (trans_node["shift"]) {
-    transmission.shift = parseDistribution(trans_node["shift"]);
+    transmission.shift =
+        parseDistribution(trans_node["shift"], "transmission shift");
   }
 
   // Note: symptom-specific infectiousness scaling is now handled via
@@ -460,6 +596,8 @@ void loadTransmissionTrajectoryDriven(const YAML::Node& trans_node,
   // modes; the multipliers scale susceptibility per-mode at the FOI step.
   if (trans_node["modes"]) {
     for (const auto& mode_node : trans_node["modes"]) {
+      rejectUnknownKeys(mode_node, {"name", "mode_transmissibility_multiplier"},
+                        "disease: ", " in a mode of 'transmission'");
       TransmissionMode tmode;
       tmode.name =
           mode_node["name"] ? mode_node["name"].as<std::string>() : "default";
@@ -486,6 +624,10 @@ void parseDepositionStages(
   for (auto it = mode_node["deposition_stages"].begin();
        it != mode_node["deposition_stages"].end(); ++it) {
     std::string stage_name = it->first.as<std::string>();
+    requireSymptomTag(
+        stage_name,
+        mode_type_prefix + " mode '" + mode_name + "' deposition_stages",
+        symptom_tags);
     auto curve = parseCurve(
         it->second, mode_type_prefix + " / " + mode_name + " / " + stage_name,
         verbose);
@@ -502,6 +644,8 @@ void loadNaturalImmunity(const YAML::Node& config,
                          TransmissionParams& transmission) {
   if (!config["immunity"]) return;
   auto immunity_node = config["immunity"];
+  rejectUnknownKeys(immunity_node, {"level", "waning_rate"},
+                    "disease: ", " in 'immunity'");
   transmission.natural_immunity.level =
       immunity_node["level"] ? immunity_node["level"].as<double>() : 0.95;
   transmission.natural_immunity.waning_rate =
@@ -622,6 +766,8 @@ OutcomeRates loadOutcomeRatesFromConfig(
   if (csv_node.IsScalar()) {
     csv_rel_path = csv_node.as<std::string>();
   } else if (csv_node["file"]) {
+    rejectUnknownKeys(csv_node, {"file", "populations", "sexes", "outcomes"},
+                      "disease: ", " in 'outcome_rates_csv'");
     csv_rel_path = csv_node["file"].as<std::string>();
   } else {
     throw std::runtime_error(
@@ -671,30 +817,22 @@ DiseaseStageSettings loadStageSettings(const YAML::Node& config) {
   DiseaseStageSettings stage_settings;
   if (!config["settings"]) return stage_settings;
   auto settings = config["settings"];
-
-  if (settings["default_lowest_stage"]) {
-    stage_settings.default_lowest_stage =
-        settings["default_lowest_stage"].as<std::string>();
-  }
-  if (settings["max_mild_symptom_tag"]) {
-    stage_settings.max_mild_symptom_tag =
-        settings["max_mild_symptom_tag"].as<std::string>();
-  }
+  rejectUnknownKeys(settings,
+                    {"hospitalised_stage", "intensive_care_stage",
+                     "fatality_stage", "recovered_stage"},
+                    "disease: ", " in 'settings'");
 
   auto loadStageList = [](const YAML::Node& node,
                           std::vector<std::string>& out) {
     if (!node) return;
     for (const auto& item : node) {
+      rejectUnknownKeys(item, {"name"}, "disease: ", " in 'settings'");
       if (item["name"]) {
         out.push_back(item["name"].as<std::string>());
       }
     }
   };
 
-  loadStageList(settings["stay_at_home_stage"],
-                stage_settings.stay_at_home_stages);
-  loadStageList(settings["severe_symptoms_stay_at_home_stage"],
-                stage_settings.severe_symptoms_stay_at_home_stages);
   loadStageList(settings["hospitalised_stage"],
                 stage_settings.hospitalised_stages);
   loadStageList(settings["intensive_care_stage"],
@@ -719,6 +857,8 @@ std::vector<SymptomTag> loadSymptomTags(const YAML::Node& config) {
   }
   uint16_t current_id = 0;
   for (const auto& tag_node : config["symptom_tags"]) {
+    rejectUnknownKeys(tag_node, {"name", "value"},
+                      "disease: ", " in a symptom tag");
     SymptomTag tag;
     tag.name = tag_node["name"].as<std::string>();
     tag.value = tag_node["value"].as<int>();
@@ -746,6 +886,11 @@ Disease DiseaseLoader::loadFromYAML(
     }
 
     YAML::Node config = root["disease"];
+    rejectUnknownKeys(root, {"disease"}, "disease: ");
+    rejectUnknownKeys(config,
+                      {"name", "symptom_tags", "settings", "trajectories",
+                       "outcome_rates_csv", "transmission", "immunity"},
+                      "disease: ", " in 'disease'");
 
     // Get disease name
     std::string disease_name = config["name"].as<std::string>("covid19");
@@ -779,8 +924,8 @@ Disease DiseaseLoader::loadFromYAML(
     throw std::runtime_error("Failed to load disease config from " + yaml_path +
                              ": " + e.what());
   } catch (const std::exception& e) {
-    throw std::runtime_error("Error loading disease config: " +
-                             std::string(e.what()));
+    throw std::runtime_error("Error loading disease config " + yaml_path +
+                             ": " + std::string(e.what()));
   }
 }
 
@@ -798,6 +943,31 @@ std::shared_ptr<InfectiousnessCurve> parseCurve(
   }
 
   std::string type = curve_node["type"].as<std::string>();
+
+  if (type == "constant") {
+    rejectUnknownKeys(curve_node, {"type", "value"}, "disease: ",
+                      " in curve '" + context_label + "' (constant)");
+  } else if (type == "gamma") {
+    rejectUnknownKeys(curve_node,
+                      {"type", "max_infectiousness", "shape", "rate", "shift"},
+                      "disease: ", " in curve '" + context_label + "' (gamma)");
+  } else if (type == "exponential_decay") {
+    rejectUnknownKeys(
+        curve_node, {"type", "initial_value", "decay_rate", "delay"},
+        "disease: ", " in curve '" + context_label + "' (exponential_decay)");
+  } else if (type == "linear_ramp") {
+    rejectUnknownKeys(
+        curve_node, {"type", "start_value", "end_value", "ramp_duration"},
+        "disease: ", " in curve '" + context_label + "' (linear_ramp)");
+  } else if (type == "lognormal") {
+    rejectUnknownKeys(
+        curve_node, {"type", "max_infectiousness", "mu", "sigma"},
+        "disease: ", " in curve '" + context_label + "' (lognormal)");
+  } else if (type == "beta") {
+    rejectUnknownKeys(
+        curve_node, {"type", "max_infectiousness", "alpha", "beta", "duration"},
+        "disease: ", " in curve '" + context_label + "' (beta)");
+  }
 
   static constexpr double kTableMaxDays = 90.0;
   static constexpr int kTableNPoints = 2700;

@@ -1,0 +1,33 @@
+# On-the-fly venues: venues an activity can draw from when a person has none
+# of their own for it. Nothing is stored in the world for these. The pool is
+# every venue of the named type inside a geographical unit, worked out once at
+# startup.
+#
+# This only applies to a person with no venue of their own for the activity.
+# Everyone in this world has a hospital for medical_facility, and about one
+# person in five has no leisure venue at all, which is who these rules reach.
+
+# A rule is a strategy, a venue type, and how stable the choice is.
+#   strategy          hosting_geo_unit: the unit that hosts the person's current
+#                       calendar event (calendar_events.csv).
+#                     resident_geo_unit: the unit the person lives in, or its
+#                       ancestor at geo_unit_level when one is given.
+#   venue_stability   daily: a new venue from the pool each day.
+#                     fixed: the same venue every time.
+#   geo_unit_level    resident_geo_unit only. Must be a level the world has.
+rules:
+    event_venue_rule:
+        strategy: hosting_geo_unit
+        venue_type: cinema
+        venue_stability: daily
+
+    nearest_hospital_rule:
+        strategy: resident_geo_unit
+        venue_type: hospital
+        geo_unit_level: LGU
+        venue_stability: fixed
+
+# Which activity uses which rule. One rule per activity.
+activity_rules:
+    leisure: event_venue_rule
+    medical_facility: nearest_hospital_rule

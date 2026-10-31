@@ -1,0 +1,23 @@
+# MPI domain decomposition. Output is bit-identical at every rank count, so
+# this only changes how the work is split, never the result.
+#
+# Only the keys below are read. The centroid and adjacency files are the
+# England-wide MGU tables, and the world's 79 MGUs are looked up in them.
+
+parallel:
+    enabled: true
+
+    partitioning:
+        # Geography level that is cut into domains. One of XLGU, LGU, MGU, SGU,
+        # and it has to match the level the two files below describe.
+        level: "MGU"
+        centroids_file: "data/domain_decomposition/2021/mgu_centroids.csv"
+        adjacency_file: "data/domain_decomposition/2021/mgu_adjacency_graph.json"
+        metis:
+            # Domains may differ in population by up to this share.
+            imbalance_tolerance: 0.05
+
+    # Memory use while the world is read, not behaviour.
+    chunked_loading:
+        person_metadata_chunk_size: 100000
+        geo_unit_chunk_size: 1000

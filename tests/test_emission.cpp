@@ -91,9 +91,8 @@ TEST_CASE("Onset mid-slot: the infectious part of the slot counts") {
 }
 
 TEST_CASE("Trajectory-Driven: recovered or dead at slot start emits zero") {
-  // The gamma profile ignores stage, so without the t0 check a Person whose
-  // recovery or death the post-transmission update has not yet cleared would
-  // keep emitting.
+  // The gamma profile ignores stage, so without the t0 check a Person who is
+  // recovered or dead at slot start would keep emitting.
   constexpr uint16_t kRecovered = 0;
   constexpr uint16_t kMildStage = 1;
   constexpr uint16_t kDead = 2;

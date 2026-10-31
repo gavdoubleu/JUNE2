@@ -158,6 +158,22 @@ struct FollowEvent {
 static_assert(
     packed<FollowEvent, PersonId, PersonId, double, uint8_t, uint8_t[3], int>);
 
+// What a vaccination campaign's dose budget did in one tier on one day. Every
+// count is over the whole world, so every rank would write the same row.
+struct CampaignDayEvent {
+  int day;
+  uint16_t campaign_id;  // index into the campaigns registry
+  uint16_t tier_id;      // index within that campaign's tier list
+  int64_t candidates;    // people in the tier who could be dosed today
+  int64_t doses_given;   // doses given in the tier today
+  int64_t declined;      // people in the tier who declined
+  // The campaign's dose budget for the day, kNoAllotment when it has none.
+  int64_t allotment;
+  int64_t started_total;  // people who have started a course so far
+};
+static_assert(packed<CampaignDayEvent, int, uint16_t, uint16_t, int64_t,
+                     int64_t, int64_t, int64_t, int64_t>);
+
 // =============================================================================
 // HDF5 Record Structures (C-compatible for H5::CompType)
 // =============================================================================

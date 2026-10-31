@@ -308,3 +308,114 @@ TEST_CASE("ActivityManager - PolicyManager Override") {
     CHECK(locations[0].venue_id == 0);
   }
 }
+
+namespace {
+// Everyone shares one residence venue (0) and one venue (1) for the second
+// activity. The slot offers [second, residence] at the given rate.
+struct ParticipationRig {
+  WorldState world;
+  Config config;
+  std::unique_ptr<ActivityManager> manager;
+
+  ParticipationRig(int people, const std::string& second, double rate,
+                   bool second_is_hybrid) {
+    world = TestWorldFactory::createMinimalWorld(people, 2);
+    world.activity_names = {"residence", second, "none", "dead"};
+    world.venue_type_names = {"home", "other"};
+    world.venues[0].type_id = 0;
+    world.venues[1].type_id = 1;
+    world.buildIndices();
+    for (auto& p : world.people) {
+      p.activity_meta_start = static_cast<uint32_t>(world.activity_meta.size());
+      p.activity_meta_count = 2;
+      world.activity_meta.push_back(
+          {0, static_cast<uint32_t>(world.activity_venues.size()), 1});
+      world.activity_venues.push_back({0, 0});
+      world.activity_meta.push_back(
+          {1, static_cast<uint32_t>(world.activity_venues.size()), 1});
+      world.activity_venues.push_back({1, 0});
+    }
+    config.performance.precompute_schedules = true;
+    config.performance.deterministic_activities = {"residence"};
+    if (second_is_hybrid) {
+      config.performance.hybrid_activities = {second};
+    } else {
+      config.performance.stochastic_activities = {second};
+    }
+    config.schedule.day_type_cycle = {"workday"};
+    config.schedule.day_type_names = {"workday"};
+    ScheduleType s;
+    s.name = "s";
+    TimeSlot slot;
+    slot.name = "slot";
+    slot.allowed_activities = {second, "residence"};
+    s.slots_by_day_type["workday"].push_back(slot);
+    s.participation_by_day_type["workday"][second] = rate;
+    s.participation_by_day_type["workday"]["residence"] = 1.0;
+    config.schedule.schedule_types.push_back(s);
+    config.schedule.default_schedule_type = "s";
+    world.schedule_type_names = {"s"};
+    config.resolve(world);
+    manager = std::make_unique<ActivityManager>(world, config);
+    manager->assignScheduleTypes();
+    manager->precomputeSchedules();
+  }
+
+  // Per-day fraction at the second activity, and per-person day counts.
+  std::vector<int> run(int days, std::vector<VenueId>* venues = nullptr) {
+    std::vector<int> days_at(world.people.size(), 0);
+    for (int d = 0; d < days; ++d) {
+      manager->setCurrentDay(d);
+      manager->setCurrentTime(d);
+      std::vector<PersonLocation> loc(world.people.size());
+      manager->assignActivitiesFromSchedule(0, 0, loc);
+      for (size_t i = 0; i < loc.size(); ++i) {
+        if (loc[i].activity_index == 1) {
+          ++days_at[i];
+          if (venues) venues->push_back(loc[i].venue_id);
+        }
+      }
+    }
+    return days_at;
+  }
+};
+}  // namespace
+
+TEST_CASE("ActivityManager - participation below one is applied once") {
+  const int people = 20000;
+  const int days = 10;
+  const double rate = 0.4;
+  // 5 binomial sd on the mean daily fraction
+  const double tol = 5.0 * std::sqrt(rate * (1 - rate) / (people * days));
+
+  SUBCASE("stochastic activity next to a deterministic residence") {
+    ParticipationRig rig(people, "leisure", rate, false);
+    auto days_at = rig.run(days);
+    long total = 0;
+    int ever = 0;
+    for (int n : days_at) {
+      total += n;
+      ever += (n > 0);
+    }
+    CHECK(std::abs(double(total) / (double(people) * days) - rate) < tol);
+    // A missed roll on one day must not pin the person to residence: nearly
+    // everyone attends on at least one of ten days (1 - 0.6^10 = 0.994).
+    CHECK(double(ever) / people > 0.98);
+  }
+
+  SUBCASE("hybrid activity next to a deterministic residence") {
+    ParticipationRig rig(people, "primary_activity", rate, true);
+    std::vector<VenueId> venues;
+    auto days_at = rig.run(days, &venues);
+    long total = 0;
+    int ever = 0;
+    for (int n : days_at) {
+      total += n;
+      ever += (n > 0);
+    }
+    CHECK(std::abs(double(total) / (double(people) * days) - rate) < tol);
+    CHECK(double(ever) / people > 0.98);
+    // The cached venue is kept whenever the person attends.
+    for (VenueId v : venues) CHECK(v == 1);
+  }
+}

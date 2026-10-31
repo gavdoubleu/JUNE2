@@ -532,8 +532,8 @@ class InteractionManager {
   // Mirrors the STEP 1 logic in processVenueTransmissions so the pre-pass
   // can bin people under the PARENT matrix (which may have a different bin
   // scheme than the child).
-  int computeBinIndexForMatrix(const Person* person, const Venue* venue,
-                               SubsetIndex subset_index,
+  int computeBinIndexForMatrix(const Person* person, const VisitorInfo* visitor,
+                               const Venue* venue, SubsetIndex subset_index,
                                const ContactMatrix* matrix,
                                int num_groups) const;
 
@@ -765,7 +765,8 @@ class InteractionManager {
   // and clamp to [0, num_bins_needed). Emits a (rate-limited)
   // DEBUG_TRANSMISSION line if the clamp fired.
   int resolveMemberBinIndex(const InteractionMember& member,
-                            const Person* person, Venue* venue,
+                            const Person* person, const VisitorInfo* visitor,
+                            Venue* venue,
                             const ContactMatrix& bin_structure,
                             int num_bins_needed, uint8_t encounter_type_id,
                             const std::string& venue_type,

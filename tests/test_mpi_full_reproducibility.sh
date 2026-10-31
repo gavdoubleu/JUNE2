@@ -31,6 +31,11 @@ SEEDS="${SEEDS:-}"
 # Space-separated list of rank counts to compare. Must include 1 as the
 # reference.
 NPS="${NPS:-1 2 3}"
+# Further datasets to compare, written as DATASETS entries and separated by
+# spaces, for a config that switches on more output (vaccination, say). Each
+# one is required to be present and non-empty, so leave it empty for a config
+# that does not write them.
+EXTRA_DATASETS="${EXTRA_DATASETS:-}"
 
 BINARY="${BUILD_DIR}/disease_sim"
 if [[ ! -x "$BINARY" ]]; then
@@ -123,6 +128,8 @@ DATASETS=(
   "dataset:/events/infections"
   "dataset:/events/symptom_changes"
 )
+# shellcheck disable=SC2206  # split on spaces on purpose
+DATASETS+=($EXTRA_DATASETS)
 # config_2021 does not configure the optional OOE relationship producer, so
 # /events/relationships is absent by design. It is reported as a fixture
 # limitation rather than treated as a required, non-exercised dataset.

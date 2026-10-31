@@ -273,8 +273,9 @@ InteractionManager::buildPartialPresenceGroups(
     const float f_presence =
         runtime_group_allocator_->getPresenceFactor(actual_venue_id, m.id);
 
-    int matrix_bin = computeBinIndexForMatrix(person, venue, m.subset_index,
-                                              &bin_structure, num_bins_needed);
+    int matrix_bin =
+        computeBinIndexForMatrix(person, visitor, venue, m.subset_index,
+                                 &bin_structure, num_bins_needed);
     if (matrix_bin < 0 || matrix_bin >= num_bins_needed) matrix_bin = 0;
 
     groups[group].push_back(RuntimeGroupMember{

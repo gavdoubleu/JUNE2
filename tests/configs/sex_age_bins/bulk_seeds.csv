@@ -1,0 +1,25 @@
+# Seeds written as rows. Columns:
+#
+#   name, date, type            required. type is uniform, exact or clustered.
+#                               Rows with the same name, date and type (and the
+#                               same four fields below) are one seed.
+#   geo_level, geo_unit, cases  for exact and clustered: the unit, named at that
+#                               level, and how many cases in it
+#   cases_per_capita            for uniform: cases per head of population
+#   trajectory_key,             the same four fields as in infection_seeds.yaml
+#   start_symptom,
+#   infector_symptom,
+#   transmission_mode
+#   filter.*                    who can be picked. Rows of one seed with the same
+#                               filters share one group, and each group has its
+#                               own case count per unit.
+name,date,type,geo_level,geo_unit,trajectory_key,start_symptom,infector_symptom,transmission_mode,cases,cases_per_capita,filter.properties.comorbidities,filter.sex,filter.age
+# Uniform, restricted to people with a heart condition on the list.
+cardiac_uniform,2020-03-09 08:00,uniform,,,,,,,,0.0003,cvd,,
+# One seed, two units. Both rows share name, date, type and filters.
+young_men_exact,2020-03-10 08:00,exact,MGU,E02004314,,,,,6,,,male,18-30
+young_men_exact,2020-03-10 08:00,exact,MGU,E02004323,,,,,4,,,male,18-30
+# Clustered, entering at a stated stage.
+student_clusters,2020-03-11 08:00,clustered,MGU,E02004314,,exposed,,,5,,,,18-24
+# A forced clinical path.
+forced_severe_path,2020-03-12 08:00,exact,LGU,Darlington,severe,,,,2,,,,40-70

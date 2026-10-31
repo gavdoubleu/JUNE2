@@ -225,7 +225,9 @@ class ActivityManager {
                                int num_day_types,
                                const ScheduleType* schedule_type);
 
-  // Pre-computes one (person, day-type, slot) entry. Picks the activity
+  // Pre-computes one (person, day-type, slot) entry. A slot offering an
+  // activity that is redrawn at runtime (and can be taken) is not rolled
+  // here at all; see the body. Otherwise picks the activity
   // via selectActivity against the per-slot precomp_key, classifies it
   // as deterministic / hybrid / fully-stochastic (honouring the
   // per-schedule force_hybrid_mask and the linked-activities-mask

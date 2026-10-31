@@ -1,0 +1,362 @@
+# Contact matrices for the sex and age bins scenario.
+#
+# One block per venue type and per transmission mode. A mode block has
+#   beta      per-mode transmission rate at that venue type, multiplied into
+#             every entry of `contacts` when the file is read
+#   bins      who is in each row and column of the matrix
+#   contacts  contacts per person per day, [observer bin][other bin]
+#
+# Every mode of a venue type must use the same bins.
+#
+# A person is put into a bin by, in this order:
+#   1. their subset in the venue, when the subset name is one of the bins;
+#   2. their sex, when the bins are named male and female;
+#   3. their age, when the bins are age bands, written "min-max", "min+" or
+#      "[min,max]" in whole years.
+# Anyone who matches nothing goes to the first bin. A visitor from another MPI
+# rank is binned on the sex and age it has at home, so the result does not
+# depend on the rank count. Here gym and pub use sex bins and cinema uses age
+# bins, which is what this fixture exists to exercise.
+
+# The scenario has three modes. fomite rows carry a zero beta on purpose:
+# fomite transmission is driven by the deposits in each venue (see disease.yaml),
+# and these rows exist only so that every mode has the same bins.
+
+# When a (venue type, mode) pair has no matrix of its own, the loader refuses to
+# start unless this is true, and then lists the pairs that borrowed the default.
+# boarding_school and student_dorms are left out below to show it.
+allow_default_matrix: true
+
+default_contacts_matrix:
+    modes:
+        respiratory:
+            beta: 0.0375
+            bins: [all]
+            contacts:
+                - [20]
+        physical_contact:
+            beta: 0.0083333333
+            bins: [all]
+            contacts:
+                - [20]
+        fomite:
+            beta: 0.0
+            bins: [all]
+            contacts:
+                - [0.0]
+
+contact_matrices:
+    care_home:
+        modes:
+            respiratory:
+                beta: 0.0116666667
+                bins: &care_bins [resident, worker]
+                contacts:
+                    - [4.0, 0.0]
+                    - [0.0, 14.25]
+            physical_contact:
+                beta: 0.0233333333
+                bins: *care_bins
+                contacts:
+                    - [0.0, 15.0]
+                    - [1.5, 0.75]
+            fomite:
+                beta: 0.0
+                bins: *care_bins
+                contacts:
+                    - [0.0, 0.0]
+                    - [0.0, 0.0]
+
+    office:
+        modes:
+            respiratory:
+                beta: 0.04312875
+                bins: &office_bins [worker]
+                contacts: &office_contacts
+                    - [4.8]
+            physical_contact:
+                beta: 0.0064925
+                bins: *office_bins
+                contacts: *office_contacts
+            fomite:
+                beta: 0.0
+                bins: *office_bins
+                contacts:
+                    - [0.0]
+
+    uni_groups_by_year:
+        modes:
+            respiratory:
+                beta: 0.09375
+                bins: &uni_bins [student]
+                contacts: &uni_contacts
+                    - [2]
+            physical_contact:
+                beta: 0.0625
+                bins: *uni_bins
+                contacts: *uni_contacts
+            fomite:
+                beta: 0.0
+                bins: *uni_bins
+                contacts:
+                    - [0.0]
+
+    classroom:
+        modes:
+            respiratory:
+                beta: 0.0375
+                bins: &class_bins [student, worker]
+                contacts:
+                    - [8.5, 2.3]
+                    - [23.0, 5.7]
+            physical_contact:
+                beta: 0.075
+                bins: *class_bins
+                contacts:
+                    - [1.5, 0.2]
+                    - [2.0, 0.3]
+            fomite:
+                beta: 0.0
+                bins: *class_bins
+                contacts:
+                    - [0.0, 0.0]
+                    - [0.0, 0.0]
+
+    household:
+        modes:
+            respiratory:
+                beta: 0.0673333333
+                bins: &home_bins [Kids, Young Adults, Adults, Old Adults]
+                contacts:
+                    - [1.63482, 0.7872, 0.7872, 0.7872]
+                    - [0.5568, 0.45296, 0.45296, 0.45296]
+                    - [0.3891, 0.4455, 0.4455, 0.4455]
+                    - [0.35264, 0.45296, 0.45296, 0.71775]
+            physical_contact:
+                beta: 0.1346666667
+                bins: *home_bins
+                contacts:
+                    - [0.84218, 0.5248, 0.5248, 0.5248]
+                    - [0.3712, 0.73904, 0.73904, 0.73904]
+                    - [0.9079, 1.0395, 1.0395, 1.0395]
+                    - [0.57536, 0.73904, 0.73904, 0.58725]
+            fomite:
+                beta: 0.0
+                bins: *home_bins
+                contacts:
+                    - [0.0, 0.0, 0.0, 0.0]
+                    - [0.0, 0.0, 0.0, 0.0]
+                    - [0.0, 0.0, 0.0, 0.0]
+                    - [0.0, 0.0, 0.0, 0.0]
+
+    pub:
+        modes:
+            respiratory:
+                beta: 0.1259602667
+                bins: &pub_bins [male, female]
+                contacts:
+                    - [3, 3]
+                    - [3, 3]
+            physical_contact:
+                beta: 0.0343528
+                bins: *pub_bins
+                contacts:
+                    - [3, 3]
+                    - [3, 3]
+            fomite:
+                beta: 0.0
+                bins: *pub_bins
+                contacts:
+                    - [0.0, 0.0]
+                    - [0.0, 0.0]
+
+    gym:
+        modes:
+            respiratory:
+                beta: 0.1259602667
+                bins: &gym_bins [male, female]
+                contacts:
+                    - [3.5, 2.5]
+                    - [2.5, 3.5]
+            physical_contact:
+                beta: 0.0343528
+                bins: *gym_bins
+                contacts:
+                    - [3, 2]
+                    - [2, 3]
+            fomite:
+                beta: 0.0
+                bins: *gym_bins
+                contacts:
+                    - [0.0, 0.0]
+                    - [0.0, 0.0]
+
+    grocery:
+        modes:
+            respiratory:
+                beta: 0.0121352
+                bins: &patron_bins [patron]
+                contacts: &grocery_contacts
+                    - [1.5]
+            physical_contact:
+                beta: 0.0033096
+                bins: *patron_bins
+                contacts: *grocery_contacts
+            fomite:
+                beta: 0.0
+                bins: *patron_bins
+                contacts:
+                    - [0.0]
+
+    cinema:
+        modes:
+            respiratory:
+                beta: 0.04618856
+                bins: &cinema_bins ["0-17", "18+"]
+                contacts:
+                    - [4, 2]
+                    - [2, 3]
+            physical_contact:
+                beta: 0.01259688
+                bins: *cinema_bins
+                contacts:
+                    - [4, 2]
+                    - [2, 3]
+            fomite:
+                beta: 0.0
+                bins: *cinema_bins
+                contacts:
+                    - [0.0, 0.0]
+                    - [0.0, 0.0]
+
+    hospital:
+        modes:
+            respiratory:
+                beta: 0.0146
+                bins: &hospital_bins [worker, patient]
+                contacts:
+                    - [4.75, 0.0]
+                    - [0.0, 0.0]
+            physical_contact:
+                beta: 0.0292
+                bins: *hospital_bins
+                contacts:
+                    - [0.25, 10.0]
+                    - [1.0, 0.0]
+            fomite:
+                beta: 0.0
+                bins: *hospital_bins
+                contacts:
+                    - [0.0, 0.0]
+                    - [0.0, 0.0]
+
+    # Parent venues: a company holds offices and a school holds classrooms.
+    # Their matrix describes mixing between the children of the parent.
+    company:
+        modes:
+            respiratory:
+                beta: 0.0139125
+                bins: &all_bins [all]
+                contacts: &parent_contacts
+                    - [20]
+            physical_contact:
+                beta: 0.0030916667
+                bins: *all_bins
+                contacts: *parent_contacts
+            fomite:
+                beta: 0.0
+                bins: *all_bins
+                contacts:
+                    - [0.0]
+
+    school:
+        modes:
+            respiratory:
+                beta: 0.002625
+                bins: *all_bins
+                contacts: *parent_contacts
+            physical_contact:
+                beta: 0.0005833333
+                bins: *all_bins
+                contacts: *parent_contacts
+            fomite:
+                beta: 0.0
+                bins: *all_bins
+                contacts:
+                    - [0.0]
+
+    university:
+        modes:
+            respiratory:
+                beta: 0.011475
+                bins: *all_bins
+                contacts: *parent_contacts
+            physical_contact:
+                beta: 0.00255
+                bins: *all_bins
+                contacts: *parent_contacts
+            fomite:
+                beta: 0.0
+                bins: *all_bins
+                contacts:
+                    - [0.0]
+
+    # Transport lines. Their riders are split into carriages and buses by
+    # partial_presence in simulation.yaml. Rates are per hour.
+    train_line:
+        modes:
+            respiratory:
+                beta: 0.04
+                bins: &rider_bins [rider]
+                contacts:
+                    - [8]
+            physical_contact:
+                beta: 0.0
+                bins: *rider_bins
+                contacts:
+                    - [8]
+            fomite:
+                beta: 0.0
+                bins: *rider_bins
+                contacts:
+                    - [0.0]
+
+    bus_line:
+        modes:
+            respiratory:
+                beta: 0.05
+                bins: *rider_bins
+                contacts:
+                    - [10]
+            physical_contact:
+                beta: 0.0
+                bins: *rider_bins
+                contacts:
+                    - [10]
+            fomite:
+                beta: 0.0
+                bins: *rider_bins
+                contacts:
+                    - [0.0]
+
+    # Virtual venues for coordinated encounters (see
+    # coordinated_encounters.yaml). The key is the name an encounter gives in
+    # virtual_contact_matrix. Only encounters held at a virtual venue read
+    # these, because one held at a real venue mixes under that venue's matrix.
+    private_gathering:
+        modes:
+            respiratory:
+                beta: 0.1
+                bins: *all_bins
+                contacts:
+                    - [6]
+            physical_contact:
+                beta: 0.05
+                bins: *all_bins
+                contacts:
+                    - [4]
+            fomite:
+                beta: 0.0
+                bins: *all_bins
+                contacts:
+                    - [0.0]

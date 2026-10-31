@@ -81,9 +81,12 @@ class ScopedTestFiles {
  public:
   explicit ScopedTestFiles(std::string prefix = "june2_test") {
     static std::atomic<unsigned> counter{0};
+    // The process id keeps two runs of a test binary apart, and a directory
+    // left under this exact name by a crashed run is cleared, not tripped over.
     directory_ = std::filesystem::temp_directory_path() /
-                 (std::move(prefix) + "_" + std::to_string(getpid()) + "_" +
+                 (std::move(prefix) + "_" + std::to_string(::getpid()) + "_" +
                   std::to_string(counter.fetch_add(1)));
+    std::filesystem::remove_all(directory_);
     if (!std::filesystem::create_directories(directory_))
       throw std::runtime_error("could not create test temp directory: " +
                                directory_.string());
@@ -98,6 +101,10 @@ class ScopedTestFiles {
   }
 
   const std::filesystem::path& directory() const { return directory_; }
+
+  std::filesystem::path path(std::string_view filename) const {
+    return directory_ / std::string(filename);
+  }
 
   std::filesystem::path write(std::string_view filename,
                               std::string_view contents) const {

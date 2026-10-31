@@ -20,6 +20,10 @@ struct Dose {
   double day_administered;
 
   // Milestones (relative to day_administered)
+  // No protection at all until this many days after the dose. From here
+  // protection rises linearly to its peak at days_to_effective. If the two
+  // are equal, protection jumps straight to the peak.
+  double days_to_onset = 0.0;
   double days_to_effective;
   double days_to_waning;
   double days_to_finished;  // When it's basically gone or at baseline
@@ -57,9 +61,15 @@ struct Dose {
 
     if (time_since < 0) return 0.0;
 
-    // 1. Ramp up to effective
+    // Nothing before onset. This also keeps the ramp below from dividing by
+    // zero when onset equals days_to_effective.
+    if (time_since < days_to_onset) return 0.0;
+
+    // 1. Ramp up from onset to effective
     if (time_since < days_to_effective) {
-      return (time_since / days_to_effective) * peak_efficacy;
+      return ((time_since - days_to_onset) /
+              (days_to_effective - days_to_onset)) *
+             peak_efficacy;
     }
 
     // 2. Peak efficacy period

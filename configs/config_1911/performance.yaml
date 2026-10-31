@@ -12,7 +12,3 @@ performance:
   deterministic_activities:
     - "residence"
     - "primary_activity"
-
-  # Active infection tracking
-  # When enabled, only infected people are tracked for state updates
-  track_active_infections_only: true

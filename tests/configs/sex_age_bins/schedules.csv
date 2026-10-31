@@ -1,0 +1,21 @@
+# Schedule assignment table for the sex and age bins scenario.
+#
+# Rows are tried from the top and the first row whose filters all match a
+# person is used. Inside that row each schedule.<name> column is the chance of
+# being given that schedule type. Whatever probability is left over falls back
+# to the selection rules in schedules.yaml. If the columns add up to 0.98 or
+# more they are rescaled to 1.
+#
+#   filter.<property>   same names as a selection rule: age, sex,
+#                       properties.<name>, activities.<name>.length and so on.
+#                       Ages can be a value, a range such as 18-29 or a
+#                       comparison such as >=65. An empty cell matches anyone.
+#   geo_level, geo_unit the row applies to everyone living in that unit or
+#                       below it. They go together or not at all, and are not
+#                       filter columns because they are looked up in the world.
+#   schedule.<name>     must be a schedule type in schedules.yaml.
+filter.age,filter.properties.work_mode,geo_level,geo_unit,schedule.night_owls,schedule.has_primary_activity_hybrid
+# In Darlington one in ten ordinary workers has moved to hybrid working.
+,Normal,LGU,Darlington,,0.10
+# A quarter of 18 to 29 year olds are night owls.
+18-29,,,,0.25,

@@ -209,18 +209,16 @@ contact_matrices:
     modes:
       respiratory:
         beta: 0.0146
-        bins: &id020 [workers, patients, icu_patients]
+        bins: &id020 [worker, patient]
         contacts:
-        - [4.75, 0.0, 0.0]
-        - [0.0, 0.0, 0.0]
-        - [0.0, 0.0, 0.0]
+        - [4.75, 0.0]
+        - [0.0, 0.0]
       physical_contact:
         beta: 0.0292
         bins: *id020
         contacts:
-        - [0.25, 10.0, 10.0]
-        - [1.0, 0.0, 0.0]
-        - [1.0, 0.0, 0.0]
+        - [0.25, 10.0]
+        - [1.0, 0.0]
   company:
     modes:
       respiratory:

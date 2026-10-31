@@ -302,9 +302,14 @@ if(BUILD_TESTING)
       test_fomite_transmission
       test_vaccines
       test_vaccination_manager
+      test_vaccination_allocation
+      test_vaccination_uptake
       test_config_loading
+      test_config_strictness
+      test_name_checks
       test_config_checks
       test_activity_manager
+      test_activity_preferences
 
       test_transmission_modifiers
       test_applicable_policy_sets
@@ -403,7 +408,11 @@ if(BUILD_TESTING)
     add_june_test(test_mpi_advanced "tests/test_mpi_advanced.cpp" "${MPIEXEC_EXECUTABLE}")
     add_june_test(test_mpi_registry_sync "tests/test_mpi_registry_sync.cpp" "${MPIEXEC_EXECUTABLE}")
     add_june_test(test_mpi_observed_metrics "tests/test_mpi_observed_metrics.cpp" "${MPIEXEC_EXECUTABLE}")
+    add_june_test(test_mpi_vaccination_allocation "tests/test_mpi_vaccination_allocation.cpp" "${MPIEXEC_EXECUTABLE}")
+    add_june_test(test_mpi_vaccination_uptake "tests/test_mpi_vaccination_uptake.cpp" "${MPIEXEC_EXECUTABLE}")
+    add_june_test(test_mpi_vaccination_manager "tests/test_mpi_vaccination_manager.cpp" "${MPIEXEC_EXECUTABLE}")
     add_june_test(test_mpi_policy_trigger "tests/test_mpi_policy_trigger.cpp" "${MPIEXEC_EXECUTABLE}")
+    add_june_test(test_mpi_calendar_event_counts "tests/test_mpi_calendar_event_counts.cpp" "${MPIEXEC_EXECUTABLE}")
     add_june_test(test_mpi_transmission_modes "tests/test_mpi_transmission_modes.cpp" "${MPIEXEC_EXECUTABLE}")
     add_june_test(test_mpi_visitor_exchange_paths "tests/test_mpi_visitor_exchange_paths.cpp" "${MPIEXEC_EXECUTABLE}" 4)
 
@@ -432,6 +441,17 @@ if(BUILD_TESTING)
       set_tests_properties(test_mpi_structured_seed_reproducibility PROPERTIES
                            ENVIRONMENT "BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR};DAYS=3;SEEDS=configs/config_2021/infection_seeds_structured.yaml"
                            SKIP_RETURN_CODE 77 TIMEOUT 600)
+
+      # The same end-to-end diff on a scenario whose gym and pub are binned
+      # by sex and whose cinema is binned by age band. A visitor from another
+      # rank must be put in the bin its home rank gives it, or the np=1 and
+      # np>1 runs differ from the first day people travel.
+      add_test(NAME test_mpi_sex_age_bins_reproducibility
+               COMMAND ${CMAKE_SOURCE_DIR}/tests/test_mpi_full_reproducibility.sh
+               WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+      set_tests_properties(test_mpi_sex_age_bins_reproducibility PROPERTIES
+                           ENVIRONMENT "BUILD_DIR=${CMAKE_CURRENT_BINARY_DIR};DAYS=8;NPS=1 2 3;WORLD=worlds/world_state.h5;CONFIG=tests/configs/sex_age_bins/simulation.yaml"
+                           SKIP_RETURN_CODE 77 TIMEOUT 900)
 
       # Checkpoint/restart determinism gate: a checkpoint leg + resume leg
       # must be set-identical to an uninterrupted baseline across a

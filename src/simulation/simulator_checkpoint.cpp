@@ -219,7 +219,7 @@ void writeShardVaccine(H5::H5File& f, const std::vector<uint32_t>& ord,
   std::vector<std::string> vx_name;
   std::vector<int64_t> dose_off;
   std::vector<int32_t> dose_cnt, dose_num;
-  std::vector<double> d_admin, d_eff, d_wane, d_fin, d_wfac;
+  std::vector<double> d_admin, d_onset, d_eff, d_wane, d_fin, d_wfac;
   for (uint32_t idx : ord) {
     const Person& p = people[idx];
     if (!p.vaccine_trajectory) continue;
@@ -231,6 +231,7 @@ void writeShardVaccine(H5::H5File& f, const std::vector<uint32_t>& ord,
     for (const auto& d : vt.doses) {
       dose_num.push_back(d.number);
       d_admin.push_back(d.day_administered);
+      d_onset.push_back(d.days_to_onset);
       d_eff.push_back(d.days_to_effective);
       d_wane.push_back(d.days_to_waning);
       d_fin.push_back(d.days_to_finished);
@@ -246,6 +247,7 @@ void writeShardVaccine(H5::H5File& f, const std::vector<uint32_t>& ord,
   writeVec(f, "/vaccine/dose_counts", dose_cnt, I32, comp);
   writeVec(f, "/vaccine/dose_number", dose_num, I32, comp);
   writeVec(f, "/vaccine/dose_day_administered", d_admin, F64, comp);
+  writeVec(f, "/vaccine/dose_days_to_onset", d_onset, F64, comp);
   writeVec(f, "/vaccine/dose_days_to_effective", d_eff, F64, comp);
   writeVec(f, "/vaccine/dose_days_to_waning", d_wane, F64, comp);
   writeVec(f, "/vaccine/dose_days_to_finished", d_fin, F64, comp);

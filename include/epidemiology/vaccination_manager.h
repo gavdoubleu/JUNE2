@@ -1,202 +1,311 @@
 #pragma once
 
+#include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdint>
+#include <ctime>
+#include <iomanip>
+#include <limits>
 #include <memory>
+#include <optional>
+#include <ostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "core/config.h"
+#include "core/types.h"
 #include "core/world_state.h"
-#include "utils/deterministic_rng.h"
+#include "epidemiology/vaccination_allocation.h"
+#include "epidemiology/vaccination_uptake.h"
 #include "utils/event_logging/event_logger.h"
-#include "utils/random.h"
+#include "utils/mpi_utils.h"
 #include "utils/time_utils.h"
 #include "vaccine.h"
 
 namespace june {
 
-// update() is called once per simulated day with the day index. A time that is
-// negative, not finite or not a whole number is a caller bug: the roll is keyed
-// on the day, so a fractional time would silently share a day with another.
-inline uint64_t vaccinationDayIndex(double current_time) {
-  if (!std::isfinite(current_time) || current_time < 0.0 ||
-      current_time != std::floor(current_time))
-    throw std::runtime_error("vaccination: simulation time " +
-                             std::to_string(current_time) +
-                             " is not a whole, non negative day index");
-  return static_cast<uint64_t>(current_time);
+// The most first doses a campaign may give: floor(target * population).
+//
+// The product is a floating point number, and 0.29 is not exactly 29/100, so
+// 0.29 of 100 comes out as 28.999999999999996 and a plain floor would drop a
+// whole person. The target and the multiply each carry at most half an ulp of
+// error, so lifting the product by 4 * DBL_EPSILON (relative) covers both. It
+// cannot reach the next integer unless the target has more digits than a
+// double holds at that size.
+inline int64_t firstDoseCap(double coverage_target, int64_t population) {
+  if (!(coverage_target > 0.0 && coverage_target <= 1.0))
+    throw std::runtime_error("vaccination: coverage_target " +
+                             std::to_string(coverage_target) +
+                             " must be above 0 and at most 1");
+  if (population < 0)
+    throw std::runtime_error("vaccination: population " +
+                             std::to_string(population) +
+                             " must not be negative");
+  const double product = coverage_target * static_cast<double>(population);
+  return static_cast<int64_t>(std::floor(product * (1.0 + 4.0 * DBL_EPSILON)));
 }
 
-// Seed for one campaign's coverage roll for one person on one day. Every part
-// of the key goes through mix_seed, so two different (person, day, campaign)
-// triples never share a draw, and the run seed changes every draw.
-inline uint64_t vaccinationRollSeed(uint64_t base_seed, PersonId person,
-                                    size_t campaign_index, uint64_t day) {
-  return mix_seed(base_seed, static_cast<uint64_t>(person), day,
-                  0x7ACC1ULL + campaign_index);
-}
-
-class VaccinationCampaign {
- public:
-  VaccinationCampaign(const VaccinationCampaignConfig& config,
-                      const Config& full_config)
-      : config_(config) {
-    std::tm sim_start = parseDate(full_config.simulation.start_date);
-
-    if (!config.start_date.empty()) {
-      std::tm camp_start = parseDate(config.start_date);
-      start_day_offset_ = daysBetween(sim_start, camp_start);
-    } else {
-      start_day_offset_ = -1.0;  // Active from start
-    }
-
-    if (!config.end_date.empty()) {
-      std::tm camp_end = parseDate(config.end_date);
-      end_day_offset_ = daysBetween(sim_start, camp_end);
-    } else {
-      end_day_offset_ = 1e9;  // Far future
-    }
-  }
-  bool isActive(double current_day) const {
-    return current_day >= start_day_offset_ && current_day <= end_day_offset_;
-  }
-
-  // Checks if someone is allowed to get a vaccine from this specific campaign
-  bool isEligible(const Person& person, double current_time,
-                  const WorldState& world) const {
-    // 1. Selection criteria match
-    if (!matchesAllCriteria(person, config_.selection_criteria, &world))
-      return false;
-
-    if (config_.dose_sequence.empty()) return false;
-
-    int current_doses = person.vaccine_trajectory
-                            ? person.vaccine_trajectory->getNumDoses()
-                            : 0;
-
-    // Check if this campaign provides the next dose the person needs
-    bool provides_needed_dose = false;
-    for (int dose_num : config_.dose_sequence) {
-      if (dose_num == current_doses) {
-        provides_needed_dose = true;
-        break;
-      }
-    }
-
-    if (!provides_needed_dose) {
-      return false;
-    }
-
-    // Booster filter: check previous vaccine type
-    if (current_doses > 0 && !config_.last_dose_type_filter.empty()) {
-      bool type_match = false;
-      for (const auto& filter_type : config_.last_dose_type_filter) {
-        if (person.vaccine_trajectory->vaccine_name == filter_type) {
-          type_match = true;
-          break;
-        }
-      }
-      if (!type_match) return false;
-    }
-
-    // If already have some doses, check timing for the next one
-    if (current_doses > 0) {
-      double last_time = person.vaccine_trajectory->getLastDoseTime();
-      double wait_time = 0.0;
-      // Use current_doses - 1 as index for days_to_next_dose
-      if (current_doses - 1 <
-          static_cast<int>(config_.days_to_next_dose.size())) {
-        wait_time = config_.days_to_next_dose[current_doses - 1];
-      }
-
-      if (current_time < last_time + wait_time) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  const VaccinationCampaignConfig& getConfig() const { return config_; }
-
- private:
-  VaccinationCampaignConfig config_;
-  double start_day_offset_;
-  double end_day_offset_;
-};
-
-// This class manages all the different vaccination campaigns going on
+// Spends each campaign's dose budget, one day at a time.
+//
+// At construction, which is collective, it settles who is in each tier and who
+// accepts (settleUptake) and fixes the cap on first doses. Nothing else is kept
+// between days that a restored checkpoint would not give back: the number of
+// people who have started a course is counted again every day from the
+// trajectories. Every rank runs the same code, in the same order, with the same
+// number of collective calls.
 class VaccinationManager {
  public:
   VaccinationManager(WorldState& world, const Config& config,
                      EventLogger* event_logger = nullptr)
       : world_(world), config_(config), event_logger_(event_logger) {
-    if (config.vaccination.enabled) {
-      for (const auto& camp_cfg : config.vaccination.campaigns) {
-        campaigns_.emplace_back(camp_cfg, config);
+    if (!config.vaccination.enabled) return;
+    const auto& configs = config.vaccination.campaigns;
+    const std::tm sim_start = parseDate(config.simulation.start_date);
+    const int64_t population =
+        mpi_runtime::globalSum(static_cast<int64_t>(world.people.size()));
+    campaigns_.reserve(configs.size());
+    for (size_t c = 0; c < configs.size(); ++c) {
+      const VaccinationCampaignConfig& cfg = configs[c];
+      Campaign& campaign = campaigns_.emplace_back();
+      campaign.config = &cfg;
+      campaign.index = c;
+
+      const auto vaccine = config.vaccination.vaccines.find(cfg.vaccine_type);
+      if (vaccine == config.vaccination.vaccines.end())
+        throw std::runtime_error("vaccination campaign '" + cfg.name +
+                                 "': vaccine_type '" + cfg.vaccine_type +
+                                 "' is not one of the vaccines");
+      campaign.vaccine = &vaccine->second;
+      if (cfg.tiers.empty())
+        throw std::runtime_error("vaccination campaign '" + cfg.name +
+                                 "' has no tiers");
+      for (const auto& tier : cfg.tiers) {
+        if (tier.dose >= static_cast<int>(vaccine->second.doses.size()))
+          throw std::runtime_error(
+              "vaccination campaign '" + cfg.name + "' tier '" + tier.name +
+              "' gives dose " + std::to_string(tier.dose) + " but vaccine '" +
+              cfg.vaccine_type + "' has " +
+              std::to_string(vaccine->second.doses.size()) + " doses");
+        campaign.starts_course.push_back(tier.dose == 0);
       }
+
+      campaign.uptake =
+          settleUptake(world, cfg, c, config.simulation.random_seed);
+      if (cfg.coverage_target)
+        campaign.cap = firstDoseCap(*cfg.coverage_target, population);
+
+      // An absent start means campaign day 0 is the run's day 0. The end day
+      // is included.
+      if (!cfg.start_date.empty())
+        campaign.start_day = daysBetween(sim_start, parseDate(cfg.start_date));
+      if (!cfg.end_date.empty())
+        campaign.end_day = daysBetween(sim_start, parseDate(cfg.end_date));
+      campaign.candidates.resize(cfg.tiers.size());
     }
   }
 
-  // This is called every simulation day to hand out vaccines
-  void update(double current_time) {
-    const uint64_t day = vaccinationDayIndex(current_time);
-    if (!config_.vaccination.enabled) return;
-
-    // 1. Identify active campaigns once for the day
-    std::vector<VaccinationCampaign*> active_campaigns;
-    for (auto& campaign : campaigns_) {
-      if (campaign.isActive(current_time)) {
-        active_campaigns.push_back(&campaign);
-      }
+  // This is called every simulation day, with the day index, to hand out
+  // vaccines
+  void update(int day) {
+    const auto current_time = static_cast<double>(day);
+    for (Campaign& campaign : campaigns_) {
+      if (day < campaign.start_day || day > campaign.end_day) continue;
+      runCampaign(campaign, day, current_time);
     }
+  }
 
-    if (active_campaigns.empty()) return;
+  // How far each campaign got, for the end of a run. Collective: every rank
+  // calls it, and only rank 0 writes. A campaign with a coverage target says
+  // whether it was reached, since a target that uptake, eligibility or the
+  // budget made unreachable shows nowhere else but in the daily rows.
+  void printCoverage(std::ostream& out) const {
+    for (const Campaign& campaign : campaigns_) {
+      const VaccinationCampaignConfig& cfg = *campaign.config;
+      int64_t started = 0;
+      for (const Person& person : world_.people)
+        started += hasStarted(person, cfg.vaccine_type);
+      started = mpi_runtime::globalSum(started);
+      if (mpi_runtime::state().rank != 0) continue;
 
-    // 2. Iterate through people
-    for (auto& person : world_.people) {
-      if (person.is_dead) continue;
-
-      for (auto* campaign : active_campaigns) {
-        const auto& camp_cfg = campaign->getConfig();
-
-        // Eligibility check
-        if (campaign->isEligible(person, current_time, world_)) {
-          // Daily probability check, one draw per (person, day, campaign)
-          SplitMix64 vax_rng(vaccinationRollSeed(
-              config_.simulation.random_seed, person.id,
-              static_cast<size_t>(campaign - campaigns_.data()), day));
-
-          if (uniform01(vax_rng) < camp_cfg.daily_coverage) {
-            administerVaccine(person, camp_cfg.vaccine_type, current_time);
-            break;  // Only one vaccine/campaign per day for a person
-          }
-        }
+      out << "vaccination campaign '" << cfg.name << "': ";
+      if (!campaign.cap) {
+        out << started << " people started a course (no coverage target)\n";
+        continue;
       }
+      out << started << " of " << *campaign.cap
+          << " first doses the coverage target allows";
+      if (*campaign.cap > 0)
+        out << " (" << std::fixed << std::setprecision(1)
+            << 100.0 * static_cast<double>(started) /
+                   static_cast<double>(*campaign.cap)
+            << "%)";
+      out << ", target "
+          << (started >= *campaign.cap ? "reached" : "not reached") << "\n";
     }
   }
 
  private:
-  void administerVaccine(Person& person, const std::string& vaccine_type,
-                         double current_time) {
-    auto it = config_.vaccination.vaccines.find(vaccine_type);
-    if (it == config_.vaccination.vaccines.end()) return;
+  // A candidate is kept as its place in the tier's lottery and its position in
+  // world.people.
+  using Candidate = std::pair<uint64_t, uint32_t>;
 
+  struct Campaign {
+    const VaccinationCampaignConfig* config = nullptr;
+    const VaccineConfig* vaccine = nullptr;
+    size_t index = 0;
+    CampaignUptake uptake;
+    std::optional<int64_t> cap;  // most first doses over the whole run
+    int64_t start_day = 0;       // run day of campaign day 0
+    int64_t end_day = std::numeric_limits<int64_t>::max();
+    std::vector<bool> starts_course;  // per tier: does it give dose 0
+    // Reused between days; cleared, not reallocated
+    std::vector<std::vector<Candidate>> candidates;
+  };
+
+  // A course counts from its first dose, under the vaccine that gave it, and
+  // the dead included.
+  static bool hasStarted(const Person& person, const std::string& vaccine) {
+    const VaccineTrajectory* trajectory = person.vaccine_trajectory.get();
+    return trajectory && trajectory->getNumDoses() > 0 &&
+           trajectory->vaccine_name == vaccine;
+  }
+
+  // The brand and gap rules for a person who holds `held` doses. Nobody with no
+  // dose is held back by them. A course goes on with the vaccine it began
+  // with, because coverage counts people under the first dose's vaccine; a
+  // campaign that lists the vaccines a course may have begun with (a
+  // booster, say) takes those instead.
+  static bool nextDoseDue(const Person& person, int held,
+                          const VaccinationCampaignConfig& cfg,
+                          double current_time) {
+    if (held == 0) return true;
+    const VaccineTrajectory& trajectory = *person.vaccine_trajectory;
+    const auto& accepted = cfg.courses_begun_with;
+    if (accepted.empty()) {
+      if (trajectory.vaccine_name != cfg.vaccine_type) return false;
+    } else if (std::find(accepted.begin(), accepted.end(),
+                         trajectory.vaccine_name) == accepted.end()) {
+      return false;
+    }
+    const auto gap = static_cast<size_t>(held - 1);
+    const double wait =
+        gap < cfg.days_to_next_dose.size() ? cfg.days_to_next_dose[gap] : 0.0;
+    return current_time >= trajectory.getLastDoseTime() + wait;
+  }
+
+  void runCampaign(Campaign& campaign, int64_t day, double current_time) {
+    const VaccinationCampaignConfig& cfg = *campaign.config;
+    const size_t tiers = cfg.tiers.size();
+    const std::optional<int64_t> allotment =
+        cfg.dose_budget ? std::optional(doseAllotment(cfg.dose_budget->doses,
+                                                      cfg.dose_budget->per_days,
+                                                      day - campaign.start_day))
+                        : std::nullopt;
+
+    // One pass over the local people: who has started a course (the dead
+    // included, a course counts from its first dose) and who could be dosed
+    // today.
+    for (auto& list : campaign.candidates) list.clear();
+    std::vector<int64_t> declined(tiers, 0);
+    int64_t started = 0;
+    for (size_t i = 0; i < world_.people.size(); ++i) {
+      const Person& person = world_.people[i];
+      const VaccineTrajectory* trajectory = person.vaccine_trajectory.get();
+      const int held = trajectory ? trajectory->getNumDoses() : 0;
+      started += hasStarted(person, cfg.vaccine_type);
+      if (person.is_dead) continue;
+      const uint64_t selected = campaign.uptake.selected[i];
+      if (selected == 0) continue;
+      // One dose a day, from the first campaign that reaches the person
+      if (held > 0 && trajectory->getLastDoseTime() == current_time) continue;
+      if (!nextDoseDue(person, held, cfg, current_time)) continue;
+      for (size_t t = 0; t < tiers; ++t) {
+        if (!((selected >> t) & 1) || cfg.tiers[t].dose != held) continue;
+        // The first tier that fits decides; a decline does not move the
+        // person on to a later tier.
+        if ((campaign.uptake.accepted[i] >> t) & 1)
+          campaign.candidates[t].emplace_back(
+              lotteryKey(config_.simulation.random_seed,
+                         static_cast<uint64_t>(person.id), campaign.index, t),
+              static_cast<uint32_t>(i));
+        else
+          ++declined[t];
+        break;
+      }
+    }
+
+    started = mpi_runtime::globalSum(started);
+    std::vector<int64_t> counts(tiers);
+    for (size_t t = 0; t < tiers; ++t) {
+      counts[t] = mpi_runtime::globalSum(
+          static_cast<int64_t>(campaign.candidates[t].size()));
+      declined[t] = mpi_runtime::globalSum(declined[t]);
+    }
+
+    std::optional<int64_t> cap_remaining;
+    if (campaign.cap)
+      cap_remaining = std::max<int64_t>(0, *campaign.cap - started);
+    const std::vector<int64_t> take =
+        fillTiers(allotment, counts, campaign.starts_course, cap_remaining);
+
+    int64_t started_after = started;
+    for (size_t t = 0; t < tiers; ++t) {
+      if (campaign.starts_course[t]) started_after += take[t];
+      if (take[t] > 0) serveTier(campaign, t, counts[t], take[t], current_time);
+    }
+
+    // Every count is a whole-world total, so only rank 0 writes the row
+    if (event_logger_ && mpi_runtime::state().rank == 0) {
+      for (size_t t = 0; t < tiers; ++t)
+        event_logger_->logCampaignDay(
+            static_cast<int>(day), static_cast<uint16_t>(campaign.index),
+            static_cast<uint16_t>(t), counts[t], take[t], declined[t],
+            allotment.value_or(kNoAllotment), started_after);
+    }
+  }
+
+  // Doses `take` of the tier's `count` candidates over all ranks. When the
+  // tier is not served in full, the ones with the lowest lottery keys go first.
+  void serveTier(Campaign& campaign, size_t t, int64_t count, int64_t take,
+                 double current_time) {
+    std::vector<Candidate>& list = campaign.candidates[t];
+    if (take < count) {
+      std::sort(list.begin(), list.end());
+      const auto local_at_or_below = [&](uint64_t key) {
+        return std::upper_bound(
+                   list.begin(), list.end(), key,
+                   [](uint64_t k, const Candidate& c) { return k < c.first; }) -
+               list.begin();
+      };
+      const std::optional<uint64_t> cutoff =
+          lotteryCutoff(count, take, [&](uint64_t key) {
+            return mpi_runtime::globalSum(local_at_or_below(key));
+          });
+      list.resize(static_cast<size_t>(local_at_or_below(*cutoff)));
+    }
+    for (const Candidate& candidate : list)
+      administerVaccine(world_.people[candidate.second], campaign,
+                        current_time);
+  }
+
+  void administerVaccine(Person& person, const Campaign& campaign,
+                         double current_time) {
+    const std::string& vaccine_type = campaign.config->vaccine_type;
     if (!person.vaccine_trajectory) {
       person.vaccine_trajectory = std::make_unique<VaccineTrajectory>();
       person.vaccine_trajectory->vaccine_name = vaccine_type;
     }
-
-    // Determine which dose to give
-    int dose_idx = person.vaccine_trajectory->getNumDoses();
-    if (dose_idx >= static_cast<int>(it->second.doses.size())) return;
-
-    const auto& d_cfg = it->second.doses[dose_idx];
+    const int dose_index = person.vaccine_trajectory->getNumDoses();
+    // The tier's dose was checked against the vaccine at construction
+    const DoseConfig& d_cfg = campaign.vaccine->doses[dose_index];
 
     Dose dose;
     dose.number = d_cfg.number;
     dose.day_administered = current_time;
+    dose.days_to_onset = d_cfg.days_to_onset;
     dose.days_to_effective = d_cfg.days_to_effective;
     dose.days_to_waning = d_cfg.days_to_waning;
     dose.days_to_finished = d_cfg.days_to_finished;
@@ -206,17 +315,15 @@ class VaccinationManager {
 
     person.vaccine_trajectory->addDose(dose);
 
-    // Log the vaccination event
-    if (event_logger_) {
-      event_logger_->logVaccination(person.id, vaccine_type, dose_idx,
+    if (event_logger_)
+      event_logger_->logVaccination(person.id, vaccine_type, dose_index,
                                     current_time);
-    }
   }
 
   WorldState& world_;
   const Config& config_;
   EventLogger* event_logger_;
-  std::vector<VaccinationCampaign> campaigns_;
+  std::vector<Campaign> campaigns_;
 };
 
 }  // namespace june

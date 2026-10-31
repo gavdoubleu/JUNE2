@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/config.h"
 #include "core/types.h"
 #include "epidemiology/observed_metrics.h"
 
@@ -32,15 +33,6 @@ struct TriggerCell {
 struct ResponseTerm {
   std::string metric;
   double weight = 0.0;
-};
-
-// Who shares one avoidance draw. A person decides alone, or everyone registered
-// to the same venue for a named activity decides together.
-struct DecisionUnit {
-  std::string shared_activity;  // empty: the person decides alone
-  int16_t activity_index = -1;  // shared_activity in the world, set on resolve
-
-  bool shared() const { return !shared_activity.empty(); }
 };
 
 // Ties a Policy's activation to an observed metric. "Closed" means the trigger

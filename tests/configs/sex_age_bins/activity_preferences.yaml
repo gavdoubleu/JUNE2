@@ -1,0 +1,79 @@
+# Which kind of venue a person picks when an activity offers several.
+#
+# Leisure is the one that matters in this world: people have pubs, cinemas,
+# gyms and groceries to choose from. For each person the engine takes the
+# profile with the highest priority whose `activity` matches and whose
+# `selection` all holds, and draws a venue type with probability proportional
+# to its weight. Venue types a profile does not list keep a weight of 1.
+# Higher priority is tried first.
+#
+# `activity` names the activity the profile is for. Empty means any activity.
+# `selection` takes the same {property, operator, value} entries as policies
+# and schedules. Operators: == != > < >= <= in contains.
+
+profiles:
+    # Two conditions that must both hold, one on a list-valued property.
+    - name: "Clinically vulnerable (leisure)"
+      activity: "leisure"
+      priority: 30
+      selection:
+          - {property: "properties.comorbidities", operator: contains, value: "immunosuppression"}
+      weights: {grocery: 3.0, pub: 0.05, cinema: 0.1, gym: 0.05}
+
+    # A geography condition: the person's ancestor unit at a named level,
+    # matched by name.
+    - name: "Young adults in County Durham (leisure)"
+      activity: "leisure"
+      priority: 20
+      selection:
+          - {property: age, operator: ">=", value: 18}
+          - {property: age, operator: "<", value: 30}
+          - {property: "geo_unit.LGU", operator: "==", value: "County Durham"}
+      weights: {pub: 4.0, gym: 3.0, cinema: 2.0, grocery: 0.3}
+
+    # A condition on how many ties a person has in a network the world carries.
+    - name: "Well connected (leisure)"
+      activity: "leisure"
+      priority: 15
+      selection:
+          - {property: "networks.friendships.length", operator: ">=", value: 4}
+      weights: {pub: 2.5, cinema: 1.5, gym: 1.0, grocery: 0.5}
+
+    - name: "Young males (leisure)"
+      activity: "leisure"
+      priority: 10
+      selection:
+          - {property: age, operator: "<", value: 30}
+          - {property: sex, operator: "==", value: "M"}
+      weights: {gym: 5.0, pub: 3.0, cinema: 2.0, grocery: 0.5}
+
+    - name: "Young females (leisure)"
+      activity: "leisure"
+      priority: 10
+      selection:
+          - {property: age, operator: "<", value: 30}
+          - {property: sex, operator: "==", value: "F"}
+      weights: {gym: 4.0, cinema: 4.0, pub: 2.0, grocery: 1.0}
+
+    # Property values are the strings the world stores.
+    - name: "Working from home (leisure)"
+      activity: "leisure"
+      priority: 8
+      selection:
+          - {property: "properties.work_mode", operator: "==", value: "From_Home"}
+      weights: {gym: 3.0, grocery: 2.0, pub: 1.0, cinema: 1.0}
+
+    - name: "Seniors (leisure)"
+      activity: "leisure"
+      priority: 5
+      selection:
+          - {property: age, operator: ">", value: 65}
+      weights: {grocery: 5.0, cinema: 3.0, pub: 1.0, gym: 0.1}
+
+    # The fallback. An empty selection matches everyone and an empty activity
+    # matches every activity.
+    - name: "Default"
+      activity: ""
+      priority: 0
+      selection: []
+      weights: {pub: 1.0, cinema: 1.0, gym: 1.0, grocery: 1.0}

@@ -93,11 +93,9 @@ InteractionManager::InteractionManager(
   }
 }
 
-int InteractionManager::computeBinIndexForMatrix(const Person* person,
-                                                 const Venue* venue,
-                                                 SubsetIndex subset_index,
-                                                 const ContactMatrix* matrix,
-                                                 int num_bins) const {
+int InteractionManager::computeBinIndexForMatrix(
+    const Person* person, const VisitorInfo* visitor, const Venue* venue,
+    SubsetIndex subset_index, const ContactMatrix* matrix, int num_bins) const {
   if (!matrix || num_bins <= 1) return 0;
 
   int bin_index = -1;
@@ -116,15 +114,18 @@ int InteractionManager::computeBinIndexForMatrix(const Person* person,
     }
   }
 
-  // Stage 3: property-based (sex first, then age).
-  if (bin_index < 0 && person) {
-    int sex_bin = (person->sex == Sex::MALE)     ? matrix->male_bin
-                  : (person->sex == Sex::FEMALE) ? matrix->female_bin
-                                                 : -1;
+  // Stage 3: property-based (sex first, then age). A visitor carries the
+  // age and sex its home rank has, so it bins as it would at home.
+  if (bin_index < 0 && (person || visitor)) {
+    const Sex sex = person ? person->sex : visitor->sex;
+    const float age = person ? person->age : visitor->age;
+    int sex_bin = (sex == Sex::MALE)     ? matrix->male_bin
+                  : (sex == Sex::FEMALE) ? matrix->female_bin
+                                         : -1;
     if (sex_bin >= 0) {
       bin_index = sex_bin;
     } else {
-      int age_int = std::min(static_cast<int>(person->age), 99);
+      int age_int = std::min(static_cast<int>(age), 99);
       if (age_int >= 0) bin_index = matrix->age_to_bin[age_int];
     }
   }
@@ -315,8 +316,8 @@ void InteractionManager::accumulateOneMemberIntoParent(
   }
   if (person && person->is_dead) return;
 
-  int parent_bin = computeBinIndexForMatrix(person, venue, loc.subset_index,
-                                            parent_matrix, parent_num_bins);
+  int parent_bin = computeBinIndexForMatrix(
+      person, visitor, venue, loc.subset_index, parent_matrix, parent_num_bins);
 
   // Headcount (matches BinGroup::total_size convention)
   agg.size_by_bin[parent_bin]++;

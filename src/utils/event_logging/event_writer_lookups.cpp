@@ -234,19 +234,6 @@ std::vector<june::detail::PersonActivityRecord> buildPersonActivityRecords(
   return records;
 }
 
-// At most 4 properties are kept (matches PopulationSummaryRecord::extra_codes
-// width).
-std::vector<std::string> collectSummaryPropertyNames(
-    const june::WorldState& world,
-    const std::vector<std::string>& summary_props) {
-  std::vector<std::string> property_names;
-  for (const auto& name : summary_props) {
-    if (world.getPersonPropertyIndex(name) < 0) continue;
-    property_names.push_back(name);
-  }
-  return property_names;
-}
-
 std::vector<june::PopulationSummaryRecord> buildPopulationSummaryRecords(
     const june::WorldState& world,
     const std::vector<std::string>& property_names) {
@@ -363,10 +350,9 @@ void writePopulationSummary(H5::H5File& file, const WorldState& world,
   const size_t n = world.people.size();
   if (n == 0) return;
 
-  std::vector<std::string> summary_props = config.simulation.summary_properties;
-  if (summary_props.size() > 4) summary_props.resize(4);
-
-  auto property_names = collectSummaryPropertyNames(world, summary_props);
+  // At most 4 properties fit (PopulationSummaryRecord::extra_codes width).
+  const std::vector<std::string> property_names =
+      config.simulation.summaryPropertiesFor(world);
   auto records = buildPopulationSummaryRecords(world, property_names);
   auto ptype = event_lookup_schema::populationSummary();
 

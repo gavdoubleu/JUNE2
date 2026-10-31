@@ -1,6 +1,5 @@
 coordinated_encounters:
   enabled: true
-  log_commitments: true
 
   # ---------------------------------------------------------------------------
   # follow: a FOLLOWER is placed wherever its HOST resolves each slot, reusing

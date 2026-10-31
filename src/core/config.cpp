@@ -321,10 +321,18 @@ bool SelectionCriterion::evaluate(
   }
 
   // Boolean predicates: bypass the target-code / fallback machinery entirely.
-  // The criterion's `value` is bool; the operator must be == or !=.
+  // The criterion's `value` is a bool, or the 0/1 the YAML parser stores for
+  // true/false; the operator must be == or !=.
   auto eval_bool = [this](bool actual) -> bool {
-    if (!std::holds_alternative<bool>(value)) return false;
-    bool target = std::get<bool>(value);
+    bool target;
+    if (auto b = std::get_if<bool>(&value)) {
+      target = *b;
+    } else if (auto i = std::get_if<int32_t>(&value);
+               i && (*i == 0 || *i == 1)) {
+      target = *i == 1;
+    } else {
+      return false;
+    }
     if (cached_operator == Operator::EQUAL) return actual == target;
     if (cached_operator == Operator::NOT_EQUAL) return actual != target;
     return false;
@@ -372,8 +380,9 @@ bool SelectionCriterion::evaluate(
           if (v_type_code != target_code) return true;
         }
       }
-      // True if none matched and looking for !=
-      return cached_operator == Operator::NOT_EQUAL;
+      // No venue matched (==) or none differed (!=). A person with no venue
+      // for the activity has nothing to compare, so neither operator holds.
+      return false;
     }
 
     if (p_val_code != -1) {
@@ -607,18 +616,25 @@ bool SelectionCriterion::evaluate(const Venue& venue,
 }
 
 void SimulationConfig::resolve(const WorldState& world) {
+  if (save_population_summary) summaryPropertiesFor(world);
+
   // Resolve the partial-presence venue type names into a bitmask of
-  // venue_type_ids + a per-id target_group_size lookup. Unknown names are
-  // silently ignored (the world may not contain every declared type, e.g.
-  // tube_line in a Durham-only world has no successful tube routes and is
-  // absent from the registry). Throws if a declared type id exceeds the
-  // bitmask width or if target_group_size is non-positive.
+  // venue_type_ids + a per-id target_group_size lookup. Names the world does
+  // not have are ignored, with one line on rank 0 per name (the world may not
+  // contain every declared type, e.g. tube_line in a Durham-only world has no
+  // successful tube routes and is absent from the registry). Throws if a
+  // declared type id exceeds the bitmask width or if target_group_size is
+  // non-positive.
   partial_presence.enabled_venue_type_mask = 0;
   partial_presence.target_group_size_by_type_id.assign(
       world.venue_type_names.size(), 0);
+  std::vector<std::string> ignored_types;
   for (const auto& [name, tgs] : partial_presence.target_group_size_by_name) {
     int idx = world.getVenueTypeIndex(name);
-    if (idx < 0) continue;
+    if (idx < 0) {
+      ignored_types.push_back(name);
+      continue;
+    }
     if (idx >= 64) {
       throw std::runtime_error(
           "SimulationConfig::resolve: partial_presence venue type id " +
@@ -635,6 +651,49 @@ void SimulationConfig::resolve(const WorldState& world) {
     partial_presence.enabled_venue_type_mask |= (uint64_t(1) << idx);
     partial_presence.target_group_size_by_type_id[idx] = tgs;
   }
+  std::sort(ignored_types.begin(), ignored_types.end());
+  if (mpi_runtime::state().rank == 0) {
+    for (const auto& name : ignored_types) {
+      std::cout << "partial_presence: '" << name
+                << "' is not in this world, ignored" << std::endl;
+    }
+  }
+}
+
+std::vector<std::string> SimulationConfig::summaryPropertiesFor(
+    const WorldState& world) const {
+  if (summary_properties_explicit) {
+    checkSummaryProperties(world, summary_properties);
+    return summary_properties;
+  }
+  std::vector<std::string> present;
+  for (const auto& name : summary_properties) {
+    if (world.getPersonPropertyIndex(name) >= 0) present.push_back(name);
+  }
+  return present;
+}
+
+void SimulationConfig::checkSummaryProperties(
+    const WorldState& world, const std::vector<std::string>& names) {
+  constexpr size_t kMaxStored = 4;  // PopulationSummaryRecord::extra_codes
+  std::string known;
+  for (const auto& property : world.person_property_names) {
+    if (!known.empty()) known += ", ";
+    known += property;
+  }
+  for (const auto& name : names) {
+    if (world.getPersonPropertyIndex(name) < 0) {
+      throw std::runtime_error("output.summary_properties: '" + name +
+                               "' is not a person property in this world. "
+                               "Properties: " +
+                               known);
+    }
+  }
+  if (names.size() > kMaxStored) {
+    throw std::runtime_error("output.summary_properties lists " +
+                             std::to_string(names.size()) +
+                             " properties, at most 4 are stored");
+  }
 }
 
 namespace {
@@ -644,37 +703,67 @@ namespace {
 // adds per-call dedup) from ContactMatrixConfig::resolve(), and directly
 // from ContactMatrixConfig::finalizeDefaultModeMatrices() so both paths keep
 // matrices reachable only via the default fallback correctly bin-resolved.
-void resolveContactMatrixBins(ContactMatrix& matrix, const WorldState& world) {
+// Reads a bin name as an age band (`min-max`, `[min,max]` or `min+`). Returns
+// false when the name is not one.
+bool parseAgeBandName(const std::string& bin_name, int& min_age, int& max_age) {
+  min_age = -1;
+  max_age = -1;
+  if (bin_name.empty()) return false;
+  if (bin_name.back() == '+') {
+    try {
+      min_age = std::stoi(bin_name.substr(0, bin_name.size() - 1));
+      max_age = 99;
+    } catch (...) {
+    }
+  } else {
+    size_t sep_pos = bin_name.find_first_of("-,");
+    if (sep_pos != std::string::npos) {
+      try {
+        size_t start_pos = (bin_name[0] == '[') ? 1 : 0;
+        min_age = std::stoi(bin_name.substr(start_pos, sep_pos - start_pos));
+        size_t end_pos = bin_name.find(']', sep_pos + 1);
+        if (end_pos == std::string::npos) end_pos = bin_name.size();
+        max_age =
+            std::stoi(bin_name.substr(sep_pos + 1, end_pos - sep_pos - 1));
+      } catch (...) {
+        min_age = -1;
+        max_age = -1;
+      }
+    }
+  }
+  return min_age >= 0 && max_age >= min_age;
+}
+
+// `where` reads like "venue type 'hospital', mode 'respiratory'" and is used
+// only to word the error for a bin name that means nothing in this world.
+void resolveContactMatrixBins(ContactMatrix& matrix, const WorldState& world,
+                              const std::string& where) {
   std::fill(std::begin(matrix.age_to_bin), std::end(matrix.age_to_bin), -1);
   for (size_t b = 0; b < matrix.bins.size(); ++b) {
     const std::string& bin_name = matrix.bins[b];
-    int min_age = -1, max_age = -1;
-    if (!bin_name.empty()) {
-      if (bin_name.back() == '+') {
-        try {
-          min_age = std::stoi(bin_name.substr(0, bin_name.size() - 1));
-          max_age = 99;
-        } catch (...) {
-        }
-      } else {
-        size_t sep_pos = bin_name.find_first_of("-,");
-        if (sep_pos != std::string::npos) {
-          try {
-            size_t start_pos = (bin_name[0] == '[') ? 1 : 0;
-            min_age =
-                std::stoi(bin_name.substr(start_pos, sep_pos - start_pos));
-            size_t end_pos = bin_name.find(']', sep_pos + 1);
-            if (end_pos == std::string::npos) end_pos = bin_name.size();
-            max_age =
-                std::stoi(bin_name.substr(sep_pos + 1, end_pos - sep_pos - 1));
-          } catch (...) {
-            min_age = -1;
-            max_age = -1;
-          }
-        }
+    int min_age, max_age;
+    const bool is_age_band = parseAgeBandName(bin_name, min_age, max_age);
+    // A single-bin matrix puts everyone in its one bin, so its name is only a
+    // label. With several bins the name decides who goes where.
+    if (matrix.bins.size() > 1 && !is_age_band && bin_name != "male" &&
+        bin_name != "female" &&
+        std::find(world.subset_type_names.begin(),
+                  world.subset_type_names.end(),
+                  bin_name) == world.subset_type_names.end()) {
+      std::string subsets;
+      for (const auto& name : world.subset_type_names) {
+        if (!subsets.empty()) subsets += ", ";
+        subsets += name;
       }
+      throw std::runtime_error(
+          "contact_matrices.yaml: " + where + ": bin '" + bin_name +
+          "' matches no subset name in this world, no sex and no age band. "
+          "Subsets in this world: " +
+          subsets +
+          ". Sexes: male, female. Age bands look like 0-4, 65+ or "
+          "[5,17]");
     }
-    if (min_age >= 0 && max_age >= min_age) {
+    if (is_age_band) {
       for (int a = std::max(0, min_age); a <= std::min(99, max_age); ++a) {
         if (matrix.age_to_bin[a] < 0) {
           matrix.age_to_bin[a] = static_cast<int>(b);
@@ -704,19 +793,36 @@ void ContactMatrixConfig::resolve(const WorldState& world) {
   // and cohabiting_encounters all point at "romantic_encounter"), so track
   // what has been done rather than resolving the same matrix repeatedly.
   std::unordered_set<const ContactMatrix*> bin_resolved;
-  auto resolve_matrix_bins = [&](ContactMatrix& cm) {
+  auto resolve_matrix_bins = [&](ContactMatrix& cm, const std::string& where) {
     if (!bin_resolved.insert(&cm).second) return;
-    resolveContactMatrixBins(cm, world);
+    resolveContactMatrixBins(cm, world, where);
   };
 
-  for (auto& [name, matrix] : matrices) resolve_matrix_bins(matrix);
-  for (auto& [venue_name, mode_map] : mode_matrices) {
-    for (auto& [mode_name, matrix] : mode_map) resolve_matrix_bins(matrix);
+  // Sorted, so the first bad bin reported is the same on every build.
+  auto sortedKeys = [](const auto& map) {
+    std::vector<std::string> keys;
+    for (const auto& entry : map) keys.push_back(entry.first);
+    std::sort(keys.begin(), keys.end());
+    return keys;
+  };
+  for (const auto& name : sortedKeys(matrices)) {
+    resolve_matrix_bins(matrices.at(name), "matrix '" + name + "'");
   }
-  if (default_matrix.has_value()) resolve_matrix_bins(default_matrix.value());
+  for (const auto& venue_name : sortedKeys(mode_matrices)) {
+    auto& mode_map = mode_matrices.at(venue_name);
+    for (const auto& mode_name : sortedKeys(mode_map)) {
+      resolve_matrix_bins(
+          mode_map.at(mode_name),
+          "venue type '" + venue_name + "', mode '" + mode_name + "'");
+    }
+  }
+  if (default_matrix.has_value()) {
+    resolve_matrix_bins(default_matrix.value(), "the default matrix");
+  }
   if (default_mode_matrices.has_value()) {
-    for (auto& [mode_name, matrix] : *default_mode_matrices) {
-      resolve_matrix_bins(matrix);
+    for (const auto& mode_name : sortedKeys(*default_mode_matrices)) {
+      resolve_matrix_bins(default_mode_matrices->at(mode_name),
+                          "the default matrix, mode '" + mode_name + "'");
     }
   }
 }
@@ -733,7 +839,8 @@ void ContactMatrixConfig::finalizeDefaultModeMatrices(
       auto it = default_mode_matrices->find(mode_name);
       if (it != default_mode_matrices->end()) {
         default_mode_matrices_by_id[m] = &it->second;
-        resolveContactMatrixBins(it->second, world);
+        resolveContactMatrixBins(
+            it->second, world, "the default matrix, mode '" + mode_name + "'");
         continue;
       }
     }
@@ -950,14 +1057,24 @@ void PreferenceProfile::resolve(const WorldState& world) {
                         "activity preference profile for '" + activity + "'");
   }
 
+  // An empty activity means any activity (-1). A name the world does not
+  // have would otherwise read the same way and apply to every activity.
   activity_id = world.getActivityIndex(activity);
+  if (!activity.empty() && activity_id < 0) {
+    throw std::runtime_error("Activity preference profile '" + name +
+                             "' names activity '" + activity +
+                             "', which the world does not have");
+  }
 
   weights_by_id.assign(world.venue_type_names.size(), 1.0);
   for (const auto& [name, weight] : preference_weights) {
     int idx = world.getVenueTypeIndex(name);
-    if (idx >= 0 && idx < (int)weights_by_id.size()) {
-      weights_by_id[idx] = weight;
+    if (idx < 0 || idx >= (int)weights_by_id.size()) {
+      throw std::runtime_error("Activity preference profile '" + this->name +
+                               "' gives a weight to venue type '" + name +
+                               "', which the world does not have");
     }
+    weights_by_id[idx] = weight;
   }
 }
 
@@ -993,7 +1110,27 @@ void ScheduleConfig::resolveSlots(const WorldState& world) {
   size_t num_acts = world.activity_names.size();
 
   // Helper: resolve slot vector caches
-  auto resolveSlotVec = [&](std::vector<TimeSlot>& slots) {
+  auto activityListing = [&]() {
+    std::string listing;
+    for (const auto& name : world.activity_names) {
+      if (!listing.empty()) listing += ", ";
+      listing += name;
+    }
+    return listing;
+  };
+  auto requireActivity = [&](const std::string& name,
+                             const std::string& where) {
+    int idx = world.getActivityIndex(name);
+    if (idx < 0) {
+      throw std::runtime_error(where + " names '" + name +
+                               "', which is not an activity in this world. "
+                               "Activities: " +
+                               activityListing());
+    }
+    return idx;
+  };
+  auto resolveSlotVec = [&](std::vector<TimeSlot>& slots,
+                            const std::string& owner) {
     for (auto& slot : slots) {
       slot.allowed_activity_mask = computeActivityMaskFromNames(
           slot.allowed_activities, world.activity_names);
@@ -1007,32 +1144,52 @@ void ScheduleConfig::resolveSlots(const WorldState& world) {
       }
       if (slot.specified_activity.has_value()) {
         auto& spec = slot.specified_activity.value();
-        spec.cached_activity_idx =
-            static_cast<int16_t>(world.getActivityIndex(spec.type));
+        spec.cached_activity_idx = static_cast<int16_t>(
+            requireActivity(spec.type, owner + " specified_activity.type"));
         if (spec.venue_type.has_value()) {
           spec.cached_venue_type_idx =
               world.getVenueTypeIndex(spec.venue_type.value());
+          if (spec.cached_venue_type_idx < 0) {
+            std::string types;
+            for (const auto& name : world.venue_type_names) {
+              if (!types.empty()) types += ", ";
+              types += name;
+            }
+            throw std::runtime_error(
+                owner + " specified_activity.venue_type names '" +
+                spec.venue_type.value() +
+                "', which is not a venue type in this world. Venue types: " +
+                types);
+          }
         }
       }
       // Resolve hop_on_activity -> hop_schedule_by_activity_idx
       slot.hop_schedule_by_activity_idx.assign(world.activity_names.size(), -1);
       for (const auto& [act_name, sched_name] : slot.hop_on_activity) {
-        int act_idx = world.getActivityIndex(act_name);
+        int act_idx = requireActivity(act_name, owner + " hop_on_activity");
         auto s_it = std::find_if(
             schedule_types.begin(), schedule_types.end(),
             [&](const ScheduleType& s) { return s.name == sched_name; });
-        if (act_idx >= 0 && s_it != schedule_types.end()) {
-          slot.hop_schedule_by_activity_idx[act_idx] =
-              static_cast<int16_t>(s_it - schedule_types.begin());
+        if (s_it == schedule_types.end()) {
+          std::string schedules;
+          for (const auto& st : schedule_types) {
+            if (!schedules.empty()) schedules += ", ";
+            schedules += st.name;
+          }
+          throw std::runtime_error(
+              owner + " hop_on_activity '" + act_name + "' targets schedule '" +
+              sched_name +
+              "', which is not a schedule type. Schedule types: " + schedules);
         }
+        slot.hop_schedule_by_activity_idx[act_idx] =
+            static_cast<int16_t>(s_it - schedule_types.begin());
       }
       // Resolve property_hop_dispatch -> property_hop_dispatch_by_activity_idx
       for (const auto& [act_name, dispatch] : slot.property_hop_dispatch) {
-        int act_idx = world.getActivityIndex(act_name);
-        if (act_idx >= 0) {
-          slot.property_hop_dispatch_by_activity_idx[static_cast<int16_t>(
-              act_idx)] = dispatch;
-        }
+        int act_idx =
+            requireActivity(act_name, owner + " property_hop_dispatch");
+        slot.property_hop_dispatch_by_activity_idx[static_cast<int16_t>(
+            act_idx)] = dispatch;
       }
     }
   };
@@ -1043,19 +1200,17 @@ void ScheduleConfig::resolveSlots(const WorldState& world) {
     // runtime to honour the daily cached decision).
     sched_type.force_hybrid_mask = 0;
     for (const auto& act_name : sched_type.force_hybrid_activities) {
-      int idx = world.getActivityIndex(act_name);
-      if (idx >= 0) {
-        sched_type.force_hybrid_mask |= (ActivityMask(1) << idx);
-      }
+      int idx = requireActivity(act_name, "schedule type '" + sched_type.name +
+                                              "' force_hybrid_activities");
+      sched_type.force_hybrid_mask |= (ActivityMask(1) << idx);
     }
     sched_type.linked_activities_mask = 0;
     for (const auto& act_name : sched_type.linked_activities) {
-      int idx = world.getActivityIndex(act_name);
-      if (idx >= 0) {
-        ActivityMask bit = (ActivityMask(1) << idx);
-        sched_type.linked_activities_mask |= bit;
-        sched_type.force_hybrid_mask |= bit;  // implies force_hybrid
-      }
+      int idx = requireActivity(act_name, "schedule type '" + sched_type.name +
+                                              "' linked_activities");
+      ActivityMask bit = (ActivityMask(1) << idx);
+      sched_type.linked_activities_mask |= bit;
+      sched_type.force_hybrid_mask |= bit;  // implies force_hybrid
     }
 
     // Build participation_by_day_type_id[dt_idx][act_idx]
@@ -1079,12 +1234,14 @@ void ScheduleConfig::resolveSlots(const WorldState& world) {
       const std::string& dt_name = day_type_names[dt_idx];
       auto it = sched_type.slots_by_day_type.find(dt_name);
       if (it == sched_type.slots_by_day_type.end()) continue;
-      resolveSlotVec(it->second);
+      resolveSlotVec(it->second, "schedule type '" + sched_type.name +
+                                     "' day type '" + dt_name + "'");
       sched_type.slots_by_day_type_idx[dt_idx] = &it->second;
     }
 
     // Resolve flat_slots for temporary schedules
-    resolveSlotVec(sched_type.flat_slots);
+    resolveSlotVec(sched_type.flat_slots,
+                   "schedule type '" + sched_type.name + "' flat_slots");
 
     // A temporary schedule with no flat_slots is malformed: every hop consumer
     // divides by flat_slots.size() (hopStartDay, advanceAndCheckComplete), so
@@ -1156,6 +1313,18 @@ void SelectionCriterion::resolveOrThrow(const WorldState& world,
     if (!std::holds_alternative<std::string>(value)) {
       throw std::runtime_error(context + ": '" + property_path +
                                "' compares against a name, not a number");
+    }
+  }
+  if (cached_type == PropertyType::IS_ALIVE) {
+    const auto* as_int = std::get_if<int32_t>(&value);
+    const bool value_ok = std::holds_alternative<bool>(value) ||
+                          (as_int && (*as_int == 0 || *as_int == 1));
+    if ((cached_operator != Operator::EQUAL &&
+         cached_operator != Operator::NOT_EQUAL) ||
+        !value_ok) {
+      throw std::runtime_error(
+          context +
+          ": 'is_alive' compares with == or != against true or false");
     }
   }
   if (cached_type == PropertyType::CUSTOM_PROPERTY && cached_prop_idx < 0) {
@@ -1378,6 +1547,25 @@ void CoordinatedEncounterConfig::resolve(
           " names and is capped at 255");
     }
     enc.cached_encounter_type_id = static_cast<uint8_t>(encounter_type_index);
+    auto listNames = [](const std::vector<std::string>& names) {
+      std::string listing;
+      for (const auto& name : names) {
+        if (!listing.empty()) listing += ", ";
+        listing += name;
+      }
+      return listing;
+    };
+    const std::string where =
+        "coordinated_encounters.yaml: encounter '" + enc.name + "' ";
+
+    for (const auto& slot_name : enc.trigger_slots) {
+      if (world.getActivityIndex(slot_name) < 0) {
+        throw std::runtime_error(
+            where + "trigger_slots names '" + slot_name +
+            "', which is not an activity in this world. Activities: " +
+            listNames(world.activity_names));
+      }
+    }
     enc.trigger_mask =
         computeActivityMaskFromNames(enc.trigger_slots, world.activity_names);
 
@@ -1385,13 +1573,22 @@ void CoordinatedEncounterConfig::resolve(
     enc.allowed_venue_mask = 0;
     for (const auto& vname : enc.allowed_venues) {
       int idx = world.getVenueTypeIndex(vname);
-      if (idx >= 0) {
-        enc.allowed_venue_mask |= (ActivityMask(1) << idx);
+      if (idx < 0) {
+        throw std::runtime_error(
+            where + "allowed_venues names '" + vname +
+            "', which is not a venue type in this world. Venue types: " +
+            listNames(world.venue_type_names));
       }
+      enc.allowed_venue_mask |= (ActivityMask(1) << idx);
     }
 
     // Network resolution: looked up from the static network registry.
     enc.cached_network_idx = world.getNetworkTypeIndex(enc.network);
+    if (enc.cached_network_idx < 0) {
+      throw std::runtime_error(where + "network '" + enc.network +
+                               "' is not a network in this world. Networks: " +
+                               listNames(world.network_names));
+    }
 
     // Virtual venue type ID: use deterministic sorted registry. A name that
     // matches no matrix is a config error; keeping whatever id was there
@@ -1569,6 +1766,110 @@ void ScheduleConfig::resolveCSV(const WorldState& world) {
 
   std::cout << "Loaded " << csv_rows.size()
             << " schedule assignment rows from: " << csv_path << std::endl;
+}
+
+std::optional<double> UptakeTable::probability(const Person& person,
+                                               const WorldState& world) const {
+  if (rows.empty() && !csv_path.empty()) {
+    throw std::logic_error("uptake file '" + csv_path +
+                           "' was asked for a probability before resolve");
+  }
+  if (rows.empty()) return 1.0;
+  for (const auto& row : rows) {
+    if (filtering::matchesCriteria(person, &world, row.criteria)) {
+      return row.probability;
+    }
+  }
+  return std::nullopt;
+}
+
+void UptakeTable::resolve(const WorldState& world, const std::string& label) {
+  const std::string where = label + " uptake";
+  if (!csv_path.empty()) {
+    csv::FilteredTable table;
+    try {
+      table = csv::loadFilteredCSV(csv_path);
+    } catch (const std::exception& e) {
+      throw std::runtime_error(where + ": " + e.what());
+    }
+    const std::string file = where + " file '" + csv_path + "'";
+    // A misspelt filter header would read as a value column, and its row would
+    // then match everyone, so only the probability column is allowed.
+    for (const auto& col : table.value_columns) {
+      if (col != "probability") {
+        throw std::runtime_error(file + " has the unknown column '" + col +
+                                 "'; the columns are filter.* and probability");
+      }
+    }
+    if (table.value_columns.empty()) {
+      throw std::runtime_error(file + " has no 'probability' column");
+    }
+    if (table.rows.empty()) {
+      throw std::runtime_error(file + " has no data rows");
+    }
+    rows.clear();
+    int row_num = 0;
+    for (const auto& r : table.rows) {
+      ++row_num;
+      const std::string row_where =
+          file + " data row " + std::to_string(row_num);
+      const auto cell = r.values.find("probability");
+      const std::string text = cell == r.values.end() ? "" : cell->second;
+      size_t used = 0;
+      double value = std::nan("");
+      try {
+        value = std::stod(text, &used);
+      } catch (const std::exception&) {
+        used = 0;
+      }
+      if (used == 0 || used != text.size()) {
+        throw std::runtime_error(row_where + ": probability '" + text +
+                                 "' is not a number");
+      }
+      // Written as a negation so a NaN fails the check too
+      if (!(value >= 0.0 && value <= 1.0)) {
+        throw std::runtime_error(row_where + ": probability " + text +
+                                 " is outside 0 to 1");
+      }
+      rows.push_back({r.criteria, value});
+    }
+  }
+  int row_num = 0;
+  for (auto& row : rows) {
+    ++row_num;
+    for (auto& crit : row.criteria) {
+      if (filtering::isInfectionContextCriterion(crit)) {
+        throw std::runtime_error(where + " row " + std::to_string(row_num) +
+                                 ": '" + crit.property_path +
+                                 "' describes an infection, not a person");
+      }
+      crit.resolveOrThrow(world, where + " row " + std::to_string(row_num));
+    }
+  }
+}
+
+void VaccinationTier::resolve(const WorldState& world,
+                              const std::string& campaign) {
+  const std::string label =
+      "vaccination campaign '" + campaign + "' tier '" + name + "'";
+  for (auto& crit : selection_criteria) {
+    crit.resolveOrThrow(world, label + " selection");
+  }
+  uptake.resolve(world, label);
+  if (!decision_unit.shared()) return;
+  const int activity = world.getActivityIndex(decision_unit.shared_activity);
+  if (activity < 0) {
+    throw std::runtime_error(label + ": decision_unit shared_venue names the " +
+                             "unknown activity '" +
+                             decision_unit.shared_activity + "'");
+  }
+  decision_unit.activity_index = static_cast<int16_t>(activity);
+  for (auto& crit : decision_rules.scope) {
+    crit.resolveOrThrow(world, label + " decision_unit scope");
+  }
+  for (auto& crit : decision_rules.deciders) {
+    crit.resolveOrThrow(world, label + " decision_unit deciders");
+  }
 }
 
 void Config::resolve(WorldState& world) {

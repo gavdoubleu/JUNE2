@@ -1,12 +1,6 @@
 disease:
   name: plague
   settings:
-    default_lowest_stage: exposed
-    max_mild_symptom_tag: 
-    stay_at_home_stage:
-      - name: bacteraemia
-    severe_symptoms_stay_at_home_stage:
-      - name: primary_pneumonic
     fatality_stage:
       - name: perished
     recovered_stage:

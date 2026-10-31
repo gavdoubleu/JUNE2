@@ -1,0 +1,9 @@
+# Who an event draws from. A rule is a set of geographical units, and an event
+# invites everyone who lives in any of them or below. Unit ids are the ids in
+# the world file (2231 Darlington, 2232 County Durham, both local authority
+# districts).
+catchment_rule_id,geo_unit_id
+1,2232
+2,2231
+2,2232
+3,2231

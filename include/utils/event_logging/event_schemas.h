@@ -170,4 +170,25 @@ inline H5::CompType follow() {
   return type;
 }
 
+inline H5::CompType campaignDay() {
+  H5::CompType type(sizeof(CampaignDayEvent));
+  type.insertMember("day", HOFFSET(CampaignDayEvent, day),
+                    H5::PredType::NATIVE_INT);
+  type.insertMember("campaign_id", HOFFSET(CampaignDayEvent, campaign_id),
+                    H5::PredType::NATIVE_UINT16);
+  type.insertMember("tier_id", HOFFSET(CampaignDayEvent, tier_id),
+                    H5::PredType::NATIVE_UINT16);
+  type.insertMember("candidates", HOFFSET(CampaignDayEvent, candidates),
+                    H5::PredType::NATIVE_INT64);
+  type.insertMember("doses_given", HOFFSET(CampaignDayEvent, doses_given),
+                    H5::PredType::NATIVE_INT64);
+  type.insertMember("declined", HOFFSET(CampaignDayEvent, declined),
+                    H5::PredType::NATIVE_INT64);
+  type.insertMember("allotment", HOFFSET(CampaignDayEvent, allotment),
+                    H5::PredType::NATIVE_INT64);
+  type.insertMember("started_total", HOFFSET(CampaignDayEvent, started_total),
+                    H5::PredType::NATIVE_INT64);
+  return type;
+}
+
 }  // namespace june::event_schema

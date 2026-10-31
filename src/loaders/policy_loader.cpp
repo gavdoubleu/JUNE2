@@ -20,27 +20,7 @@ namespace PolicyLoader {
 
 namespace {
 
-// Throws on the first key of `node` that is not one of `fields`, naming it and
-// listing the ones that are. `within` says where the key was found when `where`
-// does not already.
-void rejectUnknownKeys(const YAML::Node& node,
-                       std::initializer_list<const char*> fields,
-                       const std::string& where,
-                       const std::string& within = "") {
-  for (const auto& kv : node) {
-    const std::string key = kv.first.as<std::string>();
-    if (std::find_if(fields.begin(), fields.end(), [&](const char* field) {
-          return key == field;
-        }) != fields.end()) {
-      continue;
-    }
-    std::string known;
-    for (const char* field : fields)
-      known += (known.empty() ? "" : ", ") + std::string(field);
-    throw std::runtime_error(where + "unknown field '" + key + "'" + within +
-                             ". Fields are " + known + ".");
-  }
-}
+using ::june::config_detail::rejectUnknownKeys;
 
 }  // namespace
 
@@ -48,6 +28,7 @@ void loadPolicies(PolicyManager& policy_manager, const std::string& filename,
                   const std::string& simulation_start_date) {
   try {
     YAML::Node root = YAML::LoadFile(filename);
+    rejectUnknownKeys(root, {"observed_metrics", "policies"}, filename + ": ");
 
     if (root["observed_metrics"]) {
       loadObservedMetrics(policy_manager, root["observed_metrics"], filename);
@@ -61,6 +42,8 @@ void loadPolicies(PolicyManager& policy_manager, const std::string& filename,
     }
 
     const YAML::Node& policies = root["policies"];
+    rejectUnknownKeys(policies, {"symptom_policies", "temporal_policies"},
+                      filename + ": ", " in 'policies'");
 
     if (policies["symptom_policies"]) {
       loadSymptomPolicies(policy_manager, policies["symptom_policies"],
@@ -146,6 +129,8 @@ PolicyAction loadPolicyAction(const YAML::Node& node) {
   if (node["exempt"]) {
     if (node["exempt"].IsSequence()) {
       for (const auto& exempt_node : node["exempt"]) {
+        rejectUnknownKeys(exempt_node, {"activity", "selection"},
+                          "policy: ", " in an 'exempt' entry");
         ActivityExemption exemption;
         exemption.activity_name = exempt_node["activity"].as<std::string>();
         if (exempt_node["selection"].IsDefined()) {
@@ -225,6 +210,34 @@ void loadPolicyName(std::string& name, const YAML::Node& node,
                              " must have a 'name' field");
   }
   name = node["name"].as<std::string>();
+}
+
+// Every policy entry takes these fields; a symptom policy adds a few of its
+// own. A misspelt key would otherwise leave its field at the default, so
+// complience_rate would quietly mean full compliance.
+void rejectUnknownPolicyKeys(const YAML::Node& node, const std::string& kind,
+                             const std::string& name,
+                             const std::string& filename) {
+  const std::string where = filename + ": ";
+  const std::string within = " in " + kind + " '" + name + "'";
+  if (kind == "symptom_policy") {
+    rejectUnknownKeys(
+        node,
+        {"name", "start_date", "start_time", "end_date", "end_time",
+         "override_activities", "override_venue_types", "exempt_venue_types",
+         "replacement", "replacement_schedule", "exempt", "compliance_rate",
+         "applies_to", "trigger", "transmission_effects_file", "symptoms",
+         "follow_up_policy", "inherit_compliance", "inherit_refusal"},
+        where, within);
+  } else {
+    rejectUnknownKeys(
+        node,
+        {"name", "start_date", "start_time", "end_date", "end_time",
+         "override_activities", "override_venue_types", "exempt_venue_types",
+         "replacement", "replacement_schedule", "exempt", "compliance_rate",
+         "applies_to", "trigger", "transmission_effects_file"},
+        where, within);
+  }
 }
 
 template <typename Policy>
@@ -596,6 +609,8 @@ void loadSymptomPolicies(PolicyManager& policy_manager, const YAML::Node& node,
     SymptomPolicy policy;
 
     loadPolicyName(policy.name, policy_node, "symptom_policy");
+    rejectUnknownPolicyKeys(policy_node, "symptom_policy", policy.name,
+                            policies_filename);
 
     if (!policy_node["symptoms"]) {
       throw std::runtime_error("symptom_policy '" + policy.name +
@@ -645,6 +660,8 @@ void loadTemporalPolicies(PolicyManager& policy_manager, const YAML::Node& node,
     TemporalPolicy policy;
 
     loadPolicyName(policy.name, policy_node, "temporal_policy");
+    rejectUnknownPolicyKeys(policy_node, "temporal_policy", policy.name,
+                            policies_filename);
     loadCommonPolicyFields(policy, policy_node, simulation_start_date);
     loadPolicyTrigger(policy, policy_node, policy_manager.observedMetrics(),
                       "temporal");

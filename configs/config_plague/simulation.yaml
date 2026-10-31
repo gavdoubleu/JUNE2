@@ -28,15 +28,6 @@ verbose: true
 
 output:
   stats_interval_days: 10          # Output statistics every N days
-  track_by_age_group: true
-  track_by_venue_type: true
-  track_by_geography: true
   flush_interval_days: 100
   max_event_buffer_size: 1000000
-
-  age_groups:
-    - { name: "0-4", min: 0, max: 4 }
-    - { name: "5-17", min: 5, max: 17 }
-    - { name: "18-64", min: 18, max: 64 }
-    - { name: "65+", min: 65, max: 99 }
 

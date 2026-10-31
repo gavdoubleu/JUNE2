@@ -1,0 +1,26 @@
+# Which activities are worked out once at load and which are redrawn each slot.
+#
+#   deterministic  venue and participation are fixed once and cached.
+#   hybrid         venue is cached, participation is rolled again every slot.
+#   stochastic     everything is drawn again every slot.
+#
+# An activity in the hybrid list is never treated as deterministic. When the
+# deterministic list is not empty, only the activities it names are cached.
+# Schedules can also demote a single activity per schedule type with
+# force_hybrid_activities (see schedules.yaml).
+
+performance:
+    precompute_schedules: true
+
+    deterministic_activities:
+        - residence
+
+    # Workplace and school are fixed per person but whether they turn up is
+    # rolled daily, which is what hybrid working and policy compliance need.
+    hybrid_activities:
+        - primary_activity
+        - commute
+
+    stochastic_activities:
+        - leisure
+        - medical_facility

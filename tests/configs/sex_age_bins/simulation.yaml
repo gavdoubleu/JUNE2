@@ -1,0 +1,75 @@
+# Rank invariance fixture: a small scenario with gym and pub binned by
+# sex and cinema binned by age band, so a visitor from another MPI rank has to
+# be put into a sex or age bin on arrival. Output must be identical at every
+# rank count. Run by test_mpi_sex_age_bins_reproducibility on
+# worlds/world_state.h5.
+
+time:
+    # day_type_cycle in schedules.yaml is positional (sim_day % 7), so this has
+    # to be a Monday. End date is exclusive: 13 whole weeks, 91 days.
+    #   day 0   Mon 2 Mar   first seeds
+    #   day 14  Mon 16 Mar  first temporary policy window opens
+    #   day 35  Mon 6 Apr   vaccine campaign opens
+    #   day 91  Mon 1 Jun   run stops
+    start_date: "2020-03-02"
+    end_date: "2020-06-01"
+
+config_paths:
+    disease_file: "tests/configs/sex_age_bins/disease.yaml"
+    contact_matrices_file: "tests/configs/sex_age_bins/contact_matrices.yaml"
+    schedules_file: "tests/configs/sex_age_bins/schedules.yaml"
+    vaccines_file: "tests/configs/sex_age_bins/vaccines.yaml"
+    activity_preferences_file: "tests/configs/sex_age_bins/activity_preferences.yaml"
+    coordinated_encounters_file: "tests/configs/sex_age_bins/coordinated_encounters.yaml"
+    performance_file: "tests/configs/sex_age_bins/performance.yaml"
+    parallel_file: "tests/configs/sex_age_bins/parallel.yaml"
+    policies_file: "tests/configs/sex_age_bins/policies.yaml"
+    infection_seeds_file: "tests/configs/sex_age_bins/infection_seeds.yaml"
+    # Calendar events: a dated event that sends the people of a catchment area
+    # onto a temporary schedule. Venues for the event come from the on-the-fly
+    # allocator below.
+    calendar_events_file: "tests/configs/sex_age_bins/calendar_events.csv"
+    calendar_event_catchment_rules_file: "tests/configs/sex_age_bins/catchment_rules.csv"
+    on_the_fly_venues_file: "tests/configs/sex_age_bins/on_the_fly_venues.yaml"
+    # compartmental_model_sidecar is the one path left out. It needs a compiled
+    # plugin library, and a run with a sidecar cannot be checkpointed.
+
+random_seed: 12345
+
+# Prints the peak rescale of every infectiousness curve at load time.
+verbose: true
+
+output:
+    stats_interval_days: 1
+    # "none", "all" or "infected_only" for the two lookup tables below.
+    save_full_person_details: infected_only
+    save_person_activities: infected_only
+    compression_level: 6
+    flush_interval_days: 7
+    max_event_buffer_size: 100000
+    save_population_summary: true
+    # The coordinated encounter log is the largest dataset in the events file.
+    # Encounters still drive transmission with this off.
+    save_coordinated_encounters: true
+    # At most four person properties are stored with the population summary.
+    # Names the world does not carry are skipped.
+    summary_properties: [work_mode, ethnicity, comorbidities, relationship_status]
+
+# Venue types whose riders are split into runtime groups each slot (carriages,
+# buses). Group count is max(1, ceil(riders / target_group_size)), so it scales
+# with demand. Types the world does not have are ignored.
+partial_presence:
+    enabled_venue_types:
+        train_line: {target_group_size: 100}
+        bus_line: {target_group_size: 50}
+
+# Checkpoint and restart. Resume with
+#   --restart-from runs/<run-id>/checkpoints/latest
+# on_dates wins over every_n_days when both are given, and a notice is printed.
+# Use null for the one you are not using.
+checkpoint:
+    enabled: true
+    output_dir: checkpoints/
+    every_n_days: null     # e.g. 28 for one checkpoint every four weeks
+    on_dates: ["2020-04-06", "2020-05-04"]
+    keep_last: 2

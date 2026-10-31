@@ -95,9 +95,15 @@ void printSlotVenueDistribution(const WorldState& world,
 EpiSlotStats Simulator::updateEpidemiologyAfterTransmission(
     double delta_hours) {
   EpiSlotStats epi_stats;
+  // Apply every transition up to the end of this slot, so someone who dies in
+  // it is already dead when the next slot places people. The clock adds slot
+  // lengths one by one and can stop a hair short of midnight; the day's last
+  // slot ends exactly on it.
+  double slot_end = current_simulation_time_ + delta_hours / 24.0;
+  const double midnight = current_day_num_ + 1.0;
+  if (midnight - slot_end < 1e-9) slot_end = midnight;
   try {
-    epi_stats = epidemiology_->updateInfectionStates(current_simulation_time_,
-                                                     locations_);
+    epi_stats = epidemiology_->updateInfectionStates(slot_end, locations_);
   } catch (const std::exception& e) {
     std::cerr << "[Step 5 Infection Updates] Fatal error: " << e.what()
               << std::endl;
@@ -254,6 +260,8 @@ void Simulator::exchangeVisitorsAndBuildAugmented(
       info.person_id = visitor.person_id;
       info.is_infected = visitor.is_infected;
       info.immunity_level = visitor.immunity_level;
+      info.age = visitor.age;
+      info.sex = static_cast<Sex>(visitor.sex_code);
       info.symptom_id = visitor.symptom_id;
       info.time_in_stage = visitor.time_in_stage;
       info.emission = std::move(visitor.emission);
@@ -410,17 +418,10 @@ void Simulator::simulateTimeSlot(const TimeSlot& slot, int time_slot_index,
   receivePendingAndApply(pending_infections);
 #endif
 
-  // Steps 5 and 6: update infection states and decay venue fomites after
-  // transmission. This ensures newly infected people are tracked and deaths
-  // are processed at the end of the slot.
-  EpiSlotStats epi_stats = updateEpidemiologyAfterTransmission(delta_hours);
-
-  // Reduce and print the per-slot transmission and epidemiology summary.
-  printSlotEpiSummary(local_new_infections, epi_stats, delta_hours, domain_mgr_,
-                      rank);
-
   // Aggregate infected people's per-node deposition at owned venues and pass
-  // it to the plugin before the next advance() call.
+  // it to the plugin before the next advance() call. This reads the infections
+  // as they stood during the slot, so it runs before the state update clears
+  // anyone who recovers or dies in it.
   const std::unordered_map<PersonId, VisitorInfo>* deposition_visitor_data =
       nullptr;
 #ifdef USE_MPI
@@ -430,6 +431,15 @@ void Simulator::simulateTimeSlot(const TimeSlot& slot, int time_slot_index,
       transmission_locations, world_, *disease_, current_simulation_time_,
       current_simulation_time_ + delta_hours / 24.0, policy_manager_.get(),
       deposition_visitor_data);
+
+  // Steps 5 and 6: update infection states and decay venue fomites after
+  // transmission. This ensures newly infected people are tracked and deaths
+  // are processed at the end of the slot.
+  EpiSlotStats epi_stats = updateEpidemiologyAfterTransmission(delta_hours);
+
+  // Reduce and print the per-slot transmission and epidemiology summary.
+  printSlotEpiSummary(local_new_infections, epi_stats, delta_hours, domain_mgr_,
+                      rank);
 
   compartmental_model_manager_->maybeSnapshot(
       static_cast<float>(current_simulation_time_));

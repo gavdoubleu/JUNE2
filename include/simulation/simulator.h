@@ -250,6 +250,9 @@ class Simulator {
   // Sum the infector-symptom lookup gaps across ranks (collective) and warn
   // once on rank 0 if any.
   void warnInfectorLookupGaps(int rank);
+  // Sums today's per-event calendar counts over ranks; rank 0 prints a line
+  // per event. Read-only on simulation state.
+  void reportCalendarEvents(int rank);
   // Sum the zero-rate trajectory selections across ranks (collective) and
   // warn once on rank 0 if any.
   void warnUnmatchedTrajectorySelections(int rank);

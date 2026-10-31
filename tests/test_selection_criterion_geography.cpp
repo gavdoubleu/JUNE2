@@ -640,14 +640,26 @@ TEST_CASE("every selection loader rejects a present malformed selection") {
                                     "enabled: true\n"
                                     "campaigns:\n"
                                     "  bad:\n"
-                                    "    selection: {property: age}\n");
+                                    "    vaccine_type: V\n"
+                                    "    tiers:\n"
+                                    "      - {name: t, dose: 0, selection: "
+                                    "{property: age}}\n");
   CHECK_THROWS_WITH(ConfigLoader::loadVaccination(vaccines.string()),
                     doctest::Contains("selection must be a sequence"));
   const auto valid_vaccines = files.write("valid_vaccines.yaml",
                                           "enabled: true\n"
+                                          "vaccines:\n"
+                                          "  V:\n"
+                                          "    doses:\n"
+                                          "      - {days_to_effective: 14, "
+                                          "days_to_waning: 100, "
+                                          "days_to_finished: 200}\n"
                                           "campaigns:\n"
                                           "  fallback:\n"
-                                          "    selection: []\n");
+                                          "    vaccine_type: V\n"
+                                          "    tiers:\n"
+                                          "      - {name: t, dose: 0, "
+                                          "selection: []}\n");
   CHECK(
       ConfigLoader::loadVaccination(valid_vaccines.string()).campaigns.size() ==
       1);

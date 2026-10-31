@@ -103,6 +103,20 @@ void EventLogger::logFollow(PersonId host, PersonId follower, double time,
                       .slot = slot});
 }
 
+void EventLogger::logCampaignDay(int day, uint16_t campaign_id,
+                                 uint16_t tier_id, int64_t candidates,
+                                 int64_t doses_given, int64_t declined,
+                                 int64_t allotment, int64_t started_total) {
+  campaign_days_.push_back({.day = day,
+                            .campaign_id = campaign_id,
+                            .tier_id = tier_id,
+                            .candidates = candidates,
+                            .doses_given = doses_given,
+                            .declined = declined,
+                            .allotment = allotment,
+                            .started_total = started_total});
+}
+
 void EventLogger::clear() {
   infections_.clear();
   symptom_changes_.clear();
@@ -114,6 +128,7 @@ void EventLogger::clear() {
   relationships_.clear();
   coordinated_encounters_.clear();
   follows_.clear();
+  campaign_days_.clear();
 }
 
 void EventLogger::printEncounterStats(

@@ -1,0 +1,13 @@
+# How often people go out with a friend, by age and sex. Read by the
+# gym_buddies encounter through the social_rates frequency group.
+#
+# Rows are tried from the top and the first match wins, so the catch-all goes
+# last. The rate column is named in coordinated_encounters.yaml, and its unit
+# (here per month) is converted to a daily chance by dividing by 30. A person
+# who matches no row has a rate of zero.
+filter.age,filter.sex,events_per_month
+18-29,male,5.0
+18-29,female,4.0
+30-59,,2.0
+60-120,,1.0
+,,0.5
